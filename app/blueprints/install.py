@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from configparser import RawConfigParser
-from pathlib import Path
 
 from flask import (Blueprint, current_app, redirect, render_template, request,
                    url_for)
@@ -11,11 +10,9 @@ from flask_login import current_user
 from ..extensions import db
 from ..models import User
 from ..utils import log_action
+from ..config import INSTANCE_DIR, CONFIG_PATH
 
 bp = Blueprint("install", __name__)
-
-INSTANCE_DIR = Path(__file__).resolve().parents[1] / "instance"
-CONFIG_PATH = INSTANCE_DIR / "config.ini"
 
 
 @bp.route("/", methods=["GET", "POST"])
