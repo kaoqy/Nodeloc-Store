@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}订单详情{% endblock %}
+{% block body %}
+<div class="max-w-lg mx-auto">
+  <div class="glass-card p-6">
+    <div class="flex items-center justify-between mb-6">
+      <h2 class="text-lg font-bold text-white">订单详情</h2>
+      <span class="badge {% if order.status=='paid' %}badge-green{% elif order.status=='pending' %}badge-yellow{% else %}badge-red{% endif %}">
+        {% if order.status=='paid' %}已支付{% elif order.status=='pending' %}待支付{% elif order.status=='failed' %}失败{% elif order.status=='refunded' %}已退款{% else %}{{ order.status }}{% endif %}
+      </span>
+    </div>
+
+    <dl class="space-y-3 text-sm mb-6">
+      <div class="flex justify-between"><dt class="text-slate-400">订单号</dt><dd class="font-mono text-slate-300">{{ order.order_no }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">商品</dt><dd class="text-white">{{ order.product.name if order.product else '(已删除)' }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">单价</dt><dd class="text-slate-300">{{ order.unit_price }} {{ currency }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">金额</dt><dd class="text-white font-semibold">{{ order.total_amount }} {{ currency }}</dd></div>
+      {% if order.transaction_id %}<div class="flex justify-between"><dt class="text-slate-400">交易号</dt><dd class="font-mono text-xs text-slate-400">{{ order.transaction_id }}</dd></div>{% endif %}
+      {% if order.paid_at %}<div class="flex justify-between"><dt class="text-slate-400">支付时间</dt><dd class="text-slate-300">{{ order.paid_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd></div>{% endif %}
+      <div class="flex justify-between"><dt class="text-slate-400">下单时间</dt><dd class="text-slate-300">{{ order.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd></div>
+    </dl>
+
+    {% if order.is_paid and order.cards %}
+    <div class="bg-green-900/20 border border-green-700/30 rounded-xl p-4 mb-6">
+      <h3 class="font-semibold text-green-300 mb-3">您的卡密</h3>
+      <div class="space-y-2">
+        {% for card in order.cards %}
+        <div class="bg-black/30 rounded-lg p-3 font-mono text-sm text-green-200 break-all">{{ card.content }}</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% elif order.is_paid %}
+    <div class="alert alert-warning mb-6">支付成功，但卡密暂时缺货，请联系客服</div>
+    {% endif %}
+
+    <a href="{{ url_for('store.index') }}" class="btn-outline px-4 py-2 rounded-lg text-sm">返回商店</a>
+  </div>
+</div>
+{% endblock %}

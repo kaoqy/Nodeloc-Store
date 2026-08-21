@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}个人中心 — {{ site_name }}{% endblock %}
+{% block body %}
+<div class="max-w-2xl mx-auto">
+  <h1 class="text-xl font-bold text-white mb-6">个人中心</h1>
+  <div class="space-y-5">
+
+    <!-- Profile card -->
+    <div class="glass-card p-6">
+      <div class="flex items-center gap-4 mb-5">
+        <div class="w-16 h-16 rounded-full bg-indigo-600 flex items-center justify-center text-2xl font-bold text-white overflow-hidden">
+          {% if current_user.oauth_avatar %}
+          <img src="{{ current_user.oauth_avatar }}" class="w-full h-full object-cover" />
+          {% else %}
+          {{ current_user.username[0]|upper }}
+          {% endif %}
+        </div>
+        <div>
+          <div class="font-semibold text-white">{{ current_user.username }}</div>
+          <div class="text-sm text-slate-400">{{ current_user.email or '未设置邮箱' }}</div>
+          <div class="text-xs text-slate-500 mt-1">
+            注册于 {{ current_user.created_at.strftime('%Y-%m-%d') }}
+            {% if current_user.oauth_provider %}
+              · {{ current_user.oauth_provider|upper }} 绑定
+              · scope: {{ current_user.oauth_scope or '-' }}
+              {% if not current_user.oauth_has_email %}
+                <span class="text-yellow-400" title="该 NodeLoc 应用未获得 email 授权">⚠ 无 email scope</span>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="flex gap-3">
+        <a href="{{ url_for('user.edit_profile') }}" class="btn-outline px-4 py-2 rounded-lg text-sm">编辑资料</a>
+        <a href="{{ url_for('user.change_password') }}" class="btn-outline px-4 py-2 rounded-lg text-sm">修改密码</a>
+        <a href="{{ url_for('user.bind_oauth') }}" class="btn-outline px-4 py-2 rounded-lg text-sm">绑定 NodeLoc</a>
+      </div>
+    </div>
+
+    <!-- Orders summary -->
+    <div class="glass-card p-6">
+      <h2 class="font-semibold text-white mb-4">我的订单</h2>
+      <a href="{{ url_for('user.orders') }}" class="btn-primary px-5 py-2.5 rounded-lg text-sm inline-flex items-center gap-2">
+        查看全部订单 →
+      </a>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

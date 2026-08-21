@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}{{ site_name }} — 管理后台{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { colors: { brand: { 400: '#818cf8', 600: '#4f46e5', 700: '#4338ca' }}}}
+    }
+  </script>
+  <style>
+    body { background: linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 50%,#16213e 100%); min-height:100vh; }
+    .glass { background:rgba(255,255,255,.05); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.08); }
+    .glass-card { background:rgba(255,255,255,.06); backdrop-filter:blur(16px); border:1px solid rgba(255,255,255,.10); border-radius:1rem; }
+    .btn-primary { background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; transition:all .2s; }
+    .btn-primary:hover { transform:translateY(-1px); box-shadow:0 8px 24px rgba(99,102,241,.45); }
+    .btn-outline { border:1px solid rgba(255,255,255,.2); color:rgba(255,255,255,.8); transition:all .2s; }
+    .btn-outline:hover { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.4); }
+    .btn-danger { background:rgba(239,68,68,.15); border:1px solid rgba(239,68,68,.3); color:#fca5a5; transition:all .2s; }
+    .btn-danger:hover { background:rgba(239,68,68,.25); }
+    input[type=text],input[type=email],input[type=password],input[type=number],input[type=url],select,textarea {
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12); color:#e2e8f0; border-radius:.5rem;
+    }
+    input:focus,select:focus,textarea:focus { outline:none; border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.25); }
+    .table-wrap table { width:100%; border-collapse:separate; border-spacing:0; }
+    .table-wrap th { background:rgba(255,255,255,.04); padding:.625rem .875rem; text-align:left; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:rgba(255,255,255,.4); white-space:nowrap; }
+    .table-wrap td { padding:.75rem .875rem; border-top:1px solid rgba(255,255,255,.05); vertical-align:middle; }
+    .table-wrap tr:hover td { background:rgba(255,255,255,.025); }
+    .badge { display:inline-flex; align-items:center; padding:.125rem .5rem; border-radius:9999px; font-size:.7rem; font-weight:600; }
+    .badge-green { background:rgba(16,185,129,.2); color:#6ee7b7; }
+    .badge-red   { background:rgba(239,68,68,.2);  color:#fca5a5; }
+    .badge-yellow{ background:rgba(245,158,11,.2); color:#fcd34d; }
+    .badge-blue  { background:rgba(59,130,246,.2); color:#93c5fd; }
+    .badge-purple{ background:rgba(139,92,246,.2); color:#c4b5fd; }
+    .alert { padding:.75rem 1rem; border-radius:.5rem; margin-bottom:1rem; font-size:.875rem; }
+    .alert-success { background:rgba(16,185,129,.15); border:1px solid rgba(16,185,129,.3); color:#6ee7b7; }
+    .alert-danger  { background:rgba(239,68,68,.15);  border:1px solid rgba(239,68,68,.3);  color:#fca5a5; }
+    .alert-warning { background:rgba(245,158,11,.15); border:1px solid rgba(245,158,11,.3); color:#fcd34d; }
+    .nav-link { display:flex; align-items:center; gap:.5rem; padding:.5rem .75rem; border-radius:.5rem; color:rgba(255,255,255,.6); font-size:.875rem; transition:all .15s; }
+    .nav-link:hover { background:rgba(255,255,255,.06); color:#fff; }
+    .nav-link.active { background:rgba(99,102,241,.15); color:#a5b4fc; }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="text-slate-200">
+
+<div class="flex min-h-screen">
+  <!-- Sidebar -->
+  <aside class="w-56 glass border-r border-white/5 flex flex-col">
+    <div class="p-4 border-b border-white/5">
+      <a href="{{ url_for('admin.index') }}" class="text-base font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+        {{ site_name }}
+      </a>
+      <div class="text-xs text-slate-500 mt-0.5">管理后台</div>
+    </div>
+    <nav class="flex-1 p-3 space-y-0.5">
+      <a href="{{ url_for('admin.index') }}" class="nav-link {% if request.endpoint=='admin.index' %}active{% endif %}">📊 概览</a>
+      <a href="{{ url_for('admin.products') }}" class="nav-link {% if 'admin.products' in request.endpoint %}active{% endif %}">📦 商品</a>
+      <a href="{{ url_for('admin.orders') }}" class="nav-link {% if 'admin.order' in request.endpoint %}active{% endif %}">🧾 订单</a>
+      <a href="{{ url_for('admin.users') }}" class="nav-link {% if 'admin.user' in request.endpoint and 'admin.users' == request.endpoint %}active{% endif %}">👥 用户</a>
+      <a href="{{ url_for('admin.logs') }}" class="nav-link {% if 'admin.log' in request.endpoint %}active{% endif %}">📋 日志</a>
+      <a href="{{ url_for('admin.settings') }}" class="nav-link {% if 'admin.settings' in request.endpoint %}active{% endif %}">⚙️ 设置</a>
+    </nav>
+    <div class="p-3 border-t border-white/5">
+      <a href="{{ url_for('store.index') }}" class="nav-link text-xs text-slate-500 hover:text-slate-300">← 返回商店</a>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="flex-1 flex flex-col">
+    <!-- Top bar -->
+    <header class="glass border-b border-white/5 px-6 py-3 flex items-center justify-between">
+      <div class="text-sm text-slate-400">{% block header_title %}{% endblock %}</div>
+      <div class="flex items-center gap-3 text-sm">
+        <span class="text-slate-400">{{ current_user.username }}</span>
+        <a href="{{ url_for('auth.logout') }}" class="hover:text-white text-slate-500 transition">退出</a>
+      </div>
+    </header>
+
+    <!-- Flash -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="px-6 pt-4">
+      {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <!-- Content -->
+    <main class="flex-1 p-6 overflow-auto">
+      {% block body %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

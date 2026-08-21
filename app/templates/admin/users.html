@@ -1,0 +1,51 @@
+{% extends "admin/base.html" %}
+{% block title %}用户管理{% endblock %}
+{% block header_title %}用户管理{% endblock %}
+{% block body %}
+<div class="flex items-center justify-between mb-5">
+  <form method="get" class="flex gap-2">
+    <input name="q" value="{{ q }}" placeholder="搜索用户名/邮箱…" class="px-3 py-1.5 text-sm w-52" />
+    <button class="btn-outline px-3 py-1.5 rounded-lg text-sm">搜索</button>
+  </form>
+</div>
+
+<div class="glass-card overflow-hidden">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>NodeLoc</th><th>角色</th><th>注册时间</th><th>操作</th></tr></thead>
+      <tbody>
+        {% for u in pagination.items %}
+        <tr>
+          <td class="text-xs text-slate-500">{{ u.id }}</td>
+          <td class="text-sm font-medium text-white">{{ u.username }}</td>
+          <td class="text-xs text-slate-400">{{ u.email or '-' }}</td>
+          <td>
+            {% if u.oauth_provider %}<span class="badge badge-blue">已绑定</span>{% else %}<span class="text-xs text-slate-600">-</span>{% endif %}
+          </td>
+          <td>
+            {% if u.is_admin %}<span class="badge badge-purple">管理员</span>{% else %}<span class="text-xs text-slate-500">用户</span>{% endif %}
+          </td>
+          <td class="text-xs text-slate-500">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+          <td>
+            <div class="flex gap-2">
+              {% if u.id != current_user.id %}
+              <form method="post" action="{{ url_for('admin.user_toggle_admin', uid=u.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="text-xs text-yellow-400 hover:underline">{{ '取消管理' if u.is_admin else '设为管理' }}</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.user_toggle_active', uid=u.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="text-xs {{ 'text-green-400' if not u.is_active_flag else 'text-red-400' }} hover:underline">
+                  {{ '启用' if not u.is_active_flag else '禁用' }}
+                </button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

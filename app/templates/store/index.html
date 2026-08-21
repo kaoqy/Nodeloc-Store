@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}{{ site_name }} — {{ site_slogan or '在线商店' }}{% endblock %}
+{% block body %}
+<!-- Hero -->
+<section class="text-center mb-10">
+  <h1 class="text-4xl font-bold bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-3">
+    {{ site_name }}
+  </h1>
+  <p class="text-slate-400">{{ site_slogan or '精选卡密，即买即用' }}</p>
+</section>
+
+<!-- Search -->
+<form method="get" class="mb-8 max-w-md mx-auto">
+  <div class="flex gap-2">
+    <input name="q" value="{{ q }}" placeholder="搜索商品..." class="flex-1 px-4 py-2 text-sm" />
+    <button class="btn-primary px-4 py-2 rounded-lg text-sm">搜索</button>
+  </div>
+</form>
+
+<!-- Products Grid -->
+{% if pagination.items %}
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+  {% for product in pagination.items %}
+  <a href="{{ url_for('store.product_detail', slug=product.slug) }}" class="glass-card p-4 flex flex-col hover:-translate-y-1 transition-transform duration-200 group">
+    {% if product.image_path %}
+    <div class="aspect-video rounded-lg overflow-hidden mb-3 bg-black/30">
+      <img src="{{ url_for('admin.uploaded_file', filename=product.image_path) }}"
+           alt="{{ product.name }}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+    </div>
+    {% else %}
+    <div class="aspect-video rounded-lg mb-3 bg-gradient-to-br from-indigo-900/50 to-purple-900/50 flex items-center justify-center text-4xl text-white/20">📦</div>
+    {% endif %}
+    <h3 class="font-semibold text-white mb-1">{{ product.name }}</h3>
+    {% if product.summary %}
+    <p class="text-xs text-slate-400 mb-2 line-clamp-2">{{ product.summary }}</p>
+    {% endif %}
+    <div class="mt-auto flex items-center justify-between">
+      <div>
+        <span class="text-lg font-bold text-indigo-400">{{ product.price }}</span>
+        <span class="text-xs text-slate-500 ml-1">{{ currency }}</span>
+        {% if product.original_price and product.original_price > product.price %}
+        <span class="text-xs text-slate-500 line-through ml-1">{{ product.original_price }}</span>
+        {% endif %}
+      </div>
+      {% if product.stock_visible %}
+      <span class="text-xs {% if product.stock_count > 0 %}text-green-400{% else %}text-red-400{% endif %}">
+        {{ '有货' if product.stock_count > 0 else '缺货' }}
+      </span>
+      {% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-20 text-slate-500">
+  <div class="text-5xl mb-4">🔍</div>
+  <p>暂无商品，去 <a href="{{ url_for('admin.index') }}" class="text-indigo-400 hover:underline">后台</a> 添加吧</p>
+</div>
+{% endif %}
+
+<!-- Pagination -->
+{% if pagination.pages > 1 %}
+<div class="mt-8 flex justify-center">
+  <div class="pagination">
+    {% if pagination.has_prev %}
+    <a href="{{ url_for('store.index', page=pagination.prev_num, q=q) }}">‹ 上一页</a>
+    {% else %}<span class="disabled">‹ 上一页</span>{% endif %}
+    {% for p in pagination.iter_pages() %}
+      {% if p %}
+        <a href="{{ url_for('store.index', page=p, q=q) }}" {% if p==pagination.page %}class="active"{% endif %}>{{ p }}</a>
+      {% else %}<span>…</span>{% endif %}
+    {% endfor %}
+    {% if pagination.has_next %}
+    <a href="{{ url_for('store.index', page=pagination.next_num, q=q) }}">下一页 ›</a>
+    {% else %}<span class="disabled">下一页 ›</span>{% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

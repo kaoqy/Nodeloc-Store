@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-sm mx-auto mt-20 text-center">
+  <div class="text-6xl mb-4">💥</div>
+  <h1 class="text-2xl font-bold text-white mb-2">服务器错误</h1>
+  <p class="text-slate-400 mb-6">出了点问题，请稍后再试</p>
+  <a href="{{ url_for('store.index') }}" class="btn-primary px-6 py-2.5 rounded-lg text-sm">返回首页</a>
+</div>
+{% endblock %}

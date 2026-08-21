@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}绑定 NodeLoc{% endblock %}
+{% block body %}
+<div class="max-w-sm mx-auto mt-10">
+  <div class="glass-card p-6 text-center">
+    <div class="text-4xl mb-3">🔗</div>
+    <h2 class="text-lg font-bold text-white mb-2">绑定 NodeLoc 账号</h2>
+    <p class="text-sm text-slate-400 mb-6">关联后可直接使用 NodeLoc OAuth 登录</p>
+    <a href="{{ auth_url }}" class="btn-primary px-6 py-3 rounded-xl font-semibold inline-block">授权绑定</a>
+    <div class="mt-4"><a href="{{ url_for('user.profile') }}" class="text-sm text-slate-400 hover:underline">返回个人中心</a></div>
+  </div>
+</div>
+{% endblock %}

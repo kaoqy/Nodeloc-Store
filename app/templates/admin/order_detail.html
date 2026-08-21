@@ -1,0 +1,50 @@
+{% extends "admin/base.html" %}
+{% block title %}订单详情 — {{ order.order_no }}{% endblock %}
+{% block header_title %}订单详情{% endblock %}
+{% block body %}
+<div class="max-w-2xl">
+  <div class="flex items-center gap-3 mb-5">
+    <a href="{{ url_for('admin.orders') }}" class="btn-outline px-3 py-1.5 rounded-lg text-sm">← 订单列表</a>
+    {% if order.status=='paid' %}
+    <form method="post" action="{{ url_for('admin.order_refund', order_no=order.order_no) }}" onsubmit="return confirm('确认退款？')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn-danger px-3 py-1.5 rounded-lg text-sm">退款</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="glass-card p-6 space-y-4">
+    <dl class="grid grid-cols-2 gap-4 text-sm">
+      <div><dt class="text-xs text-slate-400 mb-1">订单号</dt><dd class="font-mono text-slate-200">{{ order.order_no }}</dd></div>
+      <div><dt class="text-xs text-slate-400 mb-1">状态</dt>
+        <dd>
+          {% if order.status=='paid' %}<span class="badge badge-green">已支付</span>
+          {% elif order.status=='pending' %}<span class="badge badge-yellow">待支付</span>
+          {% elif order.status=='failed' %}<span class="badge badge-red">失败</span>
+          {% elif order.status=='refunded' %}<span class="badge badge-purple">已退款</span>{% endif %}
+        </dd>
+      </div>
+      <div><dt class="text-xs text-slate-400 mb-1">用户</dt><dd class="text-slate-200">{{ order.user.username if order.user else '-' }}</dd></div>
+      <div><dt class="text-xs text-slate-400 mb-1">商品</dt><dd class="text-slate-200">{{ order.product.name if order.product else '(已删除)' }}</dd></div>
+      <div><dt class="text-xs text-slate-400 mb-1">单价</dt><dd class="text-slate-200">{{ order.unit_price }} 积分</dd></div>
+      <div><dt class="text-xs text-slate-400 mb-1">总额</dt><dd class="font-bold text-white">{{ order.total_amount }} 积分</dd></div>
+      {% if order.transaction_id %}<div><dt class="text-xs text-slate-400 mb-1">交易号</dt><dd class="font-mono text-xs text-slate-400">{{ order.transaction_id }}</dd></div>{% endif %}
+      {% if order.platform_fee %}<div><dt class="text-xs text-slate-400 mb-1">平台手续费</dt><dd class="text-slate-200">{{ order.platform_fee }} 积分</dd></div>{% endif %}
+      {% if order.merchant_points %}<div><dt class="text-xs text-slate-400 mb-1">商家到账</dt><dd class="text-green-400">{{ order.merchant_points }} 积分</dd></div>{% endif %}
+      <div><dt class="text-xs text-slate-400 mb-1">下单时间</dt><dd class="text-slate-200">{{ order.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd></div>
+      {% if order.paid_at %}<div><dt class="text-xs text-slate-400 mb-1">支付时间</dt><dd class="text-slate-200">{{ order.paid_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd></div>{% endif %}
+    </dl>
+
+    {% if order.cards %}
+    <div class="border-t border-white/5 pt-4">
+      <h4 class="font-semibold text-white text-sm mb-3">关联卡密</h4>
+      <div class="space-y-2">
+        {% for card in order.cards %}
+        <div class="bg-black/30 rounded-lg p-3 font-mono text-sm text-green-200 break-all">{{ card.content }}</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
