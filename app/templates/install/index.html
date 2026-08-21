@@ -1,17 +1,36 @@
 {% extends "base.html" %}
+{% block title %}安装向导{% endblock %}
 {% block body %}
 <div class="container-sm" style="padding-top:32px;">
 
-  <div class="text-center mb-5">
+  <div class="text-center mb-4">
     <h1>快速开始</h1>
-    <p class="text-dim text-sm">完成以下配置即可启动你的商店</p>
+    <p class="text-dim text-sm">完成以下 5 步配置即可启动你的商店</p>
   </div>
 
-  <div class="card">
-    <form method="post">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <!-- ── Step indicator ─────────────────────────────────── -->
+  <div class="wizard-steps mb-4" id="wizardSteps">
+    {% for n, label in [
+      (1, '数据库'),
+      (2, '商店信息'),
+      (3, 'NodeLoc OAuth'),
+      (4, 'NodeLoc 支付'),
+      (5, '管理员账号'),
+    ] %}
+    <div class="wstep" data-step="{{ n }}">
+      <div class="wstep-num">{{ n }}</div>
+      <div class="wstep-label">{{ label }}</div>
+    </div>
+    {% endfor %}
+  </div>
 
+  <form method="post" id="installForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- ── Step 1: Database ──────────────────────────────── -->
+    <div class="card wizard-panel" data-panel="1">
       <h3 class="mb-3">① 数据库</h3>
+      <p class="text-xs text-mute mb-3">需要先自行准备好 MariaDB / MySQL，本向导不会替你安装数据库服务。</p>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">主机</label>
@@ -36,9 +55,10 @@
         <label class="form-label">密码</label>
         <input type="password" name="db_pass" required />
       </div>
+    </div>
 
-      <div class="divider"></div>
-
+    <!-- ── Step 2: Site info ─────────────────────────────── -->
+    <div class="card wizard-panel" data-panel="2" hidden>
       <h3 class="mb-3">② 商店信息</h3>
       <div class="form-group">
         <label class="form-label">商店名称</label>
@@ -48,11 +68,15 @@
         <label class="form-label">商店标语（可选）</label>
         <input type="text" name="site_slogan" placeholder="卡密商店 · Powered by NodeLoc" />
       </div>
+    </div>
 
-      <div class="divider"></div>
-
+    <!-- ── Step 3: OAuth ─────────────────────────────────── -->
+    <div class="card wizard-panel" data-panel="3" hidden>
       <h3 class="mb-3">③ NodeLoc OAuth</h3>
-      <p class="text-xs text-mute mb-3">在 <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank">NodeLoc</a> 创建 OAuth 应用，回调地址填 <code>https://你的域名/auth/oauth/callback</code>。</p>
+      <p class="text-xs text-mute mb-3">
+        在 <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank">NodeLoc</a> 创建 OAuth 应用，
+        把下方 <code>Redirect URI</code> 填到「回调地址」一栏。
+      </p>
       <div class="form-group">
         <label class="form-label">OAuth URL</label>
         <input type="text" name="oauth_url" value="https://www.nodeloc.com" required />
@@ -65,21 +89,32 @@
         <label class="form-label">Client Secret</label>
         <input type="password" name="oauth_client_secret" required />
       </div>
+
       <div class="form-group">
         <label class="form-label">Redirect URI <span class="req">*</span>（必须 HTTPS）</label>
-        <input type="text" name="oauth_redirect_uri" placeholder="留空将自动按当前站点生成" />
-        <div class="form-help">需 HTTPS。通过 OpenResty / Caddy / Nginx 反代 + SSL 证书实现。</div>
+        <div class="copy-field">
+          <input type="text" name="oauth_redirect_uri" id="oauthRedirectUri" readonly />
+          <button type="button" class="btn btn-secondary btn-sm" data-copy="oauthRedirectUri">📋 复制</button>
+        </div>
+        <div class="form-help">已自动按当前访问域名生成。需 HTTPS，通过 OpenResty / Caddy / Nginx 反代 + SSL 证书实现。</div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Scope</label>
-        <input type="text" name="oauth_scopes" value="openid profile email" />
-        <div class="form-help">包含 <code>email</code> 时需在 NodeLoc 审核通过</div>
-      </div>
+    </div>
 
-      <div class="divider"></div>
-
+    <!-- ── Step 4: Payment ───────────────────────────────── -->
+    <div class="card wizard-panel" data-panel="4" hidden>
       <h3 class="mb-3">④ NodeLoc 支付</h3>
-      <p class="text-xs text-mute mb-3">在 <a href="https://www.nodeloc.com/payment/applications" target="_blank">NodeLoc</a> 创建支付应用，回调地址填 <code>https://你的域名/payment/callback</code>。</p>
+      <p class="text-xs text-mute mb-3">
+        在 <a href="https://www.nodeloc.com/payment/applications" target="_blank">NodeLoc</a> 创建支付应用，
+        把下方 <code>回调地址</code> 填到「通知 URL」一栏。
+      </p>
+      <div class="form-group">
+        <label class="form-label">回调地址（仅展示，需在 NodeLoc 后台填写）</label>
+        <div class="copy-field">
+          <input type="text" id="paymentCallback" readonly tabindex="-1" />
+          <button type="button" class="btn btn-secondary btn-sm" data-copy="paymentCallback">📋 复制</button>
+        </div>
+        <div class="form-help">同上，自动按当前访问域名生成。</div>
+      </div>
       <div class="form-group">
         <label class="form-label">Payment ID</label>
         <input type="text" name="payment_id" required />
@@ -88,10 +123,12 @@
         <label class="form-label">Secret Key</label>
         <input type="password" name="payment_secret" required />
       </div>
+    </div>
 
-      <div class="divider"></div>
-
+    <!-- ── Step 5: Admin ─────────────────────────────────── -->
+    <div class="card wizard-panel" data-panel="5" hidden>
       <h3 class="mb-3">⑤ 管理员账号</h3>
+      <p class="text-xs text-mute mb-3">用于登录管理后台，请妥善保管。</p>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">用户名</label>
@@ -106,11 +143,162 @@
         <label class="form-label">密码（至少 8 位）</label>
         <input type="password" name="admin_pass" required minlength="8" />
       </div>
+    </div>
 
-      {% if error %}<div class="alert alert-danger mt-3">{{ error }}</div>{% endif %}
+    {% if error %}
+    <div class="alert alert-danger mt-3">{{ error }}</div>
+    {% endif %}
 
-      <button type="submit" class="btn btn-primary btn-lg btn-block mt-4">完成安装</button>
-    </form>
-  </div>
+    <!-- ── Navigation ────────────────────────────────────── -->
+    <div class="wizard-nav mt-4">
+      <button type="button" class="btn btn-secondary" id="prevBtn" hidden>← 上一步</button>
+      <div class="wizard-nav-spacer"></div>
+      <button type="button" class="btn btn-primary" id="nextBtn">下一步 →</button>
+      <button type="submit" class="btn btn-primary btn-lg" id="submitBtn" hidden>完成安装</button>
+    </div>
+  </form>
 </div>
+
+<style>
+  /* ── Wizard-specific styles ─────────────────────────── */
+  .wizard-steps {
+    display: flex; gap: 6px;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px;
+  }
+  .wstep {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    color: var(--text-mute);
+    transition: all .15s;
+  }
+  .wstep-num {
+    flex: 0 0 auto;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600;
+    transition: all .15s;
+  }
+  .wstep-label {
+    font-size: 12.5px; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .wstep.done .wstep-num { background: var(--success-soft); border-color: var(--success); color: var(--success); }
+  .wstep.done .wstep-label { color: var(--text-dim); }
+  .wstep.active { background: var(--accent-soft); }
+  .wstep.active .wstep-num { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .wstep.active .wstep-label { color: var(--text); }
+  @media (max-width: 540px) { .wstep-label { display: none; } }
+
+  .copy-field {
+    display: flex; gap: 6px; align-items: stretch;
+  }
+  .copy-field input { flex: 1; min-width: 0; background: var(--bg-elev-2); }
+  .copy-field .btn { flex: 0 0 auto; }
+
+  .wizard-nav { display: flex; align-items: center; gap: 10px; }
+  .wizard-nav-spacer { flex: 1; }
+</style>
+
+<script>
+(function () {
+  // ── Auto-fill URLs from current origin ───────────────────
+  var origin = window.location.origin;
+  var redirectInput = document.getElementById('oauthRedirectUri');
+  if (redirectInput) redirectInput.value = origin + '/auth/oauth/callback';
+  var paymentInput = document.getElementById('paymentCallback');
+  if (paymentInput) paymentInput.value = origin + '/payment/callback';
+
+  // ── Copy buttons ─────────────────────────────────────────
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var target = document.getElementById(btn.getAttribute('data-copy'));
+      if (!target) return;
+      target.select();
+      target.setSelectionRange(0, 99999);
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) {}
+      if (navigator.clipboard && !ok) {
+        navigator.clipboard.writeText(target.value).catch(function () {});
+      }
+      var orig = btn.textContent;
+      btn.textContent = '✓ 已复制';
+      btn.classList.add('btn-success');
+      setTimeout(function () { btn.textContent = orig; btn.classList.remove('btn-success'); }, 1500);
+    });
+  });
+
+  // ── Wizard navigation ────────────────────────────────────
+  var TOTAL = 5;
+  var current = 1;
+  var panels = document.querySelectorAll('.wizard-panel');
+  var steps = document.querySelectorAll('.wstep');
+  var prevBtn = document.getElementById('prevBtn');
+  var nextBtn = document.getElementById('nextBtn');
+  var submitBtn = document.getElementById('submitBtn');
+
+  function show(n) {
+    current = n;
+    panels.forEach(function (p) {
+      p.hidden = parseInt(p.dataset.panel, 10) !== n;
+    });
+    steps.forEach(function (s) {
+      var sn = parseInt(s.dataset.step, 10);
+      s.classList.toggle('active', sn === n);
+      s.classList.toggle('done', sn < n);
+    });
+    prevBtn.hidden = n === 1;
+    var isLast = n === TOTAL;
+    nextBtn.hidden = isLast;
+    submitBtn.hidden = !isLast;
+    // Scroll to top of form on step change
+    window.scrollTo({ top: document.getElementById('installForm').offsetTop - 80, behavior: 'smooth' });
+  }
+
+  function validateCurrent() {
+    var panel = document.querySelector('.wizard-panel[data-panel="' + current + '"]');
+    if (!panel) return true;
+    var inputs = panel.querySelectorAll('input[required]');
+    for (var i = 0; i < inputs.length; i++) {
+      var el = inputs[i];
+      // Skip readonly / non-text-like (still check value)
+      if (!el.value || (el.minLength && el.value.length < el.minLength)) {
+        el.focus();
+        el.reportValidity ? el.reportValidity() : null;
+        return false;
+      }
+    }
+    return true;
+  }
+
+  nextBtn.addEventListener('click', function () {
+    if (!validateCurrent()) return;
+    if (current < TOTAL) show(current + 1);
+  });
+  prevBtn.addEventListener('click', function () {
+    if (current > 1) show(current - 1);
+  });
+
+  // Allow clicking on step indicator to jump back (only to visited/forward to validated)
+  steps.forEach(function (s) {
+    s.addEventListener('click', function () {
+      var n = parseInt(s.dataset.step, 10);
+      if (n < current) show(n);  // backward: always allowed
+      else if (n === current) return;
+      else if (n === current + 1 && validateCurrent()) show(n);  // forward one step
+    });
+    s.style.cursor = 'pointer';
+  });
+
+  show(1);
+})();
+</script>
 {% endblock %}

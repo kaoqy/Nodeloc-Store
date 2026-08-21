@@ -36,7 +36,9 @@ def index():
         oauth_url = request.form.get("oauth_url", "https://www.nodeloc.com").strip().rstrip("/")
         oauth_client_id = request.form.get("oauth_client_id", "").strip()
         oauth_client_secret = request.form.get("oauth_client_secret", "")
-        oauth_scopes = request.form.get("oauth_scopes", "openid profile email").strip()
+        # Scope is fixed: openid + profile + email is what NodeLoc returns by default.
+        # The field is no longer exposed in the install wizard / admin settings.
+        oauth_scopes = "openid profile email"
         user_redirect = request.form.get("oauth_redirect_uri", "").strip()
 
         # Auto-fill redirect URI if blank

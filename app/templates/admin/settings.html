@@ -27,7 +27,7 @@
 
     <div class="card mb-3">
       <h3 class="mb-2">NodeLoc OAuth</h3>
-      <p class="text-xs text-mute mb-4">在 <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank">NodeLoc</a> 创建 OAuth 应用，回调地址填 <code>https://你的域名/auth/oauth/callback</code></p>
+      <p class="text-xs text-mute mb-4">在 <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank">NodeLoc</a> 创建 OAuth 应用，把下方 <code>Redirect URI</code> 填到「回调地址」一栏。</p>
 
       <div class="form-group">
         <label class="form-label">OAuth URL</label>
@@ -42,21 +42,27 @@
         <input type="password" name="oauth_client_secret" value="{{ settings.get('oauth_client_secret','') }}" placeholder="留空保持不变" />
       </div>
       <div class="form-group">
-        <label class="form-label">Scope</label>
-        <input type="text" name="oauth_scopes" value="{{ settings.get('oauth_scopes','openid profile email') }}" />
-        <div class="form-help">含 <code>email</code> 需在 NodeLoc 审核通过</div>
-      </div>
-      <div class="form-group">
         <label class="form-label">Redirect URI（必须 HTTPS）</label>
-        <input type="text" name="oauth_redirect_uri" value="{{ settings.get('oauth_redirect_uri','') }}" />
-        <div class="form-help">建议值：<code>{{ url_for('auth.oauth_callback', _external=True) }}</code></div>
+        <div class="copy-field">
+          <input type="text" name="oauth_redirect_uri" id="oauthRedirectUri" value="{{ settings.get('oauth_redirect_uri','') }}" />
+          <button type="button" class="btn btn-secondary btn-sm" data-copy="oauthRedirectUri">📋 复制</button>
+        </div>
+        <div class="form-help">已自动按当前访问域名生成。需 HTTPS，通过 OpenResty / Caddy / Nginx 反代 + SSL 证书实现。</div>
       </div>
     </div>
 
     <div class="card mb-3">
       <h3 class="mb-2">NodeLoc 支付</h3>
-      <p class="text-xs text-mute mb-4">在 <a href="https://www.nodeloc.com/payment/applications" target="_blank">NodeLoc</a> 创建支付应用，回调地址填 <code>https://你的域名/payment/callback</code></p>
+      <p class="text-xs text-mute mb-4">在 <a href="https://www.nodeloc.com/payment/applications" target="_blank">NodeLoc</a> 创建支付应用，把下方 <code>回调地址</code> 填到「通知 URL」一栏。</p>
 
+      <div class="form-group">
+        <label class="form-label">回调地址（仅展示，需在 NodeLoc 后台填写）</label>
+        <div class="copy-field">
+          <input type="text" id="paymentCallback" readonly tabindex="-1" />
+          <button type="button" class="btn btn-secondary btn-sm" data-copy="paymentCallback">📋 复制</button>
+        </div>
+        <div class="form-help">自动按当前访问域名生成。</div>
+      </div>
       <div class="form-group">
         <label class="form-label">Payment ID</label>
         <input type="text" name="payment_id" value="{{ settings.get('payment_id','') }}" />
@@ -70,4 +76,42 @@
     <button type="submit" class="btn btn-primary">保存设置</button>
   </form>
 </div>
+
+<style>
+  .copy-field { display: flex; gap: 6px; align-items: stretch; }
+  .copy-field input { flex: 1; min-width: 0; }
+  .copy-field input[readonly] { background: var(--bg-elev-2); }
+  .copy-field .btn { flex: 0 0 auto; }
+</style>
+
+<script>
+(function () {
+  // Auto-fill the OAuth redirect URI / payment callback from current origin if blank.
+  var origin = window.location.origin;
+  var redirectInput = document.getElementById('oauthRedirectUri');
+  if (redirectInput && !redirectInput.value.trim()) {
+    redirectInput.value = origin + '/auth/oauth/callback';
+  }
+  var paymentInput = document.getElementById('paymentCallback');
+  if (paymentInput) paymentInput.value = origin + '/payment/callback';
+
+  // Copy buttons
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var target = document.getElementById(btn.getAttribute('data-copy'));
+      if (!target) return;
+      target.focus(); target.select();
+      target.setSelectionRange(0, 99999);
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) {}
+      if (navigator.clipboard && !ok) {
+        navigator.clipboard.writeText(target.value).catch(function () {});
+      }
+      var orig = btn.textContent;
+      btn.textContent = '✓ 已复制';
+      setTimeout(function () { btn.textContent = orig; }, 1500);
+    });
+  });
+})();
+</script>
 {% endblock %}
