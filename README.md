@@ -92,105 +92,48 @@ sudo mysql -e "
 
 保存后记录 **Payment ID** 和 **Secret Key**（只显示一次）。
 
-### Step 3 · 部署应用
+### Step 3 · 启动商店（Docker）
 
 ```bash
-# 1) 拉代码
 git clone https://github.com/kaoqy/Nodeloc-Store.git
 cd Nodeloc-Store
-
-# 2) 创建虚拟环境并安装依赖
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# 3) 创建数据目录（instance 是配置和 DB 文件，uploads 是商品图片）
-mkdir -p instance uploads/products
-chmod 755 instance uploads
-
-# 4) 启动（gunicorn 监听 127.0.0.1:5000，给 OpenResty 反代）
-gunicorn --bind 127.0.0.1:5000 --workers 2 --threads 4 --daemon \
-    --pid /tmp/nodeloc-store.pid \
-    --access-logfile /var/log/nodeloc-store.access.log \
-    --error-logfile /var/log/nodeloc-store.error.log \
-    run:app
-
-# 5) 验证
-curl -I http://127.0.0.1:5000
-# 应该看到 302 重定向到 /install/（首次访问）
+docker compose up -d
 ```
 
-#### 升级 / 重启
+> 只起一个 `store` 容器。MariaDB 用你 Step 1 装的那个，连接信息下一步在向导里填。
 
+查看日志：
 ```bash
-cd /home/<user>/Nodeloc-Store
-git pull
-source venv/bin/activate
-pip install -r requirements.txt --upgrade
-kill -HUP $(cat /tmp/nodeloc-store.pid)
+docker compose logs -f store
 ```
 
-#### 开机自启（systemd）
+### Step 4 · OpenResty 反代 + SSL
 
-`/etc/systemd/system/nodeloc-store.service`：
-
-```ini
-[Unit]
-Description=NodeLoc Store
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/home/www-data/Nodeloc-Store
-ExecStart=/home/www-data/Nodeloc-Store/venv/bin/gunicorn --bind 127.0.0.1:5000 --workers 2 --threads 4 run:app
-Restart=always
-RestartSec=5
-StandardOutput=append:/var/log/nodeloc-store.log
-StandardError=append:/var/log/nodeloc-store.log
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now nodeloc-store
-```
-
-> ⚠️ 把 `WorkingDirectory` 里的 `www-data` 改成实际运行用户，并 `chown -R www-data:www-data instance uploads`。
-
-### Step 4 · OpenResty 反代
-
-在 OpenResty 的 server 配置里加：
+在 OpenResty 配置目录加一个 server 块（路径以你的环境为准，比如 `/usr/local/openresty/nginx/conf/conf.d/store.conf`）：
 
 ```nginx
 server {
     listen 443 ssl http2;
     server_name your-domain.com;
 
-    # SSL 证书（用 acme.sh / certbot 都行）
     ssl_certificate     /path/to/fullchain.pem;
     ssl_certificate_key /path/to/privkey.pem;
 
-    # 上传大小（8MB 与应用一致）
     client_max_body_size 8M;
 
-    # 静态资源直接走 nginx（减少后端压力）
+    # 静态资源直接走 nginx
     location /static/ {
-        alias /home/www-data/Nodeloc-Store/app/static/;
+        alias /opt/Nodeloc-Store/app/static/;
         expires 7d;
         access_log off;
     }
-
-    # 用户上传的商品图片
     location /admin/uploads/ {
-        alias /home/www-data/Nodeloc-Store/uploads/products/;
+        alias /opt/Nodeloc-Store/uploads/products/;
         expires 7d;
         access_log off;
     }
 
-    # 其余全部反代到 gunicorn
+    # 反代到 Docker 容器里 gunicorn 监听的 5000
     location / {
         proxy_pass http://127.0.0.1:5000;
         proxy_set_header Host $host;
@@ -198,14 +141,11 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_redirect off;
-
-        # 长连接 / 超时
         proxy_http_version 1.1;
         proxy_read_timeout 60s;
     }
 }
 
-# HTTP → HTTPS 跳转
 server {
     listen 80;
     server_name your-domain.com;
@@ -216,6 +156,8 @@ server {
 ```bash
 sudo openresty -t && sudo openresty -s reload
 ```
+
+> `alias` 路径要跟宿主机上 `/opt/Nodeloc-Store/` 实际路径一致。容器卷默认 `./instance:/app/instance` 和 `./uploads:/app/uploads`，所以 `uploads/products` 对应宿主机的 `./uploads/products`。
 
 ### Step 5 · 完成快速开始向导
 
@@ -231,7 +173,7 @@ sudo openresty -t && sudo openresty -s reload
 5. **管理员账号** — 创建首个管理员
 
 > 提交时如果数据库连不通，会显示错误提示让你重填，**不会破坏配置**。
-> **保存即生效**，不用重启 gunicorn。
+> **保存即生效**，不用重启容器。
 
 ### Step 6 · 验证支付
 
@@ -243,24 +185,18 @@ sudo openresty -t && sudo openresty -s reload
 ## 🛠️ 常用运维
 
 ```bash
-# 看 gunicorn 日志
-tail -f /var/log/nodeloc-store.error.log
+# 看容器日志
+docker compose logs -f store
 
-# 优雅重启（不中断当前连接）
-kill -HUP $(cat /tmp/nodeloc-store.pid)
+# 重启容器
+docker compose restart store
 
-# 重启
-kill $(cat /tmp/nodeloc-store.pid)
-cd /home/www-data/Nodeloc-Store && source venv/bin/activate
-gunicorn --bind 127.0.0.1:5000 --workers 2 --threads 4 --daemon \
-    --pid /tmp/nodeloc-store.pid run:app
+# 升级到新版本
+cd /opt/Nodeloc-Store   # 或你的实际路径
+git pull
+docker compose up -d --build
 
-# 升级
-cd /home/www-data/Nodeloc-Store
-git pull && source venv/bin/activate && pip install -r requirements.txt
-kill -HUP $(cat /tmp/nodeloc-store.pid)
-
-# 备份数据库
+# 备份数据库（MariaDB 装在宿主机或远程时调整连接信息）
 mysqldump -u store_user -p nodeloc_store > backup_$(date +%F).sql
 
 # 还原数据库
@@ -284,21 +220,21 @@ curl -I http://127.0.0.1:5000/api/health
 
 ```bash
 python3 scripts/smoke_test.py
-# PASS: 24    FAIL: 0
+# PASS: 23    FAIL: 0
 ```
 
 ## 📁 项目结构
 
 ```
 nodeloc-store/
-├── app/
+├── app/                      # Flask 应用
 │   ├── __init__.py          # Flask factory + 每次请求重读 config
 │   ├── config.py            # 配置加载（instance/config.ini 实时）
 │   ├── extensions.py        # db / login_manager / csrf
 │   ├── models.py            # User / Product / Card / Order / AppSetting / AuditLog
 │   ├── nodeloc.py           # NodeLoc OAuth2 + Payment 客户端
 │   ├── utils.py             # PBKDF2 密码 / slug / audit
-│   ├── blueprints/
+│   ├── blueprints/          # 路由
 │   │   ├── install.py       # 首次安装向导
 │   │   ├── auth.py          # 邮箱 + NodeLoc OAuth 登录
 │   │   ├── store.py         # 公开商店
@@ -306,8 +242,11 @@ nodeloc-store/
 │   │   ├── user.py          # 用户中心 + 绑定 OAuth
 │   │   ├── admin.py         # 后台
 │   │   └── api.py           # JSON API + /health
+│   ├── static/css/app.css   # 自带 CSS（无 Tailwind CDN 依赖）
 │   └── templates/           # Jinja2 模板
-├── scripts/smoke_test.py    # 24 个 stdlib 单元测试
+├── scripts/smoke_test.py    # 23 个 stdlib 单元测试
+├── Dockerfile
+├── docker-compose.yml
 ├── requirements.txt
 ├── run.py                   # gunicorn 入口
 └── README.md
