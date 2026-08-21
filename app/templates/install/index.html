@@ -162,6 +162,13 @@
     <p class="sub">分 5 步完成配置，即可启动你的积分商店</p>
   </div>
 
+  {% if partial_install %}
+  <div class="alert-info" style="margin:14px auto 0;max-width:900px;">
+    <strong>检测到上次安装未完成</strong> · 配置文件已写入 <code>instance/config.ini</code>，但数据库表未创建成功。
+    请检查下面的数据库 / MariaDB 是否就绪，直接重新提交即可（已填的值会保留）。
+  </div>
+  {% endif %}
+
   <form method="post" id="installForm">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
@@ -190,26 +197,27 @@
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">主机</label>
-              <input type="text" name="db_host" value="localhost" required>
+              <input type="text" name="db_host" value="{{ defaults.db_host }}" required>
             </div>
             <div class="form-group">
               <label class="form-label">端口</label>
-              <input type="text" name="db_port" value="3306" required>
+              <input type="text" name="db_port" value="{{ defaults.db_port }}" required>
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">数据库名</label>
-              <input type="text" name="db_name" value="nodeloc_store" required>
+              <input type="text" name="db_name" value="{{ defaults.db_name }}" required>
             </div>
             <div class="form-group">
               <label class="form-label">用户名</label>
-              <input type="text" name="db_user" required>
+              <input type="text" name="db_user" value="{{ defaults.db_user }}" required>
             </div>
           </div>
           <div class="form-group">
             <label class="form-label">密码</label>
-            <input type="password" name="db_pass" required>
+            <input type="password" name="db_pass" value="{{ defaults.db_pass }}">
+            <div class="help">已预填上次输入。重新提交可重试连库。</div>
           </div>
         </div>
 
@@ -217,11 +225,11 @@
         <div class="panel-body" data-panel="2" hidden>
           <div class="form-group">
             <label class="form-label">商店名称</label>
-            <input type="text" name="site_name" value="NodeLoc Store" required>
+            <input type="text" name="site_name" value="{{ defaults.site_name }}" required>
           </div>
           <div class="form-group">
             <label class="form-label">商店标语（可选）</label>
-            <input type="text" name="site_slogan" placeholder="卡密商店 · Powered by NodeLoc">
+            <input type="text" name="site_slogan" value="{{ defaults.site_slogan }}" placeholder="卡密商店 · Powered by NodeLoc">
           </div>
         </div>
 
@@ -230,15 +238,15 @@
           <div class="help">在 <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank">NodeLoc</a> 创建 OAuth 应用，把下方 <code>Redirect URI</code> 填到「回调地址」一栏。</div>
           <div class="form-group">
             <label class="form-label">OAuth URL</label>
-            <input type="text" name="oauth_url" value="https://www.nodeloc.com" required>
+            <input type="text" name="oauth_url" value="{{ defaults.oauth_url }}" required>
           </div>
           <div class="form-group">
             <label class="form-label">Client ID</label>
-            <input type="text" name="oauth_client_id" required>
+            <input type="text" name="oauth_client_id" value="{{ defaults.oauth_client_id }}" required>
           </div>
           <div class="form-group">
             <label class="form-label">Client Secret</label>
-            <input type="password" name="oauth_client_secret" required>
+            <input type="password" name="oauth_client_secret" value="{{ defaults.oauth_client_secret }}">
           </div>
           <div class="form-group">
             <label class="form-label">Redirect URI <span class="req">*</span>（必须 HTTPS）</label>
@@ -263,11 +271,11 @@
           </div>
           <div class="form-group">
             <label class="form-label">Payment ID</label>
-            <input type="text" name="payment_id" required>
+            <input type="text" name="payment_id" value="{{ defaults.payment_id }}" required>
           </div>
           <div class="form-group">
             <label class="form-label">Secret Key</label>
-            <input type="password" name="payment_secret" required>
+            <input type="password" name="payment_secret" value="{{ defaults.payment_secret }}">
           </div>
         </div>
 
