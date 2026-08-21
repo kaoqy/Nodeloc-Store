@@ -16,36 +16,29 @@ CONFIG_PATH = INSTANCE_DIR / "config.ini"
 
 
 def _read_ini() -> dict:
-    """Read instance/config.ini if it exists; return a dict of overrides."""
+    """Read instance/config.ini if it exists; return a flat dict of
+    section.key pairs (no prefixing). Callers know which section each key
+    lives in.
+    """
     if not CONFIG_PATH.exists():
         return {}
     cp = RawConfigParser()
     cp.read(CONFIG_PATH, encoding="utf-8")
     out: dict = {}
-    if cp.has_section("app"):
-        for k, v in cp.items("app"):
+    for section in ("app", "oauth", "payment", "database"):
+        if not cp.has_section(section):
+            continue
+        for k, v in cp.items(section):
             out[k] = v
-    if cp.has_section("oauth"):
-        for k, v in cp.items("oauth"):
-            out[f"OAuth_{k}"] = v
-        # also expose allow_http as a top-level key
-        if "allow_http" in cp["oauth"]:
-            out["ALLOW_HTTP"] = cp["oauth"].get("allow_http", "0")
-    if cp.has_section("payment"):
-        for k, v in cp.items("payment"):
-            out[f"PAYMENT_{k}"] = v
-    if cp.has_section("database"):
-        for k, v in cp.items("database"):
-            out[f"DB_{k.upper()}"] = v
     return out
 
 
 def _build_db_uri(values: dict) -> str:
-    user = values.get("DB_USER", "")
-    pwd = values.get("DB_PASSWORD", "")
-    host = values.get("DB_HOST", "")
-    port = values.get("DB_PORT", "3306")
-    name = values.get("DB_NAME", "")
+    user = values.get("db_user", "")
+    pwd = values.get("db_pass", "")
+    host = values.get("db_host", "")
+    port = values.get("db_port", "3306")
+    name = values.get("db_name", "")
     if user and host and name:
         return f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{name}?charset=utf8mb4"
     sqlite_path = INSTANCE_DIR / "fallback.db"
@@ -57,30 +50,22 @@ def _build_config_dict(values: dict) -> dict:
     return dict(
         # Flask
         SECRET_KEY=os.environ.get("SECRET_KEY") or values.get("secret_key", "change-me-please"),
-        # DB
-        DB_USER=values.get("DB_USER", ""),
-        DB_PASSWORD=values.get("DB_PASSWORD", ""),
-        DB_HOST=values.get("DB_HOST", ""),
-        DB_PORT=values.get("DB_PORT", "3306"),
-        DB_NAME=values.get("DB_NAME", ""),
-        SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL") or _build_db_uri(values),
-        # Uploads
-        UPLOAD_FOLDER=str(BASE_DIR / "uploads" / "products"),
-        MAX_CONTENT_LENGTH=8 * 1024 * 1024,
         # Storefront
         SITE_NAME=values.get("site_name", "NodeLoc Store"),
         SITE_SLOGAN=values.get("site_slogan", "卡密商店 · Powered by NodeLoc"),
         CURRENCY=values.get("currency", "积分"),
-        # OAuth
-        NODELOC_URL=values.get("OAuth_url", "https://www.nodeloc.com").rstrip("/"),
-        NODELOC_CLIENT_ID=values.get("OAuth_client_id", ""),
-        NODELOC_CLIENT_SECRET=values.get("OAuth_client_secret", ""),
-        NODELOC_REDIRECT_URI=values.get("OAuth_redirect_uri", ""),
-        NODELOC_SCOPES=values.get("OAuth_scopes", "openid profile email"),
-        ALLOW_HTTP=values.get("ALLOW_HTTP", "0") == "1",
-        # Payment
-        PAYMENT_ID=values.get("PAYMENT_id", ""),
-        PAYMENT_SECRET=values.get("PAYMENT_secret", ""),
+        # OAuth (ini keys: url / client_id / client_secret / redirect_uri / scopes / allow_http)
+        NODELOC_URL=values.get("url", "https://www.nodeloc.com").rstrip("/"),
+        NODELOC_CLIENT_ID=values.get("client_id", ""),
+        NODELOC_CLIENT_SECRET=values.get("client_secret", ""),
+        NODELOC_REDIRECT_URI=values.get("redirect_uri", ""),
+        NODELOC_SCOPES=values.get("scopes", "openid profile email"),
+        ALLOW_HTTP=values.get("allow_http", "0") == "1",
+        # Payment (ini keys: id / secret)
+        PAYMENT_ID=values.get("id", ""),
+        PAYMENT_SECRET=values.get("secret", ""),
+        # DB (read directly from values via _build_db_uri)
+        SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL") or _build_db_uri(values),
     )
 
 
