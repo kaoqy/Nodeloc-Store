@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, redirect, render_template, request, url_for
+# Keep these lightweight imports at module level; everything Flask-specific
+# is deferred into create_app() so other app.* modules can be imported in a
+# stdlib-only environment (e.g. scripts/smoke_test.py).
 
 from .config import Config, apply_to, is_installed
-from .extensions import csrf, db, login_manager
 
 
-def create_app() -> Flask:
+def create_app() -> "Flask":
+    # Defer Flask imports so this module can be imported in stdlib-only envs.
+    from datetime import datetime
+    from flask import Flask, redirect, render_template, request, url_for
+    from .extensions import csrf, db, login_manager
     app = Flask(
         __name__,
         instance_path=str(Path(__file__).resolve().parent.parent / "instance"),
@@ -78,12 +82,13 @@ def create_app() -> Flask:
     # ---------- Context ----------
     @app.context_processor
     def _inject_globals():
+        from datetime import datetime as _dt
         return {
             "site_name": app.config.get("SITE_NAME", "NodeLoc Store"),
             "site_slogan": app.config.get("SITE_SLOGAN", ""),
             "currency": app.config.get("CURRENCY", "积分"),
-            "current_year": datetime.utcnow().year,
-            "now": datetime.utcnow,
+            "current_year": _dt.utcnow().year,
+            "now": _dt.utcnow,
         }
 
     # ---------- Error handlers ----------

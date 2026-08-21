@@ -205,9 +205,10 @@ class NodeLocPayment:
     def verify_callback(params: Mapping[str, Any], secret_key: str) -> bool:
         """Verify a payment callback signature.
 
-        NodeLoc signs the callback with the raw payment SECRET KEY (not the
-        SHA256-hashed token used for outgoing requests). All non-signature
-        parameters are sorted alphabetically and joined as `k=v&k=v`.
+        Per the NodeLoc docs, the **callback** is signed with the raw
+        `secret_key` (not the SHA256-hashed token used for outgoing
+        requests). All non-signature params are sorted alphabetically and
+        joined as `k=v&k=v`.
         """
         params = dict(params)
         signature = params.pop("signature", None)
@@ -230,7 +231,7 @@ class NodeLocPayment:
         return r.json()
 
     def _sign(self, params: Mapping[str, Any]) -> str:
-        return _sign_with_secret(params, self.secret_key)
+        return _sign_with_hashed_token(params, self.secret_key)
 
 
 # --------------------------------------------------------------------------- #
@@ -244,16 +245,22 @@ def _safe_json(r: requests.Response) -> Any:
 
 
 def _sign_with_secret(params: Mapping[str, Any], secret: str) -> str:
-    """Sign outgoing NodeLoc requests.
-
-    Per docs: token_hash = SHA256(your_token) is the HMAC key, where
-    `your_token` is the secret itself (we don't apply a second hash since
-    NodeLoc's Payment Secret is already the high-entropy key it gave us).
-    The doc wording is consistent with HMAC-SHA256(secret, param_string).
-    """
+    """Sign with the raw secret as the HMAC key (used for callbacks)."""
     sorted_items = sorted((k, "" if v is None else str(v)) for k, v in params.items())
     param_string = "&".join(f"{k}={v}" for k, v in sorted_items)
     return hmac.new(secret.encode("utf-8"), param_string.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _sign_with_hashed_token(params: Mapping[str, Any], secret: str) -> str:
+    """Sign outgoing requests: HMAC-SHA256(SHA256(secret), params).
+
+    Per NodeLoc docs: `token_hash = SHA256(your_token)` is the HMAC key,
+    where `your_token` is the Payment Secret (or OAuth token) the
+    application was issued. SHA256 of the secret is a 64-char hex digest
+    used as the signing key.
+    """
+    token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    return _sign_with_secret(params, token_hash)
 
 
 def new_state() -> str:
