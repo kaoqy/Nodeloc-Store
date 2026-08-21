@@ -361,7 +361,15 @@
   function setPanel(n) {
     current = n;
     panels.forEach(function (p) {
-      p.hidden = parseInt(p.dataset.panel, 10) !== n;
+      var isActive = parseInt(p.dataset.panel, 10) === n;
+      p.hidden = !isActive;
+      // Only the visible panel should enforce HTML5 required validation,
+      // otherwise the browser silently blocks submit on a hidden empty field
+      // (invisible focus target -> "no response" when clicking 完成安装).
+      p.querySelectorAll('input[required]').forEach(function (inp) {
+        if (isActive) inp.setAttribute('required', '');
+        else inp.removeAttribute('required');
+      });
     });
     steps.forEach(function (s) {
       var sn = parseInt(s.dataset.step, 10);
