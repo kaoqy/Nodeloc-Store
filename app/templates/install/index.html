@@ -284,16 +284,16 @@
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">用户名</label>
-              <input type="text" name="admin_user" required>
+              <input type="text" name="admin_user" value="{{ defaults.admin_user }}" required>
             </div>
             <div class="form-group">
               <label class="form-label">邮箱（可选）</label>
-              <input type="email" name="admin_email">
+              <input type="email" name="admin_email" value="{{ defaults.admin_email }}">
             </div>
           </div>
           <div class="form-group">
             <label class="form-label">密码（至少 8 位）</label>
-            <input type="password" name="admin_pass" required minlength="8">
+            <input type="password" name="admin_pass" value="{{ defaults.admin_pass }}" required minlength="8">
           </div>
         </div>
       </div>

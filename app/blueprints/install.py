@@ -25,6 +25,7 @@ _DEFAULT_DEFAULTS = {
     "oauth_url": "https://www.nodeloc.com", "oauth_client_id": "",
     "oauth_client_secret": "",
     "payment_id": "", "payment_secret": "",
+    "admin_user": "", "admin_email": "", "admin_pass": "",
 }
 
 
@@ -100,6 +101,8 @@ def index():
             "oauth_url": oauth_url, "oauth_client_id": oauth_client_id,
             "oauth_client_secret": oauth_client_secret,
             "payment_id": payment_id, "payment_secret": payment_secret,
+            "admin_user": admin_user, "admin_email": admin_email or "",
+            "admin_pass": admin_pass,
         })
 
         # Validate required fields
