@@ -2,40 +2,37 @@
 {% block title %}商品管理{% endblock %}
 {% block header_title %}商品管理{% endblock %}
 {% block body %}
-<div class="flex items-center justify-between mb-5">
+<div class="flex items-center justify-between mb-4">
   <form method="get" class="flex gap-2">
-    <input name="q" value="{{ q }}" placeholder="搜索商品…" class="px-3 py-1.5 text-sm w-48" />
-    <button class="btn-outline px-3 py-1.5 rounded-lg text-sm">搜索</button>
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索商品..." style="width:220px;" />
+    <button class="btn btn-secondary btn-sm">搜索</button>
   </form>
-  <a href="{{ url_for('admin.product_new') }}" class="btn-primary px-4 py-2 rounded-lg text-sm">+ 新建商品</a>
+  <a href="{{ url_for('admin.product_new') }}" class="btn btn-primary btn-sm">+ 新建商品</a>
 </div>
 
-<div class="glass-card overflow-hidden">
+<div class="card" style="padding:0;">
   <div class="table-wrap">
     <table>
       <thead><tr><th>ID</th><th>名称</th><th>价格</th><th>库存</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>
         {% for p in pagination.items %}
         <tr>
-          <td class="text-xs text-slate-500">{{ p.id }}</td>
-          <td class="font-medium text-white text-sm">{{ p.name }}</td>
-          <td class="text-sm">{{ p.price }}</td>
-          <td class="text-sm {% if p.stock_count < 1 %}text-red-400{% else %}text-green-400{% endif %}">{{ p.stock_count }}</td>
+          <td class="text-mute mono text-xs">{{ p.id }}</td>
+          <td><strong>{{ p.name }}</strong></td>
+          <td>{{ p.price }}</td>
+          <td class="{{ 'text-success' if p.stock_count > 0 else 'text-danger' }}">{{ p.stock_count }}</td>
           <td>
-            {% if p.is_published %}
-              <span class="badge badge-green">上架</span>
-            {% else %}
-              <span class="badge badge-red">下架</span>
-            {% endif %}
+            {% if p.is_published %}<span class="badge badge-success">上架</span>
+            {% else %}<span class="badge badge-neutral">下架</span>{% endif %}
           </td>
           <td>
-            <div class="flex gap-2">
-              <a href="{{ url_for('admin.product_edit', pid=p.id) }}" class="text-indigo-400 hover:underline text-sm">编辑</a>
-              <a href="{{ url_for('admin.product_toggle', pid=p.id) }}" class="text-yellow-400 hover:underline text-sm">{{ '下架' if p.is_published else '上架' }}</a>
-              <a href="{{ url_for('admin.product_cards', pid=p.id) }}" class="text-slate-400 hover:text-white text-sm">卡密</a>
-              <form method="post" action="{{ url_for('admin.product_delete', pid=p.id) }}" onsubmit="return confirm('确认删除？')">
+            <div class="flex gap-3 text-sm">
+              <a href="{{ url_for('admin.product_edit', pid=p.id) }}">编辑</a>
+              <a href="{{ url_for('admin.product_toggle', pid=p.id) }}" class="text-warning">{{ '下架' if p.is_published else '上架' }}</a>
+              <a href="{{ url_for('admin.product_cards', pid=p.id) }}" class="text-mute">卡密</a>
+              <form method="post" action="{{ url_for('admin.product_delete', pid=p.id) }}" style="display:inline;" onsubmit="return confirm('确认删除？')">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="text-red-400 hover:text-red-300 text-sm">删除</button>
+                <button type="submit" class="text-danger" style="background:none; border:0; padding:0; cursor:pointer; font:inherit;">删除</button>
               </form>
             </div>
           </td>

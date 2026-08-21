@@ -1,36 +1,31 @@
 {% extends "base.html" %}
 {% block body %}
-<div class="max-w-3xl mx-auto">
-  <div class="glass-card p-6">
-    <div class="flex flex-col md:flex-row gap-6">
-      <!-- Image -->
-      <div class="md:w-1/2">
+<div style="max-width:760px; margin:0 auto;">
+  <div class="card">
+    <div style="display:grid; grid-template-columns: 240px 1fr; gap:24px;">
+      <div>
         {% if product.image_path %}
-        <div class="aspect-square rounded-xl overflow-hidden bg-black/30">
-          <img src="{{ url_for('admin.uploaded_file', filename=product.image_path) }}"
-               alt="{{ product.name }}" class="w-full h-full object-cover" />
-        </div>
+          <img src="{{ url_for('admin.uploaded_file', filename=product.image_path) }}" alt="{{ product.name }}" style="width:100%; border-radius:var(--radius); border:1px solid var(--border);" />
         {% else %}
-        <div class="aspect-square rounded-xl bg-gradient-to-br from-indigo-900/50 to-purple-900/50 flex items-center justify-center text-7xl">📦</div>
+          <div style="aspect-ratio:1; background:var(--bg-elev-2); border:1px solid var(--border); border-radius:var(--radius); display:flex; align-items:center; justify-content:center; font-size:48px; color:var(--text-mute);">📦</div>
         {% endif %}
       </div>
-      <!-- Info -->
-      <div class="md:w-1/2 flex flex-col">
-        <h1 class="text-2xl font-bold text-white mb-2">{{ product.name }}</h1>
-        {% if product.summary %}
-        <p class="text-slate-400 text-sm mb-4">{{ product.summary }}</p>
-        {% endif %}
-        <div class="mb-4">
-          <span class="text-3xl font-bold text-indigo-400">{{ product.price }}</span>
-          <span class="text-slate-400 text-sm ml-1">{{ currency }}</span>
+      <div>
+        <h1 style="margin-bottom:6px;">{{ product.name }}</h1>
+        {% if product.summary %}<p class="text-dim text-sm" style="margin-bottom:16px;">{{ product.summary }}</p>{% endif %}
+
+        <div style="margin-bottom:14px;">
+          <span style="font-size:26px; font-weight:600;">{{ product.price }}</span>
+          <span class="text-mute text-sm"> {{ currency }}</span>
           {% if product.original_price and product.original_price > product.price %}
-          <span class="text-slate-500 line-through text-sm ml-2">{{ product.original_price }}</span>
+          <span class="text-mute text-sm" style="text-decoration:line-through; margin-left:6px;">{{ product.original_price }}</span>
           {% endif %}
         </div>
+
         {% if product.stock_visible %}
-        <div class="mb-4 text-sm">
-          库存: <span class="{% if product.stock_count > 0 %}text-green-400{% else %}text-red-400{% endif %}">
-            {{ product.stock_count }} 件
+        <div class="text-sm text-dim mb-4">
+          库存：<span class="{{ 'text-success' if product.stock_count > 0 else 'text-danger' }}">
+            {{ product.stock_count }}
           </span>
         </div>
         {% endif %}
@@ -39,31 +34,28 @@
           {% if product.stock_count > 0 and product.is_published %}
           <form method="post" action="{{ url_for('payment.create', product_id=product.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn-primary w-full py-3 rounded-xl font-semibold text-lg mb-3">
+            <button type="submit" class="btn btn-primary btn-lg btn-block">
               立即购买 · {{ product.price }} {{ currency }}
             </button>
           </form>
           {% else %}
-          <button disabled class="w-full py-3 rounded-xl font-semibold text-lg bg-slate-700 text-slate-400 cursor-not-allowed">暂时缺货</button>
+          <button disabled class="btn btn-block btn-lg" style="cursor:not-allowed;">已售罄</button>
           {% endif %}
         {% else %}
-        <a href="{{ url_for('auth.login', next=url_for('store.product_detail', slug=product.slug)) }}"
-           class="btn-primary w-full py-3 rounded-xl font-semibold text-lg text-center block">
-          登录后购买
-        </a>
+        <a href="{{ url_for('auth.login', next=url_for('store.product_detail', slug=product.slug)) }}" class="btn btn-primary btn-lg btn-block">登录后购买</a>
         {% endif %}
       </div>
     </div>
 
     {% if product.description %}
-    <div class="mt-6 pt-6 border-t border-white/10">
-      <h2 class="font-semibold text-white mb-3">商品详情</h2>
-      <div class="prose prose-invert prose-sm max-w-none text-slate-300">{{ product.description }}</div>
-    </div>
+    <div class="divider"></div>
+    <h2 class="mb-3">商品详情</h2>
+    <div class="text-dim" style="white-space:pre-wrap;">{{ product.description }}</div>
     {% endif %}
   </div>
 
-  <!-- Back -->
-  <div class="mt-4"><a href="{{ url_for('store.index') }}" class="btn-outline px-4 py-2 rounded-lg text-sm inline-flex items-center gap-1">← 返回商店</a></div>
+  <div class="mt-4">
+    <a href="{{ url_for('store.index') }}" class="btn btn-ghost btn-sm">← 返回商店</a>
+  </div>
 </div>
 {% endblock %}

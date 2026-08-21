@@ -282,7 +282,6 @@ def settings():
         oauth_redirect_uri = request.form.get("oauth_redirect_uri", "").strip()
         payment_id = request.form.get("payment_id", "").strip()
         payment_secret = request.form.get("payment_secret", "").strip()
-        allow_http = request.form.get("allow_http") == "on"
         oauth_scopes = request.form.get("oauth_scopes", "openid profile email").strip()
 
         _save_setting("site_name", site_name)
@@ -293,7 +292,6 @@ def settings():
         _save_setting("oauth_client_secret", oauth_client_secret)
         _save_setting("oauth_redirect_uri", oauth_redirect_uri)
         _save_setting("oauth_scopes", oauth_scopes)
-        _save_setting("allow_http", "1" if allow_http else "0")
         _save_setting("payment_id", payment_id)
         _save_setting("payment_secret", payment_secret)
 
@@ -362,7 +360,7 @@ def _save_setting(key: str, value: str) -> None:
         "site_name": "app", "site_slogan": "app", "currency": "app",
         "oauth_url": "oauth", "oauth_client_id": "oauth",
         "oauth_client_secret": "oauth", "oauth_redirect_uri": "oauth",
-        "oauth_scopes": "oauth", "allow_http": "oauth",
+        "oauth_scopes": "oauth",
         "payment_id": "payment", "payment_secret": "payment",
     }
     section = section_map.get(key, "app")

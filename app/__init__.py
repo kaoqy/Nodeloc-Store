@@ -94,16 +94,16 @@ def create_app() -> "Flask":
     # ---------- Error handlers ----------
     @app.errorhandler(404)
     def _not_found(e):
-        return render_template("errors/404.html"), 404
+        return render_template("errors/generic.html", code=404, message="页面不存在"), 404
 
     @app.errorhandler(403)
     def _forbidden(e):
-        return render_template("errors/403.html"), 403
+        return render_template("errors/generic.html", code=403, message="没有权限访问此页面"), 403
 
     @app.errorhandler(500)
     def _server_error(e):
         app.logger.exception("Unhandled error: %s", e)
-        return render_template("errors/500.html"), 500
+        return render_template("errors/generic.html", code=500, message="服务器开小差了"), 500
 
     register_cli(app)
     return app

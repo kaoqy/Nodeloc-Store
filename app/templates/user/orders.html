@@ -1,44 +1,39 @@
 {% extends "base.html" %}
 {% block title %}我的订单{% endblock %}
 {% block body %}
-<div class="max-w-4xl mx-auto">
-  <h1 class="text-xl font-bold text-white mb-6">我的订单</h1>
-  <div class="glass-card overflow-hidden">
-    {% if pagination.items %}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>订单号</th><th>商品</th><th>金额</th><th>状态</th><th>时间</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for order in pagination.items %}
-          <tr>
-            <td class="font-mono text-xs text-slate-400">{{ order.order_no[:20] }}</td>
-            <td class="text-sm">{{ order.product.name if order.product else '(已删除)' }}</td>
-            <td class="text-sm">{{ order.total_amount }} {{ currency }}</td>
-            <td>
-              {% if order.status == 'paid' %}<span class="badge badge-green">已支付</span>
-              {% elif order.status == 'pending' %}<span class="badge badge-yellow">待支付</span>
-              {% elif order.status == 'failed' %}<span class="badge badge-red">失败</span>
-              {% elif order.status == 'refunded' %}<span class="badge badge-purple">已退款</span>
-              {% else %}<span class="badge badge-blue">{{ order.status }}</span>{% endif %}
-            </td>
-            <td class="text-xs text-slate-500">{{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-            <td>
-              {% if order.is_paid %}
-              <a href="{{ url_for('payment.order_detail', order_no=order.order_no) }}" class="text-indigo-400 hover:underline text-sm">查看</a>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="p-10 text-center text-slate-500">暂无订单记录</div>
-    {% endif %}
+<h1 class="mb-4">我的订单</h1>
+<div class="card" style="padding:0;">
+  {% if pagination.items %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>订单号</th><th>商品</th><th>金额</th><th>状态</th><th>时间</th><th></th></tr></thead>
+      <tbody>
+        {% for order in pagination.items %}
+        <tr>
+          <td class="mono text-xs text-mute">{{ order.order_no[:18] }}…</td>
+          <td>{{ order.product.name if order.product else '(已删除)' }}</td>
+          <td>{{ order.total_amount }} {{ currency }}</td>
+          <td>
+            {% if order.status == 'paid' %}<span class="badge badge-success">已支付</span>
+            {% elif order.status == 'pending' %}<span class="badge badge-warning">待支付</span>
+            {% elif order.status == 'failed' %}<span class="badge badge-danger">失败</span>
+            {% elif order.status == 'refunded' %}<span class="badge badge-neutral">已退款</span>
+            {% else %}<span class="badge badge-neutral">{{ order.status }}</span>{% endif %}
+          </td>
+          <td class="text-xs text-mute">{{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>
+            {% if order.is_paid %}
+            <a href="{{ url_for('payment.order_detail', order_no=order.order_no) }}" class="text-sm">查看</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
+  {% else %}
+  <div class="empty">暂无订单</div>
+  {% endif %}
+</div>
 </div>
 {% endblock %}

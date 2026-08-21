@@ -1,102 +1,51 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="dark">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}{{ site_name }}{% endblock %}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: { 50: '#eef2ff', 400: '#818cf8', 600: '#4f46e5', 700: '#4338ca' },
-          }
-        }
-      }
-    }
-  </script>
-  <style>
-    body { background: linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 50%,#16213e 100%); min-height:100vh; }
-    .glass { background: rgba(255,255,255,0.05); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); }
-    .glass-card { background: rgba(255,255,255,0.06); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.10); border-radius: 1rem; }
-    .btn-primary { background: linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; transition: all .2s; }
-    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(99,102,241,.45); }
-    .btn-outline { border: 1px solid rgba(255,255,255,.2); color: rgba(255,255,255,.8); transition: all .2s; }
-    .btn-outline:hover { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.4); }
-    input[type=text],input[type=email],input[type=password],input[type=number],select,textarea {
-      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); color: #e2e8f0; border-radius: .5rem;
-    }
-    input:focus,select:focus,textarea:focus { outline:none; border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.25); }
-    .alert { padding:.75rem 1rem; border-radius:.5rem; margin-bottom:1rem; font-size:.875rem; }
-    .alert-success { background:rgba(16,185,129,.15); border:1px solid rgba(16,185,129,.3); color:#6ee7b7; }
-    .alert-danger  { background:rgba(239,68,68,.15);  border:1px solid rgba(239,68,68,.3);  color:#fca5a5; }
-    .alert-warning { background:rgba(245,158,11,.15); border:1px solid rgba(245,158,11,.3); color:#fcd34d; }
-    .table-wrap table { width:100%; border-collapse:separate; border-spacing:0; }
-    .table-wrap th { background:rgba(255,255,255,.04); padding:.625rem .875rem; text-align:left; font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color:rgba(255,255,255,.45); }
-    .table-wrap td { padding:.75rem .875rem; border-top:1px solid rgba(255,255,255,.05); }
-    .table-wrap tr:hover td { background:rgba(255,255,255,.03); }
-    .badge { display:inline-flex; align-items:center; padding:.125rem .5rem; border-radius:9999px; font-size:.7rem; font-weight:600; }
-    .badge-green { background:rgba(16,185,129,.2); color:#6ee7b7; }
-    .badge-red   { background:rgba(239,68,68,.2);  color:#fca5a5; }
-    .badge-yellow{ background:rgba(245,158,11,.2); color:#fcd34d; }
-    .badge-blue  { background:rgba(59,130,246,.2); color:#93c5fd; }
-    .badge-purple{ background:rgba(139,92,246,.2); color:#c4b5fd; }
-    .pagination { display:flex; gap:.25rem; }
-    .pagination a,.pagination span { padding:.375rem .75rem; border-radius:.375rem; font-size:.875rem; transition:all .15s; }
-    .pagination a { background:rgba(255,255,255,.06); color:rgba(255,255,255,.7); }
-    .pagination a:hover { background:rgba(99,102,241,.3); color:#fff; }
-    .pagination .active { background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; }
-    .pagination .disabled { opacity:.4; pointer-events:none; }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
   {% block extra_head %}{% endblock %}
 </head>
-<body class="text-slate-200">
+<body>
 
-<!-- Nav -->
-<nav class="glass sticky top-0 z-50">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="flex items-center justify-between h-14">
-      <a href="{{ url_for('store.index') }}" class="text-lg font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-        {{ site_name }}
-      </a>
-      <div class="flex items-center gap-4 text-sm">
-        {% if current_user.is_authenticated %}
-          <a href="{{ url_for('user.profile') }}" class="hover:text-white transition">{{ current_user.username }}</a>
-          <a href="{{ url_for('user.orders') }}" class="hover:text-white transition">我的订单</a>
-          {% if current_user.is_admin %}
-            <a href="{{ url_for('admin.index') }}" class="btn-outline px-3 py-1 rounded-md text-xs">管理后台</a>
-          {% endif %}
-          <a href="{{ url_for('auth.logout') }}" class="hover:text-white transition">退出</a>
-        {% else %}
-          <a href="{{ url_for('auth.login') }}" class="hover:text-white transition">登录</a>
-          <a href="{{ url_for('auth.register') }}" class="btn-primary px-4 py-1.5 rounded-md text-sm">注册</a>
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="{{ url_for('store.index') }}" class="nav-brand">
+      <span class="dot"></span>{{ site_name }}
+    </a>
+    <div class="nav-links">
+      {% if current_user.is_authenticated %}
+        <a href="{{ url_for('user.profile') }}">{{ current_user.username }}</a>
+        <a href="{{ url_for('user.orders') }}">我的订单</a>
+        {% if current_user.is_admin %}
+        <a href="{{ url_for('admin.index') }}">管理</a>
         {% endif %}
-      </div>
+        <a href="{{ url_for('auth.logout') }}" class="text-mute">退出</a>
+      {% else %}
+        <a href="{{ url_for('auth.login') }}">登录</a>
+        <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-sm">注册</a>
+      {% endif %}
     </div>
   </div>
 </nav>
 
-<!-- Flash messages -->
 {% with messages = get_flashed_messages(with_categories=true) %}
 {% if messages %}
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+<div class="container" style="padding-top:16px;">
   {% for cat, msg in messages %}
-  <div class="alert alert-{{ cat }}">{{ msg }}</div>
+  <div class="alert alert-{{ 'success' if cat == 'success' else ('danger' if cat == 'danger' else ('warning' if cat == 'warning' else 'info')) }}">{{ msg }}</div>
   {% endfor %}
 </div>
 {% endif %}
 {% endwith %}
 
-<!-- Main -->
-<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+<main class="container page">
 {% block body %}{% endblock %}
 </main>
 
-<!-- Footer -->
-<footer class="text-center text-xs text-slate-500 py-6 mt-8">
-  &copy; {{ current_year }} {{ site_name }}. Powered by NodeLoc.
+<footer style="border-top:1px solid var(--border-soft); padding:20px 0; margin-top:48px; text-align:center; color:var(--text-mute); font-size:12px;">
+  &copy; {{ current_year }} {{ site_name }} · Powered by NodeLoc
 </footer>
 
 {% block extra_scripts %}{% endblock %}

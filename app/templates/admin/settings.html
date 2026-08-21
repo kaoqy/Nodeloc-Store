@@ -2,80 +2,72 @@
 {% block title %}系统设置{% endblock %}
 {% block header_title %}系统设置{% endblock %}
 {% block body %}
-<div class="max-w-2xl">
-  <form method="post" class="space-y-8">
+<div style="max-width:680px;">
+
+  <form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-    <!-- Basic -->
-    <div class="glass-card p-6 space-y-4">
-      <h3 class="font-semibold text-white text-sm border-b border-white/5 pb-2">基本信息</h3>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-xs text-slate-400 mb-1">商店名称</label>
-          <input type="text" name="site_name" value="{{ settings.get('site_name','') }}" class="w-full px-3 py-2 text-sm" />
+    <div class="card mb-3">
+      <h3 class="mb-4">基本信息</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">商店名称</label>
+          <input type="text" name="site_name" value="{{ settings.get('site_name','') }}" />
         </div>
-        <div>
-          <label class="block text-xs text-slate-400 mb-1">商店标语</label>
-          <input type="text" name="site_slogan" value="{{ settings.get('site_slogan','') }}" class="w-full px-3 py-2 text-sm" />
+        <div class="form-group">
+          <label class="form-label">商店标语</label>
+          <input type="text" name="site_slogan" value="{{ settings.get('site_slogan','') }}" />
         </div>
       </div>
-      <div>
-        <label class="block text-xs text-slate-400 mb-1">货币单位</label>
-        <input type="text" name="currency" value="{{ settings.get('currency','积分') }}" class="w-32 px-3 py-2 text-sm" />
+      <div class="form-group" style="max-width:200px;">
+        <label class="form-label">货币单位</label>
+        <input type="text" name="currency" value="{{ settings.get('currency','积分') }}" />
       </div>
     </div>
 
-    <!-- OAuth -->
-    <div class="glass-card p-6 space-y-4">
-      <h3 class="font-semibold text-white text-sm border-b border-white/5 pb-2 flex justify-between items-center">
-        NodeLoc OAuth
-        <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank" class="text-xs text-indigo-400 hover:underline">前往创建 →</a>
-      </h3>
-      <div>
-        <label class="block text-xs text-slate-400 mb-1">OAuth URL</label>
-        <input type="url" name="oauth_url" value="{{ settings.get('oauth_url','https://www.nodeloc.com') }}" class="w-full px-3 py-2 text-sm" placeholder="https://www.nodeloc.com" />
+    <div class="card mb-3">
+      <h3 class="mb-2">NodeLoc OAuth</h3>
+      <p class="text-xs text-mute mb-4">在 <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank">NodeLoc</a> 创建 OAuth 应用，回调地址填 <code>https://你的域名/auth/oauth/callback</code></p>
+
+      <div class="form-group">
+        <label class="form-label">OAuth URL</label>
+        <input type="text" name="oauth_url" value="{{ settings.get('oauth_url','https://www.nodeloc.com') }}" />
       </div>
-      <div>
-        <label class="block text-xs text-slate-400 mb-1">Client ID</label>
-        <input type="text" name="oauth_client_id" value="{{ settings.get('oauth_client_id','') }}" class="w-full px-3 py-2 text-sm" />
+      <div class="form-group">
+        <label class="form-label">Client ID</label>
+        <input type="text" name="oauth_client_id" value="{{ settings.get('oauth_client_id','') }}" />
       </div>
-      <div>
-        <label class="block text-xs text-slate-400 mb-1">Client Secret</label>
-        <input type="password" name="oauth_client_secret" value="{{ settings.get('oauth_client_secret','') }}" class="w-full px-3 py-2 text-sm" placeholder="留空保持不变" />
+      <div class="form-group">
+        <label class="form-label">Client Secret</label>
+        <input type="password" name="oauth_client_secret" value="{{ settings.get('oauth_client_secret','') }}" placeholder="留空保持不变" />
       </div>
-      <div>
-        <label class="block text-xs text-slate-400 mb-1">请求 Scope</label>
-        <input type="text" name="oauth_scopes" value="{{ settings.get('oauth_scopes','openid profile email') }}" class="w-full px-3 py-2 text-sm" />
-        <div class="text-xs text-slate-500 mt-1">⚠️ 如包含 <code>email</code>，应用需在 NodeLoc 通过审核</div>
+      <div class="form-group">
+        <label class="form-label">Scope</label>
+        <input type="text" name="oauth_scopes" value="{{ settings.get('oauth_scopes','openid profile email') }}" />
+        <div class="form-help">含 <code>email</code> 需在 NodeLoc 审核通过</div>
       </div>
-      <div>
-        <label class="block text-xs text-slate-400 mb-1">Redirect URI（回调地址）</label>
-        <input type="text" name="oauth_redirect_uri" value="{{ settings.get('oauth_redirect_uri','') }}" class="w-full px-3 py-2 text-sm" />
-        <label class="flex items-center gap-2 mt-2 text-xs text-slate-400">
-          <input type="checkbox" name="allow_http" {% if settings.get('allow_http','0') == '1' %}checked{% endif %} class="rounded border-slate-600" />
-          允许 HTTP 回调（仅开发/内网测试）
-        </label>
-        <div class="text-xs text-slate-500 mt-1">建议值：<span class="font-mono text-indigo-400">{{ url_for('auth.oauth_callback', _external=True) }}</span></div>
+      <div class="form-group">
+        <label class="form-label">Redirect URI（必须 HTTPS）</label>
+        <input type="text" name="oauth_redirect_uri" value="{{ settings.get('oauth_redirect_uri','') }}" />
+        <div class="form-help">建议值：<code>{{ url_for('auth.oauth_callback', _external=True) }}</code></div>
       </div>
     </div>
 
-    <!-- Payment -->
-    <div class="glass-card p-6 space-y-4">
-      <h3 class="font-semibold text-white text-sm border-b border-white/5 pb-2 flex justify-between items-center">
-        NodeLoc 支付
-        <a href="https://www.nodeloc.com/payment/applications" target="_blank" class="text-xs text-indigo-400 hover:underline">前往创建 →</a>
-      </h3>
-      <div>
-        <label class="block text-xs text-slate-400 mb-1">Payment ID</label>
-        <input type="text" name="payment_id" value="{{ settings.get('payment_id','') }}" class="w-full px-3 py-2 text-sm" />
+    <div class="card mb-3">
+      <h3 class="mb-2">NodeLoc 支付</h3>
+      <p class="text-xs text-mute mb-4">在 <a href="https://www.nodeloc.com/payment/applications" target="_blank">NodeLoc</a> 创建支付应用，回调地址填 <code>https://你的域名/payment/callback</code></p>
+
+      <div class="form-group">
+        <label class="form-label">Payment ID</label>
+        <input type="text" name="payment_id" value="{{ settings.get('payment_id','') }}" />
       </div>
-      <div>
-        <label class="block text-xs text-slate-400 mb-1">Secret Key</label>
-        <input type="password" name="payment_secret" value="{{ settings.get('payment_secret','') }}" class="w-full px-3 py-2 text-sm" placeholder="留空保持不变" />
+      <div class="form-group">
+        <label class="form-label">Secret Key</label>
+        <input type="password" name="payment_secret" value="{{ settings.get('payment_secret','') }}" placeholder="留空保持不变" />
       </div>
     </div>
 
-    <button type="submit" class="btn-primary px-6 py-2.5 rounded-lg text-sm">保存设置</button>
+    <button type="submit" class="btn btn-primary">保存设置</button>
   </form>
 </div>
 {% endblock %}

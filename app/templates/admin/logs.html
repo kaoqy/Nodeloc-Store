@@ -2,30 +2,28 @@
 {% block title %}操作日志{% endblock %}
 {% block header_title %}操作日志{% endblock %}
 {% block body %}
-<div class="flex items-center justify-between mb-5">
-  <form method="get" class="flex gap-2">
-    <input name="action" value="{{ action }}" placeholder="筛选操作类型…" class="px-3 py-1.5 text-sm w-40" />
-    <button class="btn-outline px-3 py-1.5 rounded-lg text-sm">筛选</button>
-  </form>
-</div>
+<form method="get" class="flex gap-2 mb-4">
+  <input type="text" name="action" value="{{ action }}" placeholder="筛选操作类型..." style="width:200px;" />
+  <button class="btn btn-secondary btn-sm">筛选</button>
+</form>
 
-<div class="glass-card overflow-hidden">
+<div class="card" style="padding:0;">
   <div class="table-wrap">
     <table>
       <thead><tr><th>时间</th><th>操作</th><th>对象</th><th>详情</th><th>IP</th></tr></thead>
       <tbody>
         {% for log in pagination.items %}
         <tr>
-          <td class="text-xs text-slate-500">{{ log.created_at.strftime('%m-%d %H:%M:%S') }}</td>
-          <td class="text-xs text-white">{{ log.action }}</td>
-          <td class="text-xs text-slate-400">{{ log.target or '-' }}</td>
-          <td class="text-xs text-slate-500 max-w-xs truncate" title="{{ log.detail }}">{{ log.detail or '-' }}</td>
-          <td class="text-xs text-slate-600">{{ log.ip or '-' }}</td>
+          <td class="text-xs text-mute mono">{{ log.created_at.strftime('%m-%d %H:%M:%S') }}</td>
+          <td class="text-sm">{{ log.action }}</td>
+          <td class="text-xs text-mute">{{ log.target or '-' }}</td>
+          <td class="text-xs text-mute" style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ log.detail }}">{{ log.detail or '-' }}</td>
+          <td class="text-xs text-mute mono">{{ log.ip or '-' }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  {% if not pagination.items %}<div class="p-8 text-center text-slate-500 text-sm">暂无日志</div>{% endif %}
+  {% if not pagination.items %}<div class="empty text-sm">暂无日志</div>{% endif %}
 </div>
 {% endblock %}

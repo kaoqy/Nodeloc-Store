@@ -1,32 +1,32 @@
 {% extends "admin/base.html" %}
-{% block title %}概览 — 管理后台{% endblock %}
+{% block title %}概览{% endblock %}
 {% block header_title %}数据概览{% endblock %}
 {% block body %}
-<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-  <div class="glass-card p-5">
-    <div class="text-xs text-slate-400 mb-1">用户总数</div>
-    <div class="text-2xl font-bold text-white">{{ total_users }}</div>
+
+<div class="stat-grid">
+  <div class="card stat-tile">
+    <div class="label">用户总数</div>
+    <div class="value">{{ total_users }}</div>
   </div>
-  <div class="glass-card p-5">
-    <div class="text-xs text-slate-400 mb-1">订单总数</div>
-    <div class="text-2xl font-bold text-white">{{ total_orders }}</div>
+  <div class="card stat-tile">
+    <div class="label">订单总数</div>
+    <div class="value">{{ total_orders }}</div>
   </div>
-  <div class="glass-card p-5">
-    <div class="text-xs text-slate-400 mb-1">已完成订单</div>
-    <div class="text-2xl font-bold text-green-400">{{ paid_orders }}</div>
+  <div class="card stat-tile">
+    <div class="label">已完成订单</div>
+    <div class="value text-success">{{ paid_orders }}</div>
   </div>
-  <div class="glass-card p-5">
-    <div class="text-xs text-slate-400 mb-1">总收入</div>
-    <div class="text-2xl font-bold text-indigo-400">{{ revenue }} <span class="text-sm font-normal text-slate-400">积分</span></div>
+  <div class="card stat-tile">
+    <div class="label">总收入</div>
+    <div class="value value-accent">{{ revenue }}<span style="font-size:12px; color:var(--text-mute); font-weight:normal; margin-left:4px;">{{ currency }}</span></div>
   </div>
 </div>
 
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-  <!-- Recent orders -->
-  <div class="glass-card overflow-hidden">
-    <div class="px-5 py-4 border-b border-white/5 flex justify-between items-center">
-      <h3 class="font-semibold text-white text-sm">最新订单</h3>
-      <a href="{{ url_for('admin.orders') }}" class="text-xs text-indigo-400 hover:underline">查看全部</a>
+<div style="display:grid; grid-template-columns: 1.4fr 1fr; gap:14px;">
+  <div class="card" style="padding:0;">
+    <div class="card-header" style="padding:14px 18px; margin:0; border:0;">
+      <h3>最新订单</h3>
+      <a href="{{ url_for('admin.orders') }}" class="text-sm">查看全部 →</a>
     </div>
     {% if recent_orders %}
     <div class="table-wrap">
@@ -35,13 +35,13 @@
         <tbody>
           {% for o in recent_orders %}
           <tr>
-            <td class="font-mono text-xs">{{ o.order_no[:16] }}…</td>
-            <td class="text-xs">{{ o.user.username }}</td>
-            <td class="text-xs">{{ o.total_amount }}</td>
+            <td class="mono text-xs text-mute">{{ o.order_no[:14] }}…</td>
+            <td class="text-sm">{{ o.user.username if o.user else '-' }}</td>
+            <td class="text-sm">{{ o.total_amount }}</td>
             <td>
-              {% if o.status=='paid' %}<span class="badge badge-green">已付</span>
-              {% elif o.status=='pending' %}<span class="badge badge-yellow">待付</span>
-              {% else %}<span class="badge badge-red">{{ o.status }}</span>{% endif %}
+              {% if o.status=='paid' %}<span class="badge badge-success">已付</span>
+              {% elif o.status=='pending' %}<span class="badge badge-warning">待付</span>
+              {% else %}<span class="badge badge-danger">{{ o.status }}</span>{% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -49,30 +49,29 @@
       </table>
     </div>
     {% else %}
-    <div class="p-6 text-center text-slate-500 text-sm">暂无订单</div>
+    <div class="empty text-sm">暂无订单</div>
     {% endif %}
   </div>
 
-  <!-- Recent audit logs -->
-  <div class="glass-card overflow-hidden">
-    <div class="px-5 py-4 border-b border-white/5 flex justify-between items-center">
-      <h3 class="font-semibold text-white text-sm">操作日志</h3>
-      <a href="{{ url_for('admin.logs') }}" class="text-xs text-indigo-400 hover:underline">查看全部</a>
+  <div class="card" style="padding:0;">
+    <div class="card-header" style="padding:14px 18px; margin:0; border:0;">
+      <h3>操作日志</h3>
+      <a href="{{ url_for('admin.logs') }}" class="text-sm">查看全部 →</a>
     </div>
     {% if recent_logs %}
-    <div class="divide-y divide-white/5">
+    <div>
       {% for log in recent_logs %}
-      <div class="px-5 py-2.5 flex items-start gap-3 text-xs">
-        <span class="text-slate-500 mt-0.5">{{ log.created_at.strftime('%m-%d %H:%M') }}</span>
+      <div class="flex items-start gap-3" style="padding:9px 18px; border-bottom:1px solid var(--border-soft); font-size:12.5px;">
+        <span class="text-mute mono" style="flex-shrink:0; font-size:11px;">{{ log.created_at.strftime('%m-%d %H:%M') }}</span>
         <div>
-          <div class="text-slate-300">{{ log.action }}</div>
-          {% if log.target %}<div class="text-slate-500">{{ log.target }}</div>{% endif %}
+          <div>{{ log.action }}</div>
+          {% if log.target %}<div class="text-mute text-xs">{{ log.target }}</div>{% endif %}
         </div>
       </div>
       {% endfor %}
     </div>
     {% else %}
-    <div class="p-6 text-center text-slate-500 text-sm">暂无日志</div>
+    <div class="empty text-sm">暂无日志</div>
     {% endif %}
   </div>
 </div>

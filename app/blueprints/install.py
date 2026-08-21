@@ -37,7 +37,6 @@ def index():
         oauth_client_id = request.form.get("oauth_client_id", "").strip()
         oauth_client_secret = request.form.get("oauth_client_secret", "")
         oauth_scopes = request.form.get("oauth_scopes", "openid profile email").strip()
-        allow_http = request.form.get("allow_http") == "on"
         user_redirect = request.form.get("oauth_redirect_uri", "").strip()
 
         # Auto-fill redirect URI if blank
@@ -45,10 +44,6 @@ def index():
             oauth_redirect_uri = url_for("auth.oauth_callback", _external=True)
         else:
             oauth_redirect_uri = user_redirect
-        # Auto-rewrite http→https in dev mode? No — keep as user typed. allow_http just gates the warning.
-        if allow_http and oauth_redirect_uri.startswith("http://"):
-            # explicitly allow — keep as is
-            pass
 
         # --- 4) Payment ---
         payment_id = request.form.get("payment_id", "").strip()
@@ -75,12 +70,11 @@ def index():
         if len(admin_pass) < 8:
             return render_template("install/index.html", error="管理员密码至少 8 位")
 
-        # HTTPS check (warn but allow)
-        https_used = oauth_redirect_uri.startswith("https://")
-        if not https_used and not allow_http:
+        # HTTPS check (required for OAuth callbacks)
+        if not oauth_redirect_uri.startswith("https://"):
             return render_template(
                 "install/index.html",
-                error="Redirect URI 为 HTTP。生产环境必须 HTTPS。开发环境请勾选「允许 HTTP 回调」。",
+                error="Redirect URI 必须使用 HTTPS。请通过 OpenResty / Caddy / Nginx 反代并配置 SSL 证书。",
             )
 
         # Write config.ini
@@ -113,7 +107,7 @@ def index():
             db.session.commit()
 
         _mark_installed()
-        current_app.logger.info("Install completed: admin=%s, https=%s", admin_user, https_used)
+        current_app.logger.info("Install completed: admin=%s", admin_user)
         return redirect(url_for("store.index"))
 
     return render_template("install/index.html")

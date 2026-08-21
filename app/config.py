@@ -54,7 +54,7 @@ def _build_config_dict(values: dict) -> dict:
         SITE_NAME=values.get("site_name", "NodeLoc Store"),
         SITE_SLOGAN=values.get("site_slogan", "卡密商店 · Powered by NodeLoc"),
         CURRENCY=values.get("currency", "积分"),
-        # OAuth (ini keys: url / client_id / client_secret / redirect_uri / scopes / allow_http)
+        # OAuth (ini keys: url / client_id / client_secret / redirect_uri / scopes)
         NODELOC_URL=values.get("url", "https://www.nodeloc.com").rstrip("/"),
         NODELOC_CLIENT_ID=values.get("client_id", ""),
         NODELOC_CLIENT_SECRET=values.get("client_secret", ""),
