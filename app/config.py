@@ -28,6 +28,9 @@ def _read_ini() -> dict:
     if cp.has_section("oauth"):
         for k, v in cp.items("oauth"):
             out[f"OAuth_{k}"] = v
+        # also expose allow_http as a top-level key
+        if "allow_http" in cp["oauth"]:
+            out["ALLOW_HTTP"] = cp["oauth"].get("allow_http", "0")
     if cp.has_section("payment"):
         for k, v in cp.items("payment"):
             out[f"PAYMENT_{k}"] = v
@@ -74,6 +77,7 @@ def _build_config_dict(values: dict) -> dict:
         NODELOC_CLIENT_SECRET=values.get("OAuth_client_secret", ""),
         NODELOC_REDIRECT_URI=values.get("OAuth_redirect_uri", ""),
         NODELOC_SCOPES=values.get("OAuth_scopes", "openid profile email"),
+        ALLOW_HTTP=values.get("ALLOW_HTTP", "0") == "1",
         # Payment
         PAYMENT_ID=values.get("PAYMENT_id", ""),
         PAYMENT_SECRET=values.get("PAYMENT_secret", ""),
@@ -96,6 +100,7 @@ class Config:
     NODELOC_CLIENT_SECRET = ""
     NODELOC_REDIRECT_URI = ""
     NODELOC_SCOPES = "openid profile email"
+    ALLOW_HTTP = False
     PAYMENT_ID = ""
     PAYMENT_SECRET = ""
     PERMANENT_SESSION_LIFETIME = 60 * 60 * 24 * 7

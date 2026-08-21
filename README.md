@@ -39,8 +39,7 @@
 
 - 一台 Linux 服务器（推荐 Ubuntu 22.04 / Debian 12）
 - Docker + Docker Compose
-- 一个域名（生产环境必须 HTTPS，NodeLoc 回调要求 HTTPS）
-- NodeLoc 论坛账号（**白银会员 TL1 及以上**，创建支付应用需此等级；OAuth 需 TL2）
+- NodeLoc 论坛账号（**白银会员 TL1**及**以上**才能创建支付应用；OAuth 应用需**TL2 黄金会员**及以上）
 
 ### Step 1 · 创建 NodeLoc 应用
 
@@ -73,18 +72,17 @@
 
 ### Step 2 · 部署项目
 
+**一条命令启动，开箱即用**——MariaDB 密码有默认值，会自动初始化：
+
 ```bash
-# 克隆仓库
 git clone https://github.com/kaoqy/Nodeloc-Store.git
 cd Nodeloc-Store
-
-# 复制环境变量模板
-cp .env.example .env
-nano .env   # 修改 DB_ROOT_PASSWORD 和 DB_PASSWORD 为强密码
-
-# 启动
 docker compose up -d
 ```
+
+> 💡 不需要改任何环境变量。所有配置（数据库、OAuth、支付）都通过下一步的向导在网页上填入。
+> 
+> 如要修改默认数据库密码，改 `docker-compose.yml` 里的 `DB_ROOT_PASSWORD` / `DB_PASSWORD` 即可（首次启动前修改，或 `docker compose down -v` 后重启）。
 
 等待约 30 秒让 MariaDB 完成初始化，然后访问 `http://你的IP:5000`。
 
@@ -100,9 +98,9 @@ docker compose up -d
 
 提交后**立即生效**，无需重启容器。
 
-### Step 4 · HTTPS（生产环境必做）
+### Step 4 · HTTPS（生产环境建议开启）
 
-NodeLoc 要求所有回调 URL 必须是 HTTPS。使用 Caddy 或 Nginx 反向代理：
+NodeLoc 生产环境要求所有回调 URL 必须是 HTTPS。使用 Caddy 或 Nginx 反向代理：
 
 #### Caddy（最简）
 
@@ -139,6 +137,8 @@ server {
 3. 下单购买 → 跳转到 NodeLoc 支付页 → 用积分支付
 4. 支付完成后浏览器会跳转回你的 `/payment/callback`，自动发货，卡密会显示在订单详情
 
+> 💡 **开发/内网测试** 不需要 HTTPS！安装向导和 Admin → 设置页都有「允许 HTTP 回调」勾选框，勾上后即可在 `http://localhost:5000` 上完成完整 OAuth + 支付测试。
+> 
 > 💡 **开发/测试** 可在 Admin → 设置页直接修改 OAuth / 支付配置，保存后**实时生效**，无需重启。
 
 ## 🛠️ 常用运维
@@ -165,8 +165,8 @@ cat backup.sql | docker compose exec -T db mysql -u root -p"$MARIADB_ROOT_PASSWO
 
 ## 🔒 安全建议
 
-- ✅ 务必使用 HTTPS（NodeLoc 强制要求回调为 HTTPS）
-- ✅ 修改 `.env` 中的数据库密码为强密码
+- ✅ 生产环境建议使用 HTTPS（开发环境可勾选「允许 HTTP 回调」跳过）
+- ✅ 首次安装后建议修改 `docker-compose.yml` 中的数据库密码
 - ✅ 修改 Admin 默认用户名
 - ✅ 定期备份数据库与 `instance/config.ini`
 - ✅ OAuth `email` scope 需在 NodeLoc 审核通过；未通过时用户的邮箱将为空

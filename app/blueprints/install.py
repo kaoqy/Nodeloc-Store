@@ -4,10 +4,13 @@ from __future__ import annotations
 from configparser import RawConfigParser
 from pathlib import Path
 
-from flask import Blueprint, current_app, redirect, render_template, request, url_for
+from flask import (Blueprint, current_app, redirect, render_template, request,
+                   url_for)
+from flask_login import current_user
 
 from ..extensions import db
 from ..models import User
+from ..utils import log_action
 
 bp = Blueprint("install", __name__)
 
@@ -33,8 +36,19 @@ def index():
         oauth_url = request.form.get("oauth_url", "https://www.nodeloc.com").strip().rstrip("/")
         oauth_client_id = request.form.get("oauth_client_id", "").strip()
         oauth_client_secret = request.form.get("oauth_client_secret", "")
-        oauth_redirect_uri = request.form.get("oauth_redirect_uri", "").strip()
         oauth_scopes = request.form.get("oauth_scopes", "openid profile email").strip()
+        allow_http = request.form.get("allow_http") == "on"
+        user_redirect = request.form.get("oauth_redirect_uri", "").strip()
+
+        # Auto-fill redirect URI if blank
+        if not user_redirect:
+            oauth_redirect_uri = url_for("auth.oauth_callback", _external=True)
+        else:
+            oauth_redirect_uri = user_redirect
+        # Auto-rewrite http→https in dev mode? No — keep as user typed. allow_http just gates the warning.
+        if allow_http and oauth_redirect_uri.startswith("http://"):
+            # explicitly allow — keep as is
+            pass
 
         # --- 4) Payment ---
         payment_id = request.form.get("payment_id", "").strip()
@@ -50,8 +64,8 @@ def index():
             "db_host": db_host, "db_port": db_port, "db_user": db_user,
             "db_name": db_name, "admin_user": admin_user, "admin_pass": admin_pass,
             "oauth_client_id": oauth_client_id, "oauth_client_secret": oauth_client_secret,
-            "oauth_redirect_uri": oauth_redirect_uri, "payment_id": payment_id,
-            "payment_secret": payment_secret,
+            "oauth_redirect_uri": oauth_redirect_uri,
+            "payment_id": payment_id, "payment_secret": payment_secret,
         }
         missing = [k for k, v in required.items() if not v]
         if missing:
@@ -60,6 +74,14 @@ def index():
             )
         if len(admin_pass) < 8:
             return render_template("install/index.html", error="管理员密码至少 8 位")
+
+        # HTTPS check (warn but allow)
+        https_used = oauth_redirect_uri.startswith("https://")
+        if not https_used and not allow_http:
+            return render_template(
+                "install/index.html",
+                error="Redirect URI 为 HTTP。生产环境必须 HTTPS。开发环境请勾选「允许 HTTP 回调」。",
+            )
 
         # Write config.ini
         try:
@@ -70,27 +92,30 @@ def index():
                 oauth_url=oauth_url, oauth_client_id=oauth_client_id,
                 oauth_client_secret=oauth_client_secret,
                 oauth_redirect_uri=oauth_redirect_uri, oauth_scopes=oauth_scopes,
+                allow_http=allow_http,
                 payment_id=payment_id, payment_secret=payment_secret,
             )
         except Exception as e:
             return render_template("install/index.html", error=f"配置写入失败: {e}")
 
-        # Reload app with new config and create tables
-        from ..extensions import db as _db
-        from .. import create_app
-        app = create_app()
-        with app.app_context():
-            _db.create_all()
-            if not User.query.filter_by(username=admin_user).first():
-                u = User(username=admin_user, email=admin_email, is_admin=True)
-                u.set_password(admin_pass)
-                _db.session.add(u)
-                _db.session.commit()
+        # Build tables on the *currently running* app (it will re-read ini on next request)
+        try:
+            db.create_all()
+        except Exception as e:
+            return render_template(
+                "install/index.html",
+                error=f"数据库连接失败: {e}（请检查 MariaDB 是否就绪、参数是否正确）",
+            )
+        if not User.query.filter_by(username=admin_user).first():
+            u = User(username=admin_user, email=admin_email, is_admin=True)
+            u.set_password(admin_pass)
+            db.session.add(u)
+            db.session.commit()
 
         _mark_installed()
+        current_app.logger.info("Install completed: admin=%s, https=%s", admin_user, https_used)
         return redirect(url_for("store.index"))
 
-    # Build the callback hint URL for the payment field
     return render_template("install/index.html")
 
 
@@ -120,6 +145,7 @@ def _write_config(**kw):
     cfg.set("oauth", "client_secret", kw["oauth_client_secret"])
     cfg.set("oauth", "redirect_uri", kw["oauth_redirect_uri"])
     cfg.set("oauth", "scopes", kw["oauth_scopes"])
+    cfg.set("oauth", "allow_http", "1" if kw.get("allow_http") else "0")
 
     cfg.set("payment", "id", kw["payment_id"])
     cfg.set("payment", "secret", kw["payment_secret"])
