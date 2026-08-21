@@ -25,4 +25,4 @@ RUN mkdir -p /app/uploads/products /app/instance && \
 EXPOSE 5000
 
 # gunicorn for production; CMD override allowed
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "run:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "info", "run:app"]

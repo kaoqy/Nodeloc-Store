@@ -58,6 +58,9 @@ def _form_defaults() -> dict:
 def index():
     # ===== POST =============================================================
     if request.method == "POST":
+        current_app.logger.info(
+            "install: POST received, form keys=%s", sorted(request.form.keys())
+        )
         # --- 1) DB config ---
         db_host = request.form.get("db_host", "").strip()
         db_port = request.form.get("db_port", "3306").strip()
@@ -134,6 +137,9 @@ def index():
             if oauth_redirect_uri.startswith("http://"):
                 oauth_redirect_uri = oauth_redirect_uri.replace("http://", "https://", 1)
             else:
+                current_app.logger.warning(
+                    "install: HTTPS check failed, oauth_redirect_uri=%.200s", oauth_redirect_uri
+                )
                 return render_template(
                     "install/index.html",
                     error="Redirect URI 必须使用 HTTPS。请通过 OpenResty / Caddy / Nginx 反代并配置 SSL 证书。",
