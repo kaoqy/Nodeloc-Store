@@ -56,6 +56,7 @@ def _form_defaults() -> dict:
 
 @bp.route("/", methods=["GET", "POST"])
 def index():
+    # ===== POST =============================================================
     if request.method == "POST":
         # --- 1) DB config ---
         db_host = request.form.get("db_host", "").strip()
@@ -72,11 +73,9 @@ def index():
         oauth_url = request.form.get("oauth_url", "https://www.nodeloc.com").strip().rstrip("/")
         oauth_client_id = request.form.get("oauth_client_id", "").strip()
         oauth_client_secret = request.form.get("oauth_client_secret", "")
-        # Scope is fixed: openid + profile + email is what NodeLoc returns by default.
         oauth_scopes = "openid profile email"
         user_redirect = request.form.get("oauth_redirect_uri", "").strip()
 
-        # Auto-fill redirect URI if blank
         if not user_redirect:
             oauth_redirect_uri = url_for("auth.oauth_callback", _external=True)
         else:
@@ -91,8 +90,7 @@ def index():
         admin_email = request.form.get("admin_email", "").strip() or None
         admin_pass = request.form.get("admin_pass", "")
 
-        # Build a defaults dict from the user's submission so the form re-renders
-        # with whatever they typed if we have to bounce back with an error.
+        # Build submitted defaults (for re-render on error)
         submitted = dict(_DEFAULT_DEFAULTS)
         submitted.update({
             "db_host": db_host, "db_port": db_port, "db_name": db_name,
@@ -118,21 +116,24 @@ def index():
             return render_template(
                 "install/index.html",
                 error=f"以下字段必填: {', '.join(missing)}",
-                defaults=submitted, partial_install=CONFIG_PATH.exists() and not is_installed(),
+                defaults=submitted,
+                partial_install=CONFIG_PATH.exists() and not is_installed(),
             )
         if len(admin_pass) < 8:
             return render_template(
                 "install/index.html",
                 error="管理员密码至少 8 位",
-                defaults=submitted, partial_install=CONFIG_PATH.exists() and not is_installed(),
+                defaults=submitted,
+                partial_install=CONFIG_PATH.exists() and not is_installed(),
             )
 
-        # HTTPS check (required for OAuth callbacks)
+        # HTTPS check
         if not oauth_redirect_uri.startswith("https://"):
             return render_template(
                 "install/index.html",
                 error="Redirect URI 必须使用 HTTPS。请通过 OpenResty / Caddy / Nginx 反代并配置 SSL 证书。",
-                defaults=submitted, partial_install=CONFIG_PATH.exists() and not is_installed(),
+                defaults=submitted,
+                partial_install=CONFIG_PATH.exists() and not is_installed(),
             )
 
         # Write config.ini
@@ -146,37 +147,36 @@ def index():
                 oauth_redirect_uri=oauth_redirect_uri, oauth_scopes=oauth_scopes,
                 payment_id=payment_id, payment_secret=payment_secret,
             )
-        except Exception:
+        except Exception as e:
             current_app.logger.exception("install: _write_config failed")
             return render_template(
                 "install/index.html",
-                error="配置写入失败（请检查服务器 instance/ 目录权限）",
-                defaults=submitted, partial_install=False,
+                error=f"配置写入失败: {e}",
+                defaults=submitted,
+                partial_install=False,
             )
 
         # CRITICAL: refresh app config NOW so SQLAlchemy uses the freshly
         # written MySQL URI instead of the in-memory SQLite fallback.
-        # Without this, db.create_all() would silently create tables in
-        # SQLite and the user's MySQL would remain empty.
         apply_to(current_app)
         try:
             db.engine.dispose()
         except Exception:
             pass
 
-        # Build tables on the *currently running* app.
+        # Build tables
         try:
             db.create_all()
-        except Exception:
+        except Exception as e:
             current_app.logger.exception("install: db.create_all failed")
-            # Leave config.ini in place so user can fix DB creds and retry.
             return render_template(
                 "install/index.html",
-                error="数据库连接失败：请检查 MariaDB / MySQL 是否就绪、账号密码与数据库名是否正确。"
-                      "配置已保存，直接修改后重新提交即可。",
-                defaults=submitted, partial_install=True,
+                error=f"数据库连接失败: {e}",
+                defaults=submitted,
+                partial_install=True,
             )
 
+        # Create admin user
         if not User.query.filter_by(username=admin_user).first():
             u = User(username=admin_user, email=admin_email, is_admin=True)
             u.set_password(admin_pass)
@@ -187,7 +187,7 @@ def index():
         current_app.logger.info("Install completed: admin=%s", admin_user)
         return redirect(url_for("store.index"))
 
-    # GET
+    # ===== GET ==============================================================
     partial = CONFIG_PATH.exists() and not is_installed()
     return render_template(
         "install/index.html",
