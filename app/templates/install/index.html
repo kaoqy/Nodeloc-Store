@@ -251,7 +251,7 @@
           <div class="form-group">
             <label class="form-label">Redirect URI <span class="req">*</span>（必须 HTTPS）</label>
             <div class="copy-field">
-              <input type="text" id="oauthRedirectUri" readonly>
+              <input type="text" name="oauth_redirect_uri" id="oauthRedirectUri" readonly>
               <button type="button" class="btn btn-secondary" data-copy="oauthRedirectUri">📋 复制</button>
             </div>
             <div class="help">已自动按当前访问域名生成。需 HTTPS，通过 OpenResty / Caddy / Nginx 反代 + SSL 证书实现。</div>

@@ -77,7 +77,7 @@ def index():
         user_redirect = request.form.get("oauth_redirect_uri", "").strip()
 
         if not user_redirect:
-            oauth_redirect_uri = url_for("auth.oauth_callback", _external=True)
+            oauth_redirect_uri = url_for("auth.oauth_callback", _external=True, _scheme="https")
         else:
             oauth_redirect_uri = user_redirect
 
@@ -127,14 +127,19 @@ def index():
                 partial_install=CONFIG_PATH.exists() and not is_installed(),
             )
 
-        # HTTPS check
+        # HTTPS check (required for OAuth callbacks).
+        # Behind a TLS-terminating proxy, Flask may see http:// internally;
+        # auto-upgrade to https:// instead of failing.
         if not oauth_redirect_uri.startswith("https://"):
-            return render_template(
-                "install/index.html",
-                error="Redirect URI 必须使用 HTTPS。请通过 OpenResty / Caddy / Nginx 反代并配置 SSL 证书。",
-                defaults=submitted,
-                partial_install=CONFIG_PATH.exists() and not is_installed(),
-            )
+            if oauth_redirect_uri.startswith("http://"):
+                oauth_redirect_uri = oauth_redirect_uri.replace("http://", "https://", 1)
+            else:
+                return render_template(
+                    "install/index.html",
+                    error="Redirect URI 必须使用 HTTPS。请通过 OpenResty / Caddy / Nginx 反代并配置 SSL 证书。",
+                    defaults=submitted,
+                    partial_install=CONFIG_PATH.exists() and not is_installed(),
+                )
 
         # Write config.ini
         try:
