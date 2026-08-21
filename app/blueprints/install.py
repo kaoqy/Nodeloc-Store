@@ -88,7 +88,6 @@ def index():
                 oauth_url=oauth_url, oauth_client_id=oauth_client_id,
                 oauth_client_secret=oauth_client_secret,
                 oauth_redirect_uri=oauth_redirect_uri, oauth_scopes=oauth_scopes,
-                allow_http=allow_http,
                 payment_id=payment_id, payment_secret=payment_secret,
             )
         except Exception as e:
@@ -141,7 +140,6 @@ def _write_config(**kw):
     cfg.set("oauth", "client_secret", kw["oauth_client_secret"])
     cfg.set("oauth", "redirect_uri", kw["oauth_redirect_uri"])
     cfg.set("oauth", "scopes", kw["oauth_scopes"])
-    cfg.set("oauth", "allow_http", "1" if kw.get("allow_http") else "0")
 
     cfg.set("payment", "id", kw["payment_id"])
     cfg.set("payment", "secret", kw["payment_secret"])
