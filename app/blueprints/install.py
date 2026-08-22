@@ -7,7 +7,7 @@ from flask import (Blueprint, current_app, redirect, render_template, request,
                    url_for)
 from flask_login import current_user
 
-from ..extensions import db
+from ..extensions import db, rebind_database
 from ..models import User
 from ..utils import log_action
 from ..config import INSTANCE_DIR, CONFIG_PATH, apply_to, is_installed
@@ -167,13 +167,24 @@ def index():
                 partial_install=False,
             )
 
-        # CRITICAL: refresh app config NOW so SQLAlchemy uses the freshly
-        # written MySQL URI instead of the in-memory SQLite fallback.
+        # Refresh the app config and replace Flask-SQLAlchemy's cached engine.
+        # Merely changing SQLALCHEMY_DATABASE_URI or disposing the old engine
+        # does not make Flask-SQLAlchemy use the newly configured database.
         apply_to(current_app)
         try:
-            db.engine.dispose()
-        except Exception:
-            pass
+            engine = rebind_database(current_app._get_current_object())
+            current_app.logger.info(
+                "install: database engine rebound to %s",
+                engine.url.render_as_string(hide_password=True),
+            )
+        except Exception as e:
+            current_app.logger.exception("install: database engine rebind failed")
+            return render_template(
+                "install/index.html",
+                error=f"数据库连接初始化失败: {e}",
+                defaults=submitted,
+                partial_install=True,
+            )
 
         # Build tables
         try:
