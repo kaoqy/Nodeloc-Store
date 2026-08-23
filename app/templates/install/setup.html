@@ -4,74 +4,254 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>安装 · NodeLoc Store</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
   <style>
-    :root { --bg1: #eef6ff; --bg2: #f6f9fc; --card: #ffffff; --border: #e3e9f2; --text: #1b2434; --mute: #5b6b81; --accent: #4f46e5; --accent-soft: #eef2ff; --accent-line: #c7d2fe; --ok: #0f9d58; --danger: #d93025; --danger-soft: #fdecea; --radius: 16px; --shadow: 0 10px 34px rgba(24,39,75,.09); --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
     * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; }
-    body { font-family: var(--font); font-size: 14.5px; line-height: 1.6; color: var(--text); min-height: 100vh; background: radial-gradient(circle at 8% 6%, rgba(79,70,229,.07), transparent 42%), radial-gradient(circle at 92% 92%, rgba(22,157,88,.06), transparent 42%), linear-gradient(165deg, var(--bg1), var(--bg2)); display: flex; align-items: center; justify-content: center; padding: 20px; }
-    .wrap { max-width: 620px; width: 100%; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 34px; }
-    .card .icon { font-size: 32px; text-align: center; margin-bottom: 8px; }
-    .card h1 { font-size: 22px; font-weight: 700; text-align: center; margin: 0 0 4px; }
-    .card .sub { text-align: center; color: var(--mute); font-size: 14px; margin: 0 0 24px; }
-    .badge-step { display: inline-block; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; padding: 2px 12px; border-radius: 999px; margin-bottom: 12px; }
-    .form-group { margin-bottom: 16px; }
-    .form-label { display: block; font-size: 13px; font-weight: 600; color: var(--mute); margin-bottom: 5px; }
-    .form-label .req { color: var(--danger); }
-    input[type=text], input[type=password], input[type=email] { width: 100%; padding: 10px 14px; background: #fafcff; color: var(--text); border: 1.5px solid var(--border); border-radius: 10px; font-size: 14px; font-family: var(--font); transition: border-color .15s, box-shadow .15s, background .15s; }
-    input:focus { outline: none; border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
-    input[readonly] { background: #f4f6fa; color: var(--text); }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    @media (max-width: 520px) { .form-row { grid-template-columns: 1fr; } }
-    .help { font-size: 12.5px; color: var(--mute); margin-top: 5px; }
-    .alert-danger { background: var(--danger-soft); color: #b91c1c; border: 1px solid #f3c1c1; border-radius: 11px; padding: 12px 16px; font-size: 13.5px; margin-bottom: 18px; }
-    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 12px 28px; border-radius: 10px; border: 1px solid transparent; font-size: 15px; font-weight: 600; cursor: pointer; font-family: var(--font); transition: all .15s; width: 100%; }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { background: #4338ca; }
-    .copy-field { display: flex; gap: 8px; align-items: stretch; }
+    body {
+      background: radial-gradient(ellipse at 20% 50%, #0f172a 0%, #020617 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      padding: 20px;
+    }
+    .glass {
+      background: rgba(255,255,255,0.03);
+      backdrop-filter: blur(32px) saturate(1.4);
+      -webkit-backdrop-filter: blur(32px) saturate(1.4);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 32px;
+      box-shadow: 0 40px 96px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+    .glass-input {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 14px 18px;
+      color: #f1f5f9;
+      width: 100%;
+      transition: all 0.25s ease;
+      font-size: 14px;
+      outline: none;
+      font-weight: 400;
+      letter-spacing: 0.01em;
+    }
+    .glass-input:focus {
+      border-color: rgba(139, 92, 246, 0.5);
+      background: rgba(255,255,255,0.06);
+      box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.08);
+    }
+    .glass-input::placeholder { color: rgba(255,255,255,0.2); }
+    .glass-input[readonly] {
+      background: rgba(255,255,255,0.02);
+      color: rgba(255,255,255,0.3);
+      cursor: default;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #7c3aed, #4f46e5);
+      border: none;
+      border-radius: 14px;
+      padding: 14px 28px;
+      font-weight: 600;
+      font-size: 15px;
+      color: white;
+      width: 100%;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      letter-spacing: 0.3px;
+      box-shadow: 0 4px 20px rgba(124, 58, 237, 0.25);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(124, 58, 237, 0.4);
+    }
+    .btn-copy {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 14px 18px;
+      color: rgba(255,255,255,0.3);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .btn-copy:hover {
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.6);
+    }
+    .step-badge {
+      display: inline-block;
+      background: rgba(52, 211, 153, 0.08);
+      color: #6ee7b7;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 6px 18px;
+      border-radius: 999px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      border: 1px solid rgba(52, 211, 153, 0.08);
+    }
+    .text-muted { color: rgba(255,255,255,0.35); }
+    .text-light { color: #f1f5f9; }
+    .alert-error {
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.12);
+      border-radius: 14px;
+      padding: 14px 18px;
+      color: #fca5a5;
+      font-size: 13px;
+      margin-bottom: 24px;
+    }
+    .label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.35);
+      margin-bottom: 6px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .label .req { color: #f87171; }
+    .divider {
+      border: none;
+      border-top: 1px solid rgba(255,255,255,0.04);
+      margin: 24px 0 22px;
+    }
+    .copy-field {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
     .copy-field input { flex: 1; min-width: 0; }
-    .copy-field .btn-copy { flex: 0 0 auto; padding: 10px 16px; border-radius: 10px; border: 1.5px solid var(--border); background: #f4f6fa; color: var(--mute); font-size: 13px; font-weight: 500; cursor: pointer; font-family: var(--font); transition: all .15s; }
-    .copy-field .btn-copy:hover { background: #e8ecf5; color: var(--text); }
-    .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0 18px; }
-    .footer { text-align: center; margin-top: 18px; font-size: 13px; color: var(--mute); }
+    .copy-field .btn-copy { flex: 0 0 auto; }
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.2);
+      margin-bottom: 14px;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+    a { color: #a78bfa; text-decoration: none; transition: color 0.2s; }
+    a:hover { color: #c4b5fd; }
   </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="card">
-    <div class="icon">⚙️</div>
-    <h1>应用配置</h1>
-    <p class="sub">第二步 · 配置 OAuth 登录、支付和管理员</p>
-    <div style="text-align:center;"><span class="badge-step">✅ 数据库已连接</span></div>
-    {% if error %}<div class="alert-danger">{{ error }}</div>{% endif %}
+<div class="w-full max-w-2xl px-4">
+  <div class="glass p-8 md:p-10">
+    <div class="text-center mb-8">
+      <div class="text-5xl mb-3">⚙️</div>
+      <h1 class="text-3xl font-bold text-light tracking-tight">应用配置</h1>
+      <p class="text-muted text-sm mt-2">第二步 · 配置 OAuth、支付和管理员</p>
+      <div class="mt-4"><span class="step-badge">✅ 数据库已连接</span></div>
+    </div>
+
+    {% if error %}
+    <div class="alert-error">{{ error }}</div>
+    {% endif %}
+
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div style="margin-bottom:6px; font-weight:600; color:var(--mute); font-size:13px;">🏪 商店信息</div>
-      <div class="form-group"><label class="form-label">商店名称</label><input type="text" name="site_name" value="{{ defaults.site_name }}" placeholder="NodeLoc Store"></div>
-      <div class="form-group"><label class="form-label">商店标语（可选）</label><input type="text" name="site_slogan" value="{{ defaults.site_slogan }}" placeholder="卡密商店 · Powered by NodeLoc"></div>
+
+      <div class="section-title">🏪 商店信息</div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="label">商店名称</label>
+          <input type="text" name="site_name" class="glass-input" value="{{ defaults.site_name }}" placeholder="NodeLoc Store">
+        </div>
+        <div>
+          <label class="label">商店标语</label>
+          <input type="text" name="site_slogan" class="glass-input" value="{{ defaults.site_slogan }}" placeholder="卡密商店 · Powered by NodeLoc">
+        </div>
+      </div>
+
       <hr class="divider" />
-      <div style="margin-bottom:6px; font-weight:600; color:var(--mute); font-size:13px;">🔐 NodeLoc OAuth</div>
-      <div class="help" style="margin-bottom:12px;">在 <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank">NodeLoc</a> 创建 OAuth 应用，把下面的 <strong>回调地址</strong> 填到「回调地址」一栏。</div>
-      <div class="form-group"><label class="form-label">OAuth URL</label><input type="text" name="oauth_url" value="{{ defaults.oauth_url }}" required></div>
-      <div class="form-group"><label class="form-label">Client ID <span class="req">*</span></label><input type="text" name="oauth_client_id" value="{{ defaults.oauth_client_id }}" required></div>
-      <div class="form-group"><label class="form-label">Client Secret <span class="req">*</span></label><input type="password" name="oauth_client_secret" value="{{ defaults.oauth_client_secret }}" required></div>
-      <div class="form-group"><label class="form-label">回调地址（自动生成，只读）</label><div class="copy-field"><input type="text" id="oauthRedirectUri" readonly><button type="button" class="btn-copy" data-copy="oauthRedirectUri">📋 复制</button></div><div class="help">必须 HTTPS。如果显示 http，请通过反向代理提供 SSL 证书。</div></div>
+
+      <div class="section-title">🔐 NodeLoc OAuth</div>
+      <div class="text-muted text-xs mb-4 leading-relaxed opacity-60">
+        在 <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank">NodeLoc</a> 创建 OAuth 应用，
+        把下面的 <strong>回调地址</strong> 填到「回调地址」一栏。
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="label">OAuth URL</label>
+          <input type="text" name="oauth_url" class="glass-input" value="{{ defaults.oauth_url }}" required>
+        </div>
+        <div>
+          <label class="label">Client ID <span class="req">*</span></label>
+          <input type="text" name="oauth_client_id" class="glass-input" value="{{ defaults.oauth_client_id }}" required>
+        </div>
+      </div>
+      <div class="mt-4">
+        <label class="label">Client Secret <span class="req">*</span></label>
+        <input type="password" name="oauth_client_secret" class="glass-input" value="{{ defaults.oauth_client_secret }}" required>
+      </div>
+      <div class="mt-4">
+        <label class="label">回调地址（自动生成）</label>
+        <div class="copy-field">
+          <input type="text" id="oauthRedirectUri" class="glass-input" readonly>
+          <button type="button" class="btn-copy" data-copy="oauthRedirectUri">📋 复制</button>
+        </div>
+        <div class="text-muted text-xs mt-1 opacity-40">必须 HTTPS。如果显示 http，请通过反向代理提供 SSL 证书。</div>
+      </div>
+
       <hr class="divider" />
-      <div style="margin-bottom:6px; font-weight:600; color:var(--mute); font-size:13px;">💳 NodeLoc 支付</div>
-      <div class="help" style="margin-bottom:12px;">在 <a href="https://www.nodeloc.com/payment/applications" target="_blank">NodeLoc</a> 创建支付应用，把下面的 <strong>回调地址</strong> 填到「通知 URL」一栏。</div>
-      <div class="form-group"><label class="form-label">回调地址（自动生成，只读）</label><div class="copy-field"><input type="text" id="paymentCallback" readonly><button type="button" class="btn-copy" data-copy="paymentCallback">📋 复制</button></div></div>
-      <div class="form-group"><label class="form-label">Payment ID <span class="req">*</span></label><input type="text" name="payment_id" value="{{ defaults.payment_id }}" required></div>
-      <div class="form-group"><label class="form-label">Secret Key <span class="req">*</span></label><input type="password" name="payment_secret" value="{{ defaults.payment_secret }}" required></div>
+
+      <div class="section-title">💳 NodeLoc 支付</div>
+      <div class="text-muted text-xs mb-4 leading-relaxed opacity-60">
+        在 <a href="https://www.nodeloc.com/payment/applications" target="_blank">NodeLoc</a> 创建支付应用，
+        把下面的 <strong>回调地址</strong> 填到「通知 URL」一栏。
+      </div>
+      <div class="mt-4">
+        <label class="label">回调地址（自动生成）</label>
+        <div class="copy-field">
+          <input type="text" id="paymentCallback" class="glass-input" readonly>
+          <button type="button" class="btn-copy" data-copy="paymentCallback">📋 复制</button>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        <div>
+          <label class="label">Payment ID <span class="req">*</span></label>
+          <input type="text" name="payment_id" class="glass-input" value="{{ defaults.payment_id }}" required>
+        </div>
+        <div>
+          <label class="label">Secret Key <span class="req">*</span></label>
+          <input type="password" name="payment_secret" class="glass-input" value="{{ defaults.payment_secret }}" required>
+        </div>
+      </div>
+
       <hr class="divider" />
-      <div style="margin-bottom:6px; font-weight:600; color:var(--mute); font-size:13px;">👤 管理员账号</div>
-      <div class="form-row"><div class="form-group"><label class="form-label">用户名 <span class="req">*</span></label><input type="text" name="admin_user" value="{{ defaults.admin_user }}" required></div><div class="form-group"><label class="form-label">邮箱（可选）</label><input type="email" name="admin_email" value="{{ defaults.admin_email }}"></div></div>
-      <div class="form-group"><label class="form-label">密码 <span class="req">*</span>（至少 8 位）</label><input type="password" name="admin_pass" value="{{ defaults.admin_pass }}" required minlength="8"></div>
+
+      <div class="section-title">👤 管理员账号</div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="label">用户名 <span class="req">*</span></label>
+          <input type="text" name="admin_user" class="glass-input" value="{{ defaults.admin_user }}" required>
+        </div>
+        <div>
+          <label class="label">邮箱</label>
+          <input type="email" name="admin_email" class="glass-input" value="{{ defaults.admin_email }}">
+        </div>
+      </div>
+      <div class="mt-4">
+        <label class="label">密码 <span class="req">*</span>（至少 8 位）</label>
+        <input type="password" name="admin_pass" class="glass-input" value="{{ defaults.admin_pass }}" required minlength="8">
+      </div>
+
       <hr class="divider" />
-      <button type="submit" class="btn btn-primary">✔ 完成安装</button>
+
+      <button type="submit" class="btn-primary">✔ 完成安装</button>
     </form>
+
+    <div class="text-center text-muted text-xs mt-8 opacity-40 tracking-wider">
+      NodeLoc Store · 安装向导
+    </div>
   </div>
-  <div class="footer">NodeLoc Store · 安装向导</div>
 </div>
+
 <script>
 (function () {
   var origin = window.location.origin;
@@ -79,6 +259,7 @@
   if (ri) ri.value = origin + '/auth/oauth/callback';
   var pc = document.getElementById('paymentCallback');
   if (pc) pc.value = origin + '/payment/callback';
+
   document.querySelectorAll('[data-copy]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var t = document.getElementById(btn.dataset.copy);
