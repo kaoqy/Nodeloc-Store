@@ -1,225 +1,381 @@
-"""install blueprint — runs once on first访问 to set DB + admin."""
 from __future__ import annotations
 
 from configparser import RawConfigParser
+from sqlalchemy import inspect, text
 
-from flask import (Blueprint, current_app, redirect, render_template, request,
-                   url_for)
+from flask import Blueprint, current_app, redirect, render_template, request, url_for
 from flask_login import current_user
 
-from ..extensions import db, rebind_database
-from ..models import User
+from ..extensions import db
+from ..models import AppSetting, User
+from ..config import INSTANCE_DIR, CONFIG_PATH, apply_to
 from ..utils import log_action
-from ..config import INSTANCE_DIR, CONFIG_PATH, apply_to, is_installed
-
-bp = Blueprint("install", __name__)
 
 
-# Default values used to render the wizard.  On GET they fall back to these
-# if no config.ini exists.  On POST error, they're filled from the user's
-# submitted values so they can fix + retry without retyping everything.
-_DEFAULT_DEFAULTS = {
-    "db_host": "localhost", "db_port": "3306", "db_name": "nodeloc_store",
-    "db_user": "", "db_pass": "",
-    "site_name": "NodeLoc Store", "site_slogan": "",
-    "oauth_url": "https://www.nodeloc.com", "oauth_client_id": "",
-    "oauth_client_secret": "",
-    "payment_id": "", "payment_secret": "",
-    "admin_user": "", "admin_email": "", "admin_pass": "",
-}
+bp = Blueprint("install", __name__, url_prefix="/install")
 
 
-def _form_defaults() -> dict:
-    """Read the current form values from the request, falling back to the
-    most recent partial-install state in instance/config.ini, then to the
-    hardcoded defaults."""
-    out = dict(_DEFAULT_DEFAULTS)
-    if CONFIG_PATH.exists():
-        cp = RawConfigParser()
-        cp.read(CONFIG_PATH, encoding="utf-8")
-        def _g(sec, key, fallback=""):
-            return cp.get(sec, key) if cp.has_option(sec, key) else fallback
-        out["db_host"]   = _g("database", "db_host",   out["db_host"])
-        out["db_port"]   = _g("database", "db_port",   out["db_port"])
-        out["db_name"]   = _g("database", "db_name",   out["db_name"])
-        out["db_user"]   = _g("database", "db_user",   out["db_user"])
-        out["db_pass"]   = _g("database", "db_pass",   out["db_pass"])
-        out["site_name"]     = _g("app",    "site_name",     out["site_name"])
-        out["site_slogan"]   = _g("app",    "site_slogan",   out["site_slogan"])
-        out["oauth_url"]     = _g("oauth",  "url",           out["oauth_url"])
-        out["oauth_client_id"]       = _g("oauth", "client_id",       out["oauth_client_id"])
-        out["oauth_client_secret"]   = _g("oauth", "client_secret",   out["oauth_client_secret"])
-        out["payment_id"]     = _g("payment", "id",     out["payment_id"])
-        out["payment_secret"] = _g("payment", "secret", out["payment_secret"])
-    return out
+# --------------------------------------------------------------------------- #
+# 第一阶段：数据库连接
+# --------------------------------------------------------------------------- #
+@bp.route("/db", methods=["GET", "POST"])
+def db_step():
+    """Phase 1: connect to database and create tables."""
+    # 如果已经完成安装，直接跳转商店
+    if AppSetting.is_installed():
+        return redirect(url_for("store.index"))
 
+    # 如果数据库已经配置好（表已存在），跳转到第二阶段
+    if AppSetting.is_db_configured():
+        # 检查表是否存在
+        inspector = inspect(db.engine)
+        if "app_settings" in inspector.get_table_names():
+            return redirect(url_for("install.setup_step"))
 
-@bp.route("/", methods=["GET", "POST"])
-def index():
-    # ===== POST =============================================================
+    error = None
+    defaults = _load_db_defaults()
+
     if request.method == "POST":
-        current_app.logger.info(
-            "install: POST received, form keys=%s", sorted(request.form.keys())
-        )
-        # --- 1) DB config ---
         db_host = request.form.get("db_host", "").strip()
         db_port = request.form.get("db_port", "3306").strip()
         db_user = request.form.get("db_user", "").strip()
         db_pass = request.form.get("db_pass", "")
         db_name = request.form.get("db_name", "").strip()
 
-        # --- 2) Site info ---
-        site_name = request.form.get("site_name", "NodeLoc Store").strip()
-        site_slogan = request.form.get("site_slogan", "").strip()
+        # 基本验证
+        missing = []
+        if not db_host:
+            missing.append("数据库主机")
+        if not db_port:
+            missing.append("端口")
+        if not db_user:
+            missing.append("用户名")
+        if not db_name:
+            missing.append("数据库名")
+        if missing:
+            error = f"请填写: {', '.join(missing)}"
+            return render_template(
+                "install/db.html",
+                error=error,
+                defaults={
+                    "db_host": db_host,
+                    "db_port": db_port,
+                    "db_user": db_user,
+                    "db_pass": db_pass,
+                    "db_name": db_name,
+                },
+            )
 
-        # --- 3) OAuth ---
+        # 尝试连接数据库并建表
+        try:
+            # 写入临时 config.ini（仅 DB 部分）
+            _write_db_config(db_host, db_port, db_user, db_pass, db_name)
+
+            # 刷新 app config
+            apply_to(current_app)
+
+            # 重新绑定数据库引擎
+            from ..extensions import rebind_database
+            rebind_database(current_app._get_current_object())
+
+            # 检查数据库连接
+            db.session.execute(text("SELECT 1"))
+
+            # 创建所有表（如果不存在）
+            db.create_all()
+
+            # 在 app_settings 中记录安装进度
+            AppSetting.set("install_step", "db_done")
+
+            current_app.logger.info(
+                "install: phase 1 complete, connected to %s@%s:%s/%s",
+                db_user, db_host, db_port, db_name
+            )
+
+            # 跳转到第二阶段
+            return redirect(url_for("install.setup_step"))
+
+        except Exception as e:
+            current_app.logger.exception("install: phase 1 failed")
+            error = f"数据库连接失败: {e}"
+            return render_template(
+                "install/db.html",
+                error=error,
+                defaults={
+                    "db_host": db_host,
+                    "db_port": db_port,
+                    "db_user": db_user,
+                    "db_pass": db_pass,
+                    "db_name": db_name,
+                },
+            )
+
+    # GET 请求
+    return render_template(
+        "install/db.html",
+        error=None,
+        defaults=defaults,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 第二阶段：OAuth + Payment + 管理员
+# --------------------------------------------------------------------------- #
+@bp.route("/setup", methods=["GET", "POST"])
+def setup_step():
+    """Phase 2: configure OAuth, Payment, and create admin user."""
+    # 如果已经完成安装，跳转商店
+    if AppSetting.is_installed():
+        return redirect(url_for("store.index"))
+
+    # 检查是否已完成第一阶段
+    if not AppSetting.is_db_configured():
+        return redirect(url_for("install.db_step"))
+
+    # 确保数据库表存在
+    inspector = inspect(db.engine)
+    if "app_settings" not in inspector.get_table_names():
+        return redirect(url_for("install.db_step"))
+
+    error = None
+    defaults = _load_setup_defaults()
+
+    if request.method == "POST":
+        # --- OAuth ---
         oauth_url = request.form.get("oauth_url", "https://www.nodeloc.com").strip().rstrip("/")
         oauth_client_id = request.form.get("oauth_client_id", "").strip()
         oauth_client_secret = request.form.get("oauth_client_secret", "")
-        oauth_scopes = "openid profile email"
-        user_redirect = request.form.get("oauth_redirect_uri", "").strip()
 
-        if not user_redirect:
-            oauth_redirect_uri = url_for("auth.oauth_callback", _external=True, _scheme="https")
-        else:
-            oauth_redirect_uri = user_redirect
-
-        # --- 4) Payment ---
+        # --- Payment ---
         payment_id = request.form.get("payment_id", "").strip()
         payment_secret = request.form.get("payment_secret", "")
 
-        # --- 5) Admin ---
+        # --- Admin ---
         admin_user = request.form.get("admin_user", "").strip()
         admin_email = request.form.get("admin_email", "").strip() or None
         admin_pass = request.form.get("admin_pass", "")
 
-        # Build submitted defaults (for re-render on error)
-        submitted = dict(_DEFAULT_DEFAULTS)
-        submitted.update({
-            "db_host": db_host, "db_port": db_port, "db_name": db_name,
-            "db_user": db_user, "db_pass": db_pass,
-            "site_name": site_name, "site_slogan": site_slogan,
-            "oauth_url": oauth_url, "oauth_client_id": oauth_client_id,
-            "oauth_client_secret": oauth_client_secret,
-            "payment_id": payment_id, "payment_secret": payment_secret,
-            "admin_user": admin_user, "admin_email": admin_email or "",
-            "admin_pass": admin_pass,
-        })
+        # --- Site ---
+        site_name = request.form.get("site_name", "NodeLoc Store").strip()
+        site_slogan = request.form.get("site_slogan", "").strip()
 
-        # Validate required fields
-        required = {
-            "db_host": db_host, "db_port": db_port, "db_user": db_user,
-            "db_name": db_name, "admin_user": admin_user, "admin_pass": admin_pass,
-            "oauth_client_id": oauth_client_id, "oauth_client_secret": oauth_client_secret,
-            "oauth_redirect_uri": oauth_redirect_uri,
-            "payment_id": payment_id, "payment_secret": payment_secret,
-        }
-        missing = [k for k, v in required.items() if not v]
+        # 验证必填项
+        missing = []
+        if not oauth_client_id:
+            missing.append("OAuth Client ID")
+        if not oauth_client_secret:
+            missing.append("OAuth Client Secret")
+        if not payment_id:
+            missing.append("Payment ID")
+        if not payment_secret:
+            missing.append("Payment Secret")
+        if not admin_user:
+            missing.append("管理员用户名")
+        if not admin_pass:
+            missing.append("管理员密码")
         if missing:
+            error = f"请填写: {', '.join(missing)}"
             return render_template(
-                "install/index.html",
-                error=f"以下字段必填: {', '.join(missing)}",
-                defaults=submitted,
-                partial_install=CONFIG_PATH.exists() and not is_installed(),
+                "install/setup.html",
+                error=error,
+                defaults={
+                    "site_name": site_name,
+                    "site_slogan": site_slogan,
+                    "oauth_url": oauth_url,
+                    "oauth_client_id": oauth_client_id,
+                    "oauth_client_secret": oauth_client_secret,
+                    "payment_id": payment_id,
+                    "payment_secret": payment_secret,
+                    "admin_user": admin_user,
+                    "admin_email": admin_email or "",
+                    "admin_pass": admin_pass,
+                },
             )
+
         if len(admin_pass) < 8:
+            error = "管理员密码至少 8 位"
             return render_template(
-                "install/index.html",
-                error="管理员密码至少 8 位",
-                defaults=submitted,
-                partial_install=CONFIG_PATH.exists() and not is_installed(),
+                "install/setup.html",
+                error=error,
+                defaults={
+                    "site_name": site_name,
+                    "site_slogan": site_slogan,
+                    "oauth_url": oauth_url,
+                    "oauth_client_id": oauth_client_id,
+                    "oauth_client_secret": oauth_client_secret,
+                    "payment_id": payment_id,
+                    "payment_secret": payment_secret,
+                    "admin_user": admin_user,
+                    "admin_email": admin_email or "",
+                    "admin_pass": admin_pass,
+                },
             )
 
-        # HTTPS check (required for OAuth callbacks).
-        # Behind a TLS-terminating proxy, Flask may see http:// internally;
-        # auto-upgrade to https:// instead of failing.
-        if not oauth_redirect_uri.startswith("https://"):
-            if oauth_redirect_uri.startswith("http://"):
-                oauth_redirect_uri = oauth_redirect_uri.replace("http://", "https://", 1)
-            else:
-                current_app.logger.warning(
-                    "install: HTTPS check failed, oauth_redirect_uri=%.200s", oauth_redirect_uri
-                )
-                return render_template(
-                    "install/index.html",
-                    error="Redirect URI 必须使用 HTTPS。请通过 OpenResty / Caddy / Nginx 反代并配置 SSL 证书。",
-                    defaults=submitted,
-                    partial_install=CONFIG_PATH.exists() and not is_installed(),
-                )
+        # HTTPS 检查：redirect_uri 必须 HTTPS
+        redirect_uri = url_for("auth.oauth_callback", _external=True, _scheme="https")
+        if not redirect_uri.startswith("https://"):
+            error = "请通过 HTTPS 访问安装页面，或配置反向代理提供 SSL 证书"
+            return render_template(
+                "install/setup.html",
+                error=error,
+                defaults={
+                    "site_name": site_name,
+                    "site_slogan": site_slogan,
+                    "oauth_url": oauth_url,
+                    "oauth_client_id": oauth_client_id,
+                    "oauth_client_secret": oauth_client_secret,
+                    "payment_id": payment_id,
+                    "payment_secret": payment_secret,
+                    "admin_user": admin_user,
+                    "admin_email": admin_email or "",
+                    "admin_pass": admin_pass,
+                },
+            )
 
-        # Write config.ini
+        # 写入 config.ini（完整配置，包含 OAuth/Payment）
         try:
-            _write_config(
-                db_host=db_host, db_port=db_port, db_user=db_user,
-                db_pass=db_pass, db_name=db_name,
-                site_name=site_name, site_slogan=site_slogan,
-                oauth_url=oauth_url, oauth_client_id=oauth_client_id,
+            _write_full_config(
+                site_name=site_name,
+                site_slogan=site_slogan,
+                oauth_url=oauth_url,
+                oauth_client_id=oauth_client_id,
                 oauth_client_secret=oauth_client_secret,
-                oauth_redirect_uri=oauth_redirect_uri, oauth_scopes=oauth_scopes,
-                payment_id=payment_id, payment_secret=payment_secret,
+                oauth_redirect_uri=redirect_uri,
+                oauth_scopes="openid profile email",
+                payment_id=payment_id,
+                payment_secret=payment_secret,
             )
         except Exception as e:
-            current_app.logger.exception("install: _write_config failed")
+            current_app.logger.exception("install: phase 2 write config failed")
+            error = f"配置写入失败: {e}"
             return render_template(
-                "install/index.html",
-                error=f"配置写入失败: {e}",
-                defaults=submitted,
-                partial_install=False,
+                "install/setup.html",
+                error=error,
+                defaults={
+                    "site_name": site_name,
+                    "site_slogan": site_slogan,
+                    "oauth_url": oauth_url,
+                    "oauth_client_id": oauth_client_id,
+                    "oauth_client_secret": oauth_client_secret,
+                    "payment_id": payment_id,
+                    "payment_secret": payment_secret,
+                    "admin_user": admin_user,
+                    "admin_email": admin_email or "",
+                    "admin_pass": admin_pass,
+                },
             )
 
-        # Refresh the app config and replace Flask-SQLAlchemy's cached engine.
-        # Merely changing SQLALCHEMY_DATABASE_URI or disposing the old engine
-        # does not make Flask-SQLAlchemy use the newly configured database.
+        # 刷新 app config（让 OAuth/Payment 配置生效）
         apply_to(current_app)
+
+        # 创建管理员用户
         try:
-            engine = rebind_database(current_app._get_current_object())
-            current_app.logger.info(
-                "install: database engine rebound to %s",
-                engine.url.render_as_string(hide_password=True),
-            )
+            existing = User.query.filter_by(username=admin_user).first()
+            if existing:
+                # 如果已存在但未设置密码，更新密码
+                if not existing.has_password():
+                    existing.set_password(admin_pass)
+                    db.session.commit()
+                    current_app.logger.info("install: updated existing admin %s password", admin_user)
+            else:
+                u = User(username=admin_user, email=admin_email, is_admin=True)
+                u.set_password(admin_pass)
+                db.session.add(u)
+                db.session.commit()
+                current_app.logger.info("install: created admin user %s", admin_user)
+
+            # 标记安装完成
+            AppSetting.set("install_step", "complete")
+
+            # 记录审计日志
+            log_action("install_complete", target=admin_user, detail=f"管理员 {admin_user} 完成安装")
+
+            current_app.logger.info("install: phase 2 complete, store ready")
+
+            # 跳转到商店首页
+            return redirect(url_for("store.index"))
+
         except Exception as e:
-            current_app.logger.exception("install: database engine rebind failed")
+            current_app.logger.exception("install: phase 2 admin creation failed")
+            error = f"创建管理员失败: {e}"
             return render_template(
-                "install/index.html",
-                error=f"数据库连接初始化失败: {e}",
-                defaults=submitted,
-                partial_install=True,
+                "install/setup.html",
+                error=error,
+                defaults={
+                    "site_name": site_name,
+                    "site_slogan": site_slogan,
+                    "oauth_url": oauth_url,
+                    "oauth_client_id": oauth_client_id,
+                    "oauth_client_secret": oauth_client_secret,
+                    "payment_id": payment_id,
+                    "payment_secret": payment_secret,
+                    "admin_user": admin_user,
+                    "admin_email": admin_email or "",
+                    "admin_pass": admin_pass,
+                },
             )
 
-        # Build tables
-        try:
-            db.create_all()
-        except Exception as e:
-            current_app.logger.exception("install: db.create_all failed")
-            return render_template(
-                "install/index.html",
-                error=f"数据库连接失败: {e}",
-                defaults=submitted,
-                partial_install=True,
-            )
-
-        # Create admin user
-        if not User.query.filter_by(username=admin_user).first():
-            u = User(username=admin_user, email=admin_email, is_admin=True)
-            u.set_password(admin_pass)
-            db.session.add(u)
-            db.session.commit()
-
-        _mark_installed()
-        current_app.logger.info("Install completed: admin=%s", admin_user)
-        return redirect(url_for("store.index"))
-
-    # ===== GET ==============================================================
-    partial = CONFIG_PATH.exists() and not is_installed()
+    # GET 请求
     return render_template(
-        "install/index.html",
-        partial_install=partial,
-        defaults=_form_defaults(),
+        "install/setup.html",
+        error=None,
+        defaults=defaults,
     )
 
 
-# ── helpers ──────────────────────────────────────────────────────────────
-def _write_config(**kw):
+# --------------------------------------------------------------------------- #
+# 辅助函数
+# --------------------------------------------------------------------------- #
+def _load_db_defaults() -> dict:
+    """从 config.ini 加载 DB 配置默认值（如果存在）"""
+    defaults = {
+        "db_host": "localhost",
+        "db_port": "3306",
+        "db_user": "",
+        "db_pass": "",
+        "db_name": "nodeloc_store",
+    }
+    if CONFIG_PATH.exists():
+        cp = RawConfigParser()
+        cp.read(CONFIG_PATH, encoding="utf-8")
+        if cp.has_section("database"):
+            for k in defaults.keys():
+                if cp.has_option("database", k):
+                    defaults[k] = cp.get("database", k)
+    return defaults
+
+
+def _load_setup_defaults() -> dict:
+    """从 config.ini 加载配置默认值（如果存在）"""
+    defaults = {
+        "site_name": "NodeLoc Store",
+        "site_slogan": "",
+        "oauth_url": "https://www.nodeloc.com",
+        "oauth_client_id": "",
+        "oauth_client_secret": "",
+        "payment_id": "",
+        "payment_secret": "",
+        "admin_user": "",
+        "admin_email": "",
+        "admin_pass": "",
+    }
+    if CONFIG_PATH.exists():
+        cp = RawConfigParser()
+        cp.read(CONFIG_PATH, encoding="utf-8")
+        for section, mapping in [
+            ("app", {"site_name": "site_name", "site_slogan": "site_slogan"}),
+            ("oauth", {"url": "oauth_url", "client_id": "oauth_client_id"}),
+            ("payment", {"id": "payment_id", "secret": "***"}),
+        ]:
+            if cp.has_section(section):
+                for ini_key, default_key in mapping.items():
+                    if cp.has_option(section, ini_key):
+                        defaults[default_key] = cp.get(section, ini_key)
+    return defaults
+
+
+def _write_db_config(host: str, port: str, user: str, pwd: str, name: str) -> None:
+    """写入数据库配置到 config.ini（只写 DB 部分，保留其他已有配置）"""
     cfg = RawConfigParser()
     if CONFIG_PATH.exists():
         cfg.read(CONFIG_PATH, encoding="utf-8")
@@ -228,39 +384,57 @@ def _write_config(**kw):
         if not cfg.has_section(section):
             cfg.add_section(section)
 
-    cfg.set("database", "db_host", kw["db_host"])
-    cfg.set("database", "db_port", kw["db_port"])
-    cfg.set("database", "db_user", kw["db_user"])
-    cfg.set("database", "db_pass", kw["db_pass"])
-    cfg.set("database", "db_name", kw["db_name"])
+    cfg.set("database", "db_host", host)
+    cfg.set("database", "db_port", port)
+    cfg.set("database", "db_user", user)
+    cfg.set("database", "db_pass", pwd)
+    cfg.set("database", "db_name", name)
 
-    cfg.set("app", "site_name", kw["site_name"])
-    cfg.set("app", "site_slogan", kw["site_slogan"])
-    cfg.set("app", "secret_key", _gen_secret_key())
-    cfg.set("app", "installed", "0")
-
-    cfg.set("oauth", "url", kw["oauth_url"])
-    cfg.set("oauth", "client_id", kw["oauth_client_id"])
-    cfg.set("oauth", "client_secret", kw["oauth_client_secret"])
-    cfg.set("oauth", "redirect_uri", kw["oauth_redirect_uri"])
-    cfg.set("oauth", "scopes", kw["oauth_scopes"])
-
-    cfg.set("payment", "id", kw["payment_id"])
-    cfg.set("payment", "secret", kw["payment_secret"])
+    # 如果 app.installed 还没写，初始化为 0
+    if cfg.has_section("app") and not cfg.has_option("app", "installed"):
+        cfg.set("app", "installed", "0")
+    if not cfg.has_section("app"):
+        cfg.add_section("app")
+        cfg.set("app", "installed", "0")
 
     INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         cfg.write(f)
 
 
-def _mark_installed():
+def _write_full_config(
+    site_name: str,
+    site_slogan: str,
+    oauth_url: str,
+    oauth_client_id: str,
+    oauth_client_secret: str,
+    oauth_redirect_uri: str,
+    oauth_scopes: str,
+    payment_id: str,
+    payment_secret: str,
+) -> None:
+    """写入完整配置到 config.ini（包含 OAuth/Payment/App）"""
     cfg = RawConfigParser()
-    cfg.read(CONFIG_PATH, encoding="utf-8")
-    cfg.set("app", "installed", "1")
+    if CONFIG_PATH.exists():
+        cfg.read(CONFIG_PATH, encoding="utf-8")
+
+    for section in ["app", "oauth", "payment", "database"]:
+        if not cfg.has_section(section):
+            cfg.add_section(section)
+
+    cfg.set("app", "site_name", site_name)
+    cfg.set("app", "site_slogan", site_slogan)
+    cfg.set("app", "installed", "0")  # 由数据库标志控制
+
+    cfg.set("oauth", "url", oauth_url)
+    cfg.set("oauth", "client_id", oauth_client_id)
+    cfg.set("oauth", "client_secret", oauth_client_secret)
+    cfg.set("oauth", "redirect_uri", oauth_redirect_uri)
+    cfg.set("oauth", "scopes", oauth_scopes)
+
+    cfg.set("payment", "id", payment_id)
+    cfg.set("payment", "secret", payment_secret)
+
+    INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         cfg.write(f)
-
-
-def _gen_secret_key() -> str:
-    import secrets
-    return secrets.token_hex(32)

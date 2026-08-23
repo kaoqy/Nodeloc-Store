@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>安装 · NodeLoc Store</title>
+  <style>
+    :root { --bg1: #eef6ff; --bg2: #f6f9fc; --card: #ffffff; --border: #e3e9f2; --text: #1b2434; --mute: #5b6b81; --accent: #4f46e5; --accent-soft: #eef2ff; --accent-line: #c7d2fe; --danger: #d93025; --danger-soft: #fdecea; --radius: 16px; --shadow: 0 10px 34px rgba(24,39,75,.09); --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body { font-family: var(--font); font-size: 14.5px; line-height: 1.6; color: var(--text); min-height: 100vh; background: radial-gradient(circle at 8% 6%, rgba(79,70,229,.07), transparent 42%), radial-gradient(circle at 92% 92%, rgba(22,157,88,.06), transparent 42%), linear-gradient(165deg, var(--bg1), var(--bg2)); display: flex; align-items: center; justify-content: center; }
+    .wrap { max-width: 560px; width: 100%; padding: 24px 20px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 34px; }
+    .card .icon { font-size: 32px; text-align: center; margin-bottom: 8px; }
+    .card h1 { font-size: 22px; font-weight: 700; text-align: center; margin: 0 0 4px; }
+    .card .sub { text-align: center; color: var(--mute); font-size: 14px; margin: 0 0 24px; }
+    .form-group { margin-bottom: 16px; }
+    .form-label { display: block; font-size: 13px; font-weight: 600; color: var(--mute); margin-bottom: 5px; }
+    .form-label .req { color: var(--danger); }
+    input[type=text], input[type=password] { width: 100%; padding: 10px 14px; background: #fafcff; color: var(--text); border: 1.5px solid var(--border); border-radius: 10px; font-size: 14px; font-family: var(--font); transition: border-color .15s, box-shadow .15s, background .15s; }
+    input:focus { outline: none; border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 480px) { .form-row { grid-template-columns: 1fr; } }
+    .help { font-size: 12.5px; color: var(--mute); margin-top: 5px; }
+    .alert-danger { background: var(--danger-soft); color: #b91c1c; border: 1px solid #f3c1c1; border-radius: 11px; padding: 12px 16px; font-size: 13.5px; margin-bottom: 18px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 12px 28px; border-radius: 10px; border: 1px solid transparent; font-size: 15px; font-weight: 600; cursor: pointer; font-family: var(--font); transition: all .15s; width: 100%; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #4338ca; }
+    .footer { text-align: center; margin-top: 18px; font-size: 13px; color: var(--mute); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="icon">🗄️</div>
+    <h1>连接数据库</h1>
+    <p class="sub">第一步 · 配置 MariaDB / MySQL</p>
+    {% if error %}<div class="alert-danger">{{ error }}</div>{% endif %}
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">主机 <span class="req">*</span></label><input type="text" name="db_host" value="{{ defaults.db_host }}" required placeholder="localhost"></div>
+        <div class="form-group"><label class="form-label">端口 <span class="req">*</span></label><input type="text" name="db_port" value="{{ defaults.db_port }}" required placeholder="3306"></div>
+      </div>
+      <div class="form-group"><label class="form-label">数据库名 <span class="req">*</span></label><input type="text" name="db_name" value="{{ defaults.db_name }}" required placeholder="nodeloc_store"></div>
+      <div class="form-group"><label class="form-label">用户名 <span class="req">*</span></label><input type="text" name="db_user" value="{{ defaults.db_user }}" required placeholder="db_user"></div>
+      <div class="form-group"><label class="form-label">密码</label><input type="password" name="db_pass" value="{{ defaults.db_pass }}" placeholder="••••••••"></div>
+      <div class="help" style="margin-bottom:18px;">💡 需要预先创建好数据库。<br>连接成功后会自动建表，然后进入第二步配置。</div>
+      <button type="submit" class="btn btn-primary">验证连接并继续 →</button>
+    </form>
+  </div>
+  <div class="footer">NodeLoc Store · 安装向导</div>
+</div>
+</body>
+</html>
