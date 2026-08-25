@@ -94,6 +94,22 @@ sudo mysql -e "
 
 ### Step 3 · 启动商店（Docker）
 
+推荐直接使用 Docker Hub 已发布的多架构镜像一键部署：
+
+```bash
+docker run -d --name nodeloc-store --restart unless-stopped -p 5000:5000 -v "$PWD/instance:/app/instance" -v "$PWD/uploads:/app/uploads" kaoqy666/nodeloc-store:latest
+```
+
+固定使用 `1.0.0` 版本：
+
+```bash
+docker run -d --name nodeloc-store --restart unless-stopped -p 5000:5000 -v "$PWD/instance:/app/instance" -v "$PWD/uploads:/app/uploads" kaoqy666/nodeloc-store:1.0.0
+```
+
+> 命令会把配置文件持久化到当前目录的 `instance`，把商品图片持久化到当前目录的 `uploads`。容器启动后访问 `http://服务器IP:5000`，或继续按 Step 4 配置 OpenResty、域名和 HTTPS。
+
+如果需要从源码构建，也可以使用 Docker Compose：
+
 ```bash
 git clone https://github.com/kaoqy/Nodeloc-Store.git
 cd Nodeloc-Store
@@ -104,8 +120,10 @@ docker compose up -d
 
 查看日志：
 ```bash
-docker compose logs -f store
+docker logs -f nodeloc-store
 ```
+
+使用 Docker Compose 部署时，查看日志的命令为 `docker compose logs -f store`。
 
 ### Step 4 · OpenResty 反代 + SSL
 
