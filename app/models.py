@@ -199,6 +199,34 @@ class AppSetting(db.Model):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
+    @classmethod
+    def get(cls, key: str, default: Optional[str] = None) -> Optional:
+        """Return a setting value, or ``default`` when the key is absent."""
+        setting = db.session.get(cls, key)
+        return setting.value if setting is not None else default
+
+    @classmethod
+    def set(cls, key: str, value: Optional[str]) -> "AppSetting":
+        """Create or update a setting and persist it immediately."""
+        setting = db.session.get(cls, key)
+        if setting is None:
+            setting = cls(key=key, value=value)
+            db.session.add(setting)
+        else:
+            setting.value = value
+        db.session.commit()
+        return setting
+
+    @classmethod
+    def is_db_configured(cls) -> bool:
+        """Whether the database phase of the installation has completed."""
+        return cls.get("install_step") in {"db_done", "complete"}
+
+    @classmethod
+    def is_installed(cls) -> bool:
+        """Whether all installation phases have completed."""
+        return cls.get("install_step") == "complete"
+
 
 # --------------------------------------------------------------------------- #
 # Audit log (admin actions, callback events)

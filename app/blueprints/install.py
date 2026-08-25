@@ -286,6 +286,8 @@ def setup_step():
 
             # 标记安装完成
             AppSetting.set("install_step", "complete")
+            _mark_install_complete()
+            apply_to(current_app)
 
             # 记录审计日志
             log_action("install_complete", target=admin_user, detail=f"管理员 {admin_user} 完成安装")
@@ -435,6 +437,19 @@ def _write_full_config(
     cfg.set("payment", "id", payment_id)
     cfg.set("payment", "secret", payment_secret)
 
+    INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        cfg.write(f)
+
+
+def _mark_install_complete() -> None:
+    """Persist the file-based installation flag used by the global request gate."""
+    cfg = RawConfigParser()
+    if CONFIG_PATH.exists():
+        cfg.read(CONFIG_PATH, encoding="utf-8")
+    if not cfg.has_section("app"):
+        cfg.add_section("app")
+    cfg.set("app", "installed", "1")
     INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         cfg.write(f)
