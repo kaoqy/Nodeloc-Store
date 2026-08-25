@@ -1,7 +1,7 @@
 """user blueprint — profile, change password, bind OAuth."""
 from __future__ import annotations
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
 
 from ..extensions import db
@@ -79,7 +79,7 @@ def bind_oauth():
     if request.method == "POST":
         code = request.form.get("code", "").strip()
         state = request.form.get("state", "").strip()
-        stored_state = request.session.get("oauth_bind_state", "")
+        stored_state = session.get("oauth_bind_state", "")
         if not code or state != stored_state:
             flash("OAuth 状态无效，请重试", "danger")
             return redirect(url_for("user.bind_oauth"))
@@ -117,7 +117,8 @@ def bind_oauth():
         flash("NodeLoc 账号已绑定", "success")
         return redirect(url_for("user.profile"))
 
-    state = request.session["oauth_bind_state"] = secrets.token_urlsafe(32)
+    state = secrets.token_urlsafe(32)
+    session["oauth_bind_state"] = state
     auth_url = oauth.build_authorize_url(state)
     return render_template("user/bind_oauth.html", auth_url=auth_url)
 

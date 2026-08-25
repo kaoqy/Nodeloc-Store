@@ -4,18 +4,26 @@ from __future__ import annotations
 import os
 import secrets
 from datetime import datetime
-from flask import (Blueprint, current_app, flash, redirect, render_template,
+from flask import (Blueprint, abort, current_app, flash, redirect, render_template,
                    request, send_from_directory, url_for)
-from flask_login import login_required
+from flask_login import current_user
 from werkzeug.utils import secure_filename
 
 from ..extensions import db
 from ..models import AppSetting, AuditLog, Card, Order, Product, User
-from ..utils import (admin_required, log_action, refresh_product_stock,
-                     slugify, unique_product_slug)
+from ..utils import (log_action, refresh_product_stock, slugify,
+                     unique_product_slug)
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
-bp.before_request(admin_required)
+
+
+@bp.before_request
+def require_admin():
+    """Require an authenticated administrator for every admin route."""
+    if not current_user.is_authenticated:
+        return redirect(url_for("auth.login", next=request.full_path))
+    if not current_user.is_admin:
+        abort(403)
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────
