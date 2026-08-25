@@ -77,7 +77,7 @@ def create_app() -> "Flask":
             allowed = ("install.", "static")
             endpoint = request.endpoint or ""
             if not any(endpoint.startswith(p) for p in allowed):
-                return redirect(url_for("install.index"))
+                return redirect(url_for("install.db_step"))
 
     # ---------- Context ----------
     @app.context_processor
