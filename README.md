@@ -97,26 +97,36 @@ sudo mysql -e "
 推荐直接使用 Docker Hub 已发布的多架构镜像一键部署：
 
 ```bash
-docker run -d --name nodeloc-store --restart unless-stopped -p 5000:5000 -v "$PWD/instance:/app/instance" -v "$PWD/uploads:/app/uploads" kaoqy666/nodeloc-store:latest
+docker run -d --name nodeloc-store --restart unless-stopped \
+  --network 1panel-network \
+  -p 5000:5000 \
+  -v "$PWD/instance:/app/instance" \
+  -v "$PWD/uploads:/app/uploads" \
+  kaoqy666/nodeloc-store:latest
 ```
 
 固定使用 `1.0.0` 版本：
 
 ```bash
-docker run -d --name nodeloc-store --restart unless-stopped -p 5000:5000 -v "$PWD/instance:/app/instance" -v "$PWD/uploads:/app/uploads" kaoqy666/nodeloc-store:1.0.0
+docker run -d --name nodeloc-store --restart unless-stopped \
+  --network 1panel-network \
+  -p 5000:5000 \
+  -v "$PWD/instance:/app/instance" \
+  -v "$PWD/uploads:/app/uploads" \
+  kaoqy666/nodeloc-store:1.0.0
 ```
 
-> 命令会把配置文件持久化到当前目录的 `instance`，把商品图片持久化到当前目录的 `uploads`。容器启动后访问 `http://服务器IP:5000`，或继续按 Step 4 配置 OpenResty、域名和 HTTPS。
+> `1Panel-mariadb-oxyE` 这类容器名只有在同一个 Docker 网络中才能解析。上面的 `--network 1panel-network` 会让商店连接到 1Panel 数据库网络。如果实际网络名不同，先运行 `docker inspect 1Panel-mariadb-oxyE --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}'` 查询，然后替换命令中的网络名。命令同时会把配置文件持久化到当前目录的 `instance`，把商品图片持久化到当前目录的 `uploads`。
 
 如果需要从源码构建，也可以使用 Docker Compose：
 
 ```bash
 git clone https://github.com/kaoqy/Nodeloc-Store.git
 cd Nodeloc-Store
-docker compose up -d
+DB_NETWORK=1panel-network docker compose up -d
 ```
 
-> 只起一个 `store` 容器。MariaDB 用你 Step 1 装的那个，连接信息下一步在向导里填。
+> Compose 只起一个 `store` 容器，并把它加入 `DB_NETWORK` 指定的外部网络。MariaDB 使用现有的 1Panel 实例，连接信息在安装向导中填写。若 1Panel 的数据库网络不是 `1panel-network`，请将 `DB_NETWORK` 改为通过 `docker inspect` 查到的名称。
 
 查看日志：
 ```bash

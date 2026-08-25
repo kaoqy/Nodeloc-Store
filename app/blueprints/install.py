@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 from configparser import RawConfigParser
 from sqlalchemy import inspect, text
 
@@ -74,6 +75,17 @@ def db_step():
 
         # 尝试连接数据库并建表
         try:
+            # Docker 容器名只有在应用与数据库加入同一个 Docker 网络时
+            # 才能被解析。提前检查主机名，避免把网络问题误报成数据库故障。
+            try:
+                socket.getaddrinfo(db_host, int(db_port), type=socket.SOCK_STREAM)
+            except (socket.gaierror, ValueError) as exc:
+                raise RuntimeError(
+                    f"无法解析数据库主机“{db_host}”。数据库本身可能正常，但应用容器与数据库容器不在同一个 Docker 网络。"
+                    "如果使用 1Panel，请把 NodeLoc Store 加入 MariaDB 所在网络；Docker Compose 可设置 "
+                    "DB_NETWORK，docker run 可添加 --network <MariaDB网络名>。"
+                ) from exc
+
             # 写入临时 config.ini（仅 DB 部分）
             _write_db_config(db_host, db_port, db_user, db_pass, db_name)
 

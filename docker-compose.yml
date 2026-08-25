@@ -4,8 +4,16 @@ services:
   store:
     build: .
     restart: unless-stopped
+    networks:
+      - default
+      - database
     ports:
       - "5000:5000"
     volumes:
       - ./instance:/app/instance
       - ./uploads:/app/uploads
+
+networks:
+  database:
+    external: true
+    name: ${DB_NETWORK:-1panel-network}
