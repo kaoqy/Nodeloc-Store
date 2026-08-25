@@ -2,6 +2,37 @@
 {% block title %}{{ site_name }}{% endblock %}
 {% block body %}
 
+<section class="store-hero">
+  <div class="store-hero-glow" aria-hidden="true"></div>
+  <div class="store-hero-content">
+    <span class="store-eyebrow">NODELOC DIGITAL STORE</span>
+    <h1>发现值得信赖的数字商品</h1>
+    <p>{{ site_slogan or '简洁、安全、高效地选购和交付数字商品。' }}</p>
+    <div class="store-hero-actions">
+      <a href="#products" class="btn btn-primary btn-lg">浏览商品</a>
+      {% if current_user.is_authenticated %}
+      <a href="{{ url_for('user.orders') }}" class="btn btn-ghost btn-lg">查看我的订单</a>
+      {% else %}
+      <a href="{{ url_for('auth.login') }}" class="btn btn-ghost btn-lg">登录账号</a>
+      {% endif %}
+    </div>
+  </div>
+  <div class="store-hero-orb" aria-hidden="true">
+    <span class="orb-ring orb-ring-one"></span>
+    <span class="orb-ring orb-ring-two"></span>
+    <span class="orb-core">N</span>
+  </div>
+</section>
+
+<section class="store-section" id="products">
+  <div class="store-section-heading">
+    <div>
+      <span class="store-eyebrow">MARKETPLACE</span>
+      <h2>精选商品</h2>
+    </div>
+    <span class="store-section-meta">安全支付 · 自动交付</span>
+  </div>
+
 {% if pagination.items %}
 <div class="product-grid">
   {% for product in pagination.items %}
@@ -53,5 +84,6 @@
   {% else %}<span class="disabled">下一页 ›</span>{% endif %}
 </div>
 {% endif %}
+</section>
 
 {% endblock %}

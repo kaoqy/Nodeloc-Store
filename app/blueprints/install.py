@@ -21,16 +21,22 @@ bp = Blueprint("install", __name__, url_prefix="/install")
 @bp.route("/db", methods=["GET", "POST"])
 def db_step():
     """Phase 1: connect to database and create tables."""
-    # 如果已经完成安装，直接跳转商店
-    if AppSetting.is_installed():
-        return redirect(url_for("store.index"))
-
-    # 如果数据库已经配置好（表已存在），跳转到第二阶段
-    if AppSetting.is_db_configured():
-        # 检查表是否存在
+    # 首次访问时数据库或 app_settings 表可能尚未就绪。
+    # 必须先检查表是否存在，再读取安装状态，避免首次访问直接触发 500。
+    try:
         inspector = inspect(db.engine)
         if "app_settings" in inspector.get_table_names():
-            return redirect(url_for("install.setup_step"))
+            if AppSetting.is_installed():
+                return redirect(url_for("store.index"))
+            if AppSetting.is_db_configured():
+                return redirect(url_for("install.setup_step"))
+    except Exception:
+        # 数据库未配置、暂不可达或尚未建表时，应继续显示安装表单。
+        db.session.rollback()
+        current_app.logger.info(
+            "install: database is not ready; showing initial setup page",
+            exc_info=True,
+        )
 
     error = None
     defaults = _load_db_defaults()
