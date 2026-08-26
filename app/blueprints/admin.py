@@ -170,7 +170,15 @@ def product_cards(pid):
 def add_cards(pid):
     product = Product.query.get_or_404(pid)
     raw = request.form.get("cards", "").strip()
-    lines = [l.strip() for l in raw.splitlines() if l.strip()]
+    lines = list(dict.fromkeys(l.strip() for l in raw.splitlines() if l.strip()))
+    existing = {
+        value for (value,) in
+        db.session.query(Card.content).filter(
+            Card.product_id == pid,
+            Card.content.in_(lines),
+        ).all()
+    } if lines else set()
+    lines = [line for line in lines if line not in existing]
     added = 0
     for line in lines:
         db.session.add(Card(product_id=pid, content=line))
@@ -181,14 +189,18 @@ def add_cards(pid):
     db.session.flush()
     refresh_product_stock(product)
     db.session.commit()
-    flash(f"已添加 {added} 个卡密", "success")
-    log_action("cards.add", target=f"product={pid}", detail=f"count={added}")
+    skipped = len(existing)
+    flash(f"已添加 {added} 个卡密，跳过 {skipped} 个重复项", "success")
+    log_action("cards.add", target=f"product={pid}", detail=f"count={added}, skipped={skipped}")
     return redirect(url_for("admin.product_cards", pid=pid))
 
 
 @bp.route("/cards/<int:card_id>/toggle", methods=["POST"])
 def card_toggle(card_id):
     card = Card.query.get_or_404(card_id)
+    if card.status == "sold":
+        flash("已售卡密不能启用或禁用", "warning")
+        return redirect(url_for("admin.product_cards", pid=card.product_id))
     card.status = "disabled" if card.status == "available" else "available"
     db.session.flush()
     refresh_product_stock(card.product)
@@ -200,6 +212,9 @@ def card_toggle(card_id):
 @bp.route("/cards/<int:card_id>/delete", methods=["POST"])
 def card_delete(card_id):
     card = Card.query.get_or_404(card_id)
+    if card.status == "sold" or card.order_id is not None:
+        flash("已售或已关联订单的卡密不能删除", "warning")
+        return redirect(url_for("admin.product_cards", pid=card.product_id))
     pid = card.product_id
     product = card.product
     db.session.delete(card)
@@ -214,12 +229,62 @@ def card_delete(card_id):
 @bp.route("/orders")
 def orders():
     status = request.args.get("status", "all")
+    q_text = request.args.get("q", "").strip()
     q = Order.query
     if status != "all":
         q = q.filter_by(status=status)
+    if q_text:
+        pattern = f"%{q_text}%"
+        q = q.outerjoin(User).outerjoin(Product).filter(
+            db.or_(
+                Order.order_no.ilike(pattern),
+                Order.transaction_id.ilike(pattern),
+                User.username.ilike(pattern),
+                User.email.ilike(pattern),
+                Product.name.ilike(pattern),
+            )
+        )
     page = request.args.get("page", 1, type=int)
     pagination = q.order_by(Order.created_at.desc()).paginate(page=page, per_page=20, error_out=False)
-    return render_template("admin/orders.html", pagination=pagination, status=status)
+    return render_template("admin/orders.html", pagination=pagination, status=status, q=q_text)
+
+
+@bp.route("/orders/<order_no>/cancel", methods=["POST"])
+def order_cancel(order_no):
+    order = Order.query.filter_by(order_no=order_no).first_or_404()
+    if order.status != "pending":
+        flash("只能取消待支付订单", "warning")
+        return redirect(url_for("admin.order_detail", order_no=order_no))
+    order.status = "cancelled"
+    db.session.commit()
+    log_action("order.cancel", target=order_no)
+    flash("订单已取消", "success")
+    return redirect(url_for("admin.order_detail", order_no=order_no))
+
+
+@bp.route("/orders/<order_no>/deliver", methods=["POST"])
+def order_deliver(order_no):
+    order = Order.query.filter_by(order_no=order_no).with_for_update().first_or_404()
+    if order.status != "paid":
+        flash("只能为已支付订单补发卡密", "warning")
+        return redirect(url_for("admin.order_detail", order_no=order_no))
+    if order.cards:
+        flash("该订单已有卡密，无需重复补发", "warning")
+        return redirect(url_for("admin.order_detail", order_no=order_no))
+    card = Card.query.filter_by(product_id=order.product_id, status="available").order_by(Card.id.asc()).with_for_update(skip_locked=True).first()
+    if not card:
+        flash("当前没有可用卡密", "danger")
+        return redirect(url_for("admin.order_detail", order_no=order_no))
+    card.status = "sold"
+    card.order_id = order.id
+    card.sold_at = datetime.utcnow()
+    order.delivered_at = datetime.utcnow()
+    db.session.flush()
+    refresh_product_stock(order.product)
+    db.session.commit()
+    log_action("order.deliver", target=order_no, detail=f"card_id={card.id}")
+    flash("卡密补发成功", "success")
+    return redirect(url_for("admin.order_detail", order_no=order_no))
 
 
 @bp.route("/orders/<order_no>")

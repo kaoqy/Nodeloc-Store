@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="system">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -16,9 +16,9 @@
       <span>{{ site_name }}</span>
     </a>
     <div class="nav-links">
-      <button class="theme-toggle" type="button" id="theme-toggle" aria-label="切换黑白主题" title="切换黑白主题">
-        <span class="theme-icon theme-icon-light" aria-hidden="true">☀</span>
-        <span class="theme-icon theme-icon-dark" aria-hidden="true">◐</span>
+      <button class="theme-toggle" type="button" id="theme-toggle" aria-label="切换主题" title="切换主题">
+        <span class="theme-icon" id="theme-icon" aria-hidden="true">◐</span>
+        <span class="theme-label" id="theme-label">跟随系统</span>
       </button>
       {% if current_user.is_authenticated %}
         <a href="{{ url_for('user.profile') }}">{{ current_user.username }}</a>
@@ -56,21 +56,33 @@
 <script>
 (function () {
   const root = document.documentElement;
-  const saved = localStorage.getItem('nodeloc-theme');
-  const preferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  const theme = saved === 'light' || saved === 'dark' ? saved : preferred;
-  root.dataset.theme = theme;
+  const media = window.matchMedia('(prefers-color-scheme: light)');
+  const modes = ['system', 'dark', 'light'];
+  const saved = localStorage.getItem('nodeloc-theme-mode');
+  let mode = modes.includes(saved) ? saved : 'system';
 
   const toggle = document.getElementById('theme-toggle');
-  if (toggle) {
-    toggle.setAttribute('aria-pressed', String(theme === 'light'));
-    toggle.addEventListener('click', function () {
-      const next = root.dataset.theme === 'light' ? 'dark' : 'light';
-      root.dataset.theme = next;
-      localStorage.setItem('nodeloc-theme', next);
-      toggle.setAttribute('aria-pressed', String(next === 'light'));
-    });
+  const icon = document.getElementById('theme-icon');
+  const label = document.getElementById('theme-label');
+
+  function applyTheme() {
+    const resolved = mode === 'system' ? (media.matches ? 'light' : 'dark') : mode;
+    root.dataset.themeMode = mode;
+    root.dataset.theme = resolved;
+    if (icon) icon.textContent = mode === 'system' ? '◐' : (mode === 'dark' ? '●' : '○');
+    if (label) label.textContent = mode === 'system' ? '跟随系统' : (mode === 'dark' ? '黑色' : '白色');
+    if (toggle) toggle.setAttribute('aria-label', '当前主题：' + label.textContent + '，点击切换');
   }
+
+  applyTheme();
+  media.addEventListener('change', function () {
+    if (mode === 'system') applyTheme();
+  });
+  if (toggle) toggle.addEventListener('click', function () {
+    mode = modes[(modes.indexOf(mode) + 1) % modes.length];
+    localStorage.setItem('nodeloc-theme-mode', mode);
+    applyTheme();
+  });
 })();
 </script>
 

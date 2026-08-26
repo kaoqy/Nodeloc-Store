@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
@@ -77,23 +78,39 @@ def callback():
         return redirect(url_for("store.index"))
 
     transaction_id = params.get("transaction_id")
-    order_no = params.get("external_reference")
+    order_no = (params.get("external_reference") or params.get("order_no") or "").strip()
     amount = params.get("amount")
-    status = params.get("status")
+    status = (params.get("status") or "").strip().lower()
     platform_fee = params.get("platform_fee")
     merchant_points = params.get("merchant_points")
     paid_at_str = params.get("paid_at")
 
-    order = Order.query.filter_by(order_no=order_no).first()
+    order = Order.query.filter_by(order_no=order_no).with_for_update().first()
     if not order:
         flash("订单不存在", "danger")
         return redirect(url_for("store.index"))
 
-    if order.status == "paid":
+    if amount is not None:
+        try:
+            callback_amount = Decimal(str(amount))
+            order_amount = Decimal(str(order.total_amount))
+        except (InvalidOperation, TypeError, ValueError):
+            log_action("payment.invalid_amount", target=order_no, detail="invalid callback amount")
+            flash("支付回调金额格式错误", "danger")
+            return redirect(url_for("payment.order_detail", order_no=order.order_no))
+        if callback_amount != order_amount:
+            log_action(
+                "payment.amount_mismatch",
+                target=order_no,
+                detail=f"expected={order_amount}, received={callback_amount}",
+            )
+            flash("支付回调金额与订单不一致", "danger")
+            return redirect(url_for("payment.order_detail", order_no=order.order_no))
+
+    if order.status == "paid" and order.delivered_at is not None:
         return render_template("payment/done.html", order=order)
 
-    if status == "completed":
-        order.status = "paid"
+    if status in {"completed", "paid", "success", "succeeded"}:
         order.transaction_id = transaction_id
         if platform_fee is not None:
             order.platform_fee = int(platform_fee)
@@ -104,14 +121,19 @@ def callback():
                 order.paid_at = datetime.fromisoformat(paid_at_str.replace("Z", "+00:00"))
             except Exception:
                 pass
-        _fulfill_order_db(order)
+        _fulfill_order_db(order, commit=False)
+        db.session.commit()
         log_action("payment.completed", target=order_no, detail=f"amount={amount}")
         return render_template("payment/done.html", order=order)
-    else:
+    elif status in {"failed", "cancelled", "canceled", "expired"}:
         order.status = "failed"
         db.session.commit()
         flash(f"支付失败: {status}", "warning")
         return redirect(url_for("store.product_detail", slug=order.product.slug))
+    else:
+        log_action("payment.pending", target=order_no, detail=f"status={status or 'unknown'}")
+        flash("支付结果仍在处理中，请稍后刷新订单", "info")
+        return redirect(url_for("payment.order_detail", order_no=order.order_no))
 
 
 @bp.route("/order/<order_no>")
@@ -133,21 +155,28 @@ def _fulfill_order(order: Order) -> ...:
     return _fulfill_order_db(order) or render_template("payment/done.html", order=order)
 
 
-def _fulfill_order_db(order: Order):
+def _fulfill_order_db(order: Order, *, commit: bool = True):
     """Mark order paid and assign a card to the user."""
     if order.delivered_at is not None:
         return
     order.status = "paid"
-    order.delivered_at = datetime.utcnow()
 
-    card = Card.query.filter_by(product_id=order.product_id, status="available").first()
+    card = (
+        Card.query
+        .filter_by(product_id=order.product_id, status="available")
+        .order_by(Card.id.asc())
+        .with_for_update(skip_locked=True)
+        .first()
+    )
     if card:
         card.status = "sold"
         card.order_id = order.id
         card.sold_at = datetime.utcnow()
+        order.delivered_at = datetime.utcnow()
     else:
         log_action("payment.stock_warning", target=order.order_no, detail="no card available")
 
     db.session.flush()
     refresh_product_stock(order.product)
-    db.session.commit()
+    if commit:
+        db.session.commit()
