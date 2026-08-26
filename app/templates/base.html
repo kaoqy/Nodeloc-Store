@@ -7,12 +7,13 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
   {% block extra_head %}{% endblock %}
 </head>
-<body>
+<body class="lobe-app-shell">
 
 <nav class="nav">
   <div class="nav-inner">
     <a href="{{ url_for('store.index') }}" class="nav-brand">
-      <span class="dot"></span>{{ site_name }}
+      <span class="brand-mark" aria-hidden="true">N</span>
+      <span>{{ site_name }}</span>
     </a>
     <div class="nav-links">
       {% if current_user.is_authenticated %}
@@ -44,7 +45,7 @@
 {% block body %}{% endblock %}
 </main>
 
-<footer style="border-top:1px solid var(--border-soft); padding:20px 0; margin-top:48px; text-align:center; color:var(--text-mute); font-size:12px;">
+<footer class="site-footer">
   &copy; {{ current_year }} {{ site_name }} · Powered by NodeLoc
 </footer>
 

@@ -105,7 +105,6 @@ def callback():
                 order.paid_at = datetime.fromisoformat(paid_at_str.replace("Z", "+00:00"))
             except Exception:
                 pass
-        db.session.commit()
         _fulfill_order_db(order)
         log_action("payment.completed", target=order_no, detail=f"amount={amount}")
         return render_template("payment/done.html", order=order)
@@ -137,7 +136,7 @@ def _fulfill_order(order: Order) -> ...:
 
 def _fulfill_order_db(order: Order):
     """Mark order paid and assign a card to the user."""
-    if order.status == "paid":
+    if order.delivered_at is not None:
         return
     order.status = "paid"
     order.delivered_at = datetime.utcnow()
@@ -150,5 +149,6 @@ def _fulfill_order_db(order: Order):
     else:
         log_action("payment.stock_warning", target=order.order_no, detail="no card available")
 
-    db.session.commit()
+    db.session.flush()
     refresh_product_stock(order.product)
+    db.session.commit()

@@ -48,7 +48,10 @@
           <td class="text-xs text-mute">{% if card.sold_at %}{{ card.sold_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}</td>
           <td>
             <div class="flex gap-3 text-sm">
-              <a href="{{ url_for('admin.card_toggle', card_id=card.id) }}" class="text-warning">{{ '禁用' if card.status=='available' else '启用' }}</a>
+<form method="post" action="{{ url_for('admin.card_toggle', card_id=card.id) }}" class="inline-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="link-button {{ 'text-warning' if card.status == 'available' else 'text-success' }}">{{ '禁用' if card.status == 'available' else '启用' }}</button>
+              </form>
               <form method="post" action="{{ url_for('admin.card_delete', card_id=card.id) }}" style="display:inline;" onsubmit="return confirm('确认删除？')">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="text-danger" style="background:none; border:0; padding:0; cursor:pointer; font:inherit;">删除</button>

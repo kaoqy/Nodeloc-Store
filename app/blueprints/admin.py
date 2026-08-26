@@ -135,7 +135,7 @@ def _product_edit(product):
                            product=product, is_new=(product is None))
 
 
-@bp.route("/products/<int:pid>/toggle")
+@bp.route("/products/<int:pid>/toggle", methods=["POST"])
 def product_toggle(pid):
     product = Product.query.get_or_404(pid)
     product.is_published = not product.is_published
@@ -175,19 +175,24 @@ def add_cards(pid):
     for line in lines:
         db.session.add(Card(product_id=pid, content=line))
         added += 1
-    db.session.commit()
+    # Flush new cards before counting them, then persist the cards and cached
+    # product stock in the same transaction. Previously stock_count was
+    # refreshed after a commit without committing the refreshed value.
+    db.session.flush()
     refresh_product_stock(product)
+    db.session.commit()
     flash(f"已添加 {added} 个卡密", "success")
     log_action("cards.add", target=f"product={pid}", detail=f"count={added}")
     return redirect(url_for("admin.product_cards", pid=pid))
 
 
-@bp.route("/cards/<int:card_id>/toggle")
+@bp.route("/cards/<int:card_id>/toggle", methods=["POST"])
 def card_toggle(card_id):
     card = Card.query.get_or_404(card_id)
     card.status = "disabled" if card.status == "available" else "available"
-    db.session.commit()
+    db.session.flush()
     refresh_product_stock(card.product)
+    db.session.commit()
     flash(f"卡密已{'禁用' if card.status == 'disabled' else '启用'}", "success")
     return redirect(url_for("admin.product_cards", pid=card.product_id))
 
@@ -196,9 +201,11 @@ def card_toggle(card_id):
 def card_delete(card_id):
     card = Card.query.get_or_404(card_id)
     pid = card.product_id
+    product = card.product
     db.session.delete(card)
+    db.session.flush()
+    refresh_product_stock(product)
     db.session.commit()
-    refresh_product_stock(Product.query.get(pid))
     flash("卡密已删除", "success")
     return redirect(url_for("admin.product_cards", pid=pid))
 
@@ -271,6 +278,9 @@ def user_toggle_admin(uid):
 @bp.route("/users/<int:uid>/toggle-active", methods=["POST"])
 def user_toggle_active(uid):
     user = User.query.get_or_404(uid)
+    if user.id == current_user.id:
+        flash("不能禁用自己的管理员账户", "danger")
+        return redirect(url_for("admin.users"))
     user.is_active_flag = not user.is_active_flag
     db.session.commit()
     flash(f"{user.username} 已{'启用' if user.is_active_flag else '禁用'}", "success")
