@@ -86,7 +86,9 @@ def oauth_initiate():
         flash("NodeLoc OAuth 未配置，请联系管理员", "warning")
         return redirect(url_for("auth.login"))
     state = new_state()
+    session.permanent = True
     session["oauth_state"] = state
+    session.modified = True
     return redirect(oauth.build_authorize_url(state))
 
 
@@ -102,6 +104,10 @@ def oauth_callback():
     code = request.args.get("code")
     if not state or state != session.pop("oauth_state", None):
         flash("OAuth 状态验证失败，请重试", "danger")
+        return redirect(url_for("auth.login"))
+
+    if not code:
+        flash("OAuth 回调缺少授权码，请重新授权", "danger")
         return redirect(url_for("auth.login"))
 
     try:

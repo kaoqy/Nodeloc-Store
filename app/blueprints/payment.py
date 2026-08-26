@@ -66,11 +66,10 @@ def create(product_id):
         return redirect(url_for("store.product_detail", slug=product.slug))
 
 
-@bp.route("/callback")
+@bp.route("/callback", methods=["GET", "POST"])
 def callback():
-    """Browser GET redirect from NodeLoc after payment."""
-    params = dict(request.args)
-    sig = params.pop("signature", None)
+    """Handle NodeLoc browser redirects and server-side payment callbacks."""
+    params = request.values.to_dict(flat=True)
     payment = _payment()
 
     if payment.is_configured() and not NodeLocPayment.verify_callback(params, payment.secret_key):
