@@ -17,7 +17,7 @@
         <div style="font-weight:600;">{{ current_user.username }}</div>
         <div class="text-sm text-mute">
           {{ current_user.email or '未绑定邮箱' }}
-          {% if current_user.is_admin %} · <span class="badge badge-info">管理员</span>{% endif %}
+          · <span class="badge badge-info">{{ {'super_admin':'超级管理员','admin':'管理员','operator':'运营人员','support':'客服人员','user':'普通用户'}.get(current_user.effective_role, current_user.effective_role) }}</span>
         </div>
       </div>
     </div>
@@ -34,6 +34,44 @@
       <a href="{{ url_for('user.change_password') }}" class="btn btn-secondary btn-sm">修改密码</a>
       <a href="{{ url_for('user.bind_oauth') }}" class="btn btn-secondary btn-sm">绑定 NodeLoc</a>
     </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="flex items-center justify-between gap-3" style="flex-wrap:wrap;">
+      <div>
+        <h3 class="mb-2">每日签到</h3>
+        <div class="text-sm text-mute">连续签到可获得更多积分，每天仅可签到一次。</div>
+      </div>
+      <form method="post" action="{{ url_for('user.check_in') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary" {% if checked_in_today %}disabled{% endif %}>
+          {{ '今日已签到' if checked_in_today else '立即签到' }}
+        </button>
+      </form>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px;">
+      <div class="card" style="padding:14px;">
+        <div class="text-xs text-mute">积分余额</div>
+        <strong style="font-size:22px;">{{ current_user.points }}</strong>
+      </div>
+      <div class="card" style="padding:14px;">
+        <div class="text-xs text-mute">连续签到</div>
+        <strong style="font-size:22px;">{{ current_user.consecutive_checkins }} 天</strong>
+      </div>
+      <div class="card" style="padding:14px;">
+        <div class="text-xs text-mute">累计签到</div>
+        <strong style="font-size:22px;">{{ current_user.total_checkins }} 次</strong>
+      </div>
+    </div>
+    {% if recent_checkins %}
+    <div class="divider"></div>
+    <div class="text-xs text-mute mb-2">最近签到记录</div>
+    <div class="flex gap-2" style="flex-wrap:wrap;">
+      {% for item in recent_checkins %}
+      <span class="badge badge-neutral">{{ item.checkin_date.strftime('%m-%d') }} · +{{ item.reward_points }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
 
   <div class="card mt-3">

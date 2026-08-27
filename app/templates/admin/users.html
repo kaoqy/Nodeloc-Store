@@ -1,49 +1,127 @@
 {% extends "admin/base.html" %}
-{% block title %}用户管理{% endblock %}
-{% block header_title %}用户管理{% endblock %}
+{% block title %}用户与权限{% endblock %}
+{% block header_title %}用户与权限{% endblock %}
 {% block body %}
-<form method="get" class="flex gap-2 mb-4">
-  <input type="text" name="q" value="{{ q }}" placeholder="搜索用户名/邮箱..." style="width:240px;" />
-  <button class="btn btn-secondary btn-sm">搜索</button>
-</form>
+<div class="flex items-center justify-between mb-4" style="gap:16px; flex-wrap:wrap;">
+  <div>
+    <h1>用户与权限</h1>
+    <p class="text-sm text-mute" style="margin:4px 0 0;">为用户分配角色、控制后台访问范围，并管理账户状态。</p>
+  </div>
+  <form method="get" class="flex gap-2">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索用户名或邮箱" style="width:240px;" />
+    <button class="btn btn-secondary btn-sm" type="submit">搜索</button>
+    {% if q %}<a href="{{ url_for('admin.users') }}" class="btn btn-ghost btn-sm">清除</a>{% endif %}
+  </form>
+</div>
+
+<div class="card mb-4">
+  <h3 class="mb-3">内置角色权限</h3>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px;">
+    <div class="card" style="padding:14px;">
+      <strong>超级管理员</strong>
+      <div class="text-xs text-mute mt-2">拥有全部权限，包括系统设置和角色管理。</div>
+    </div>
+    <div class="card" style="padding:14px;">
+      <strong>管理员</strong>
+      <div class="text-xs text-mute mt-2">管理商品、卡密、订单、用户、日志和系统设置。</div>
+    </div>
+    <div class="card" style="padding:14px;">
+      <strong>运营人员</strong>
+      <div class="text-xs text-mute mt-2">管理商品、卡密和订单，不可修改用户权限及设置。</div>
+    </div>
+    <div class="card" style="padding:14px;">
+      <strong>客服人员</strong>
+      <div class="text-xs text-mute mt-2">查看用户并处理订单，不可管理商品、卡密和设置。</div>
+    </div>
+  </div>
+</div>
 
 <div class="card" style="padding:0;">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>NodeLoc</th><th>角色</th><th>注册时间</th><th>操作</th></tr></thead>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>用户</th>
+          <th>NodeLoc</th>
+          <th>积分与签到</th>
+          <th>角色</th>
+          <th>状态</th>
+          <th>注册时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
       <tbody>
         {% for u in pagination.items %}
         <tr>
           <td class="text-mute mono text-xs">{{ u.id }}</td>
-          <td><strong>{{ u.username }}</strong></td>
-          <td class="text-xs text-mute">{{ u.email or '-' }}</td>
           <td>
-            {% if u.oauth_provider %}<span class="badge badge-info">已绑定</span>{% else %}<span class="text-xs text-mute">-</span>{% endif %}
+            <strong>{{ u.username }}</strong>
+            <div class="text-xs text-mute">{{ u.email or '未绑定邮箱' }}</div>
+            {% if u.id == current_user.id %}<span class="badge badge-neutral mt-1">当前账户</span>{% endif %}
           </td>
           <td>
-            {% if u.is_admin %}<span class="badge badge-info">管理员</span>{% else %}<span class="text-xs text-mute">用户</span>{% endif %}
+            {% if u.oauth_provider %}
+              <span class="badge badge-info">已绑定</span>
+              {% if u.oauth_username %}<div class="text-xs text-mute mt-1">{{ u.oauth_username }}</div>{% endif %}
+            {% else %}
+              <span class="text-xs text-mute">未绑定</span>
+            {% endif %}
+          </td>
+          <td>
+            <strong>{{ u.points }} 积分</strong>
+            <div class="text-xs text-mute">连续 {{ u.consecutive_checkins }} 天 · 共 {{ u.total_checkins }} 次</div>
+          </td>
+          <td>
+            <span class="badge {{ 'badge-info' if u.effective_role in ['super_admin','admin'] else 'badge-neutral' }}">
+              {{ role_labels.get(u.effective_role, u.effective_role) if role_labels is defined else u.effective_role }}
+            </span>
+            {% if u.id != current_user.id and current_user.has_permission('users.manage') %}
+            <form method="post" action="{{ url_for('admin.user_set_role', uid=u.id) }}" class="flex gap-2 mt-2" style="align-items:center;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select name="role" style="min-width:130px; padding:6px 8px;">
+                {% for role, label in role_labels.items() %}
+                <option value="{{ role }}" {% if u.effective_role == role %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn btn-secondary btn-sm">保存</button>
+            </form>
+            {% endif %}
+          </td>
+          <td>
+            {% if u.is_active_flag %}
+              <span class="badge badge-success">正常</span>
+            {% else %}
+              <span class="badge badge-danger">已禁用</span>
+            {% endif %}
           </td>
           <td class="text-xs text-mute">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
           <td>
-            {% if u.id != current_user.id %}
-            <div class="flex gap-3 text-sm">
-              <form method="post" action="{{ url_for('admin.user_toggle_admin', uid=u.id) }}" style="display:inline;">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="text-warning" style="background:none; border:0; padding:0; cursor:pointer; font:inherit;">{{ '取消管理' if u.is_admin else '设为管理' }}</button>
-              </form>
-              <form method="post" action="{{ url_for('admin.user_toggle_active', uid=u.id) }}" style="display:inline;">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="{{ 'text-success' if not u.is_active_flag else 'text-danger' }}" style="background:none; border:0; padding:0; cursor:pointer; font:inherit;">
-                  {{ '启用' if not u.is_active_flag else '禁用' }}
-                </button>
-              </form>
-            </div>
+            {% if u.id != current_user.id and current_user.has_permission('users.manage') %}
+            <form method="post" action="{{ url_for('admin.user_toggle_active', uid=u.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn {{ 'btn-secondary' if not u.is_active_flag else 'btn-ghost' }} btn-sm">
+                {{ '启用账户' if not u.is_active_flag else '禁用账户' }}
+              </button>
+            </form>
+            {% else %}
+              <span class="text-xs text-mute">不可操作</span>
             {% endif %}
           </td>
         </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-center text-mute" style="padding:36px;">没有找到符合条件的用户</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+
+{% if pagination.pages > 1 %}
+<div class="flex justify-center gap-2 mt-4">
+  {% if pagination.has_prev %}<a href="{{ url_for('admin.users', page=pagination.prev_num, q=q) }}" class="btn btn-secondary btn-sm">上一页</a>{% endif %}
+  <span class="text-sm text-mute" style="padding:7px 10px;">第 {{ pagination.page }} / {{ pagination.pages }} 页</span>
+  {% if pagination.has_next %}<a href="{{ url_for('admin.users', page=pagination.next_num, q=q) }}" class="btn btn-secondary btn-sm">下一页</a>{% endif %}
+</div>
+{% endif %}
 {% endblock %}

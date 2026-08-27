@@ -63,7 +63,7 @@
 <div class="empty card">
   <div class="icon">🛒</div>
   <p>暂无商品</p>
-  {% if current_user.is_authenticated and current_user.is_admin %}
+  {% if current_user.is_authenticated and current_user.can_access_admin %}
   <a href="{{ url_for('admin.product_new') }}" class="btn btn-primary btn-sm">新建商品</a>
   {% endif %}
 </div>

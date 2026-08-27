@@ -1,11 +1,14 @@
 """user blueprint — profile, change password, bind OAuth."""
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
+from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
-from ..models import Order
+from ..models import AppSetting, CheckIn, Order
 from ..nodeloc import NodeLocOAuth, NodeLocError
 from ..utils import log_action
 
@@ -15,7 +18,70 @@ bp = Blueprint("user", __name__)
 @bp.route("/profile")
 @login_required
 def profile():
-    return render_template("user/profile.html")
+    recent_checkins = CheckIn.query.filter_by(user_id=current_user.id).order_by(
+        CheckIn.checkin_date.desc()
+    ).limit(14).all()
+    today = date.today()
+    checked_in_today = current_user.last_checkin_date == today
+    return render_template(
+        "user/profile.html",
+        recent_checkins=recent_checkins,
+        checked_in_today=checked_in_today,
+    )
+
+
+@bp.route("/check-in", methods=["POST"])
+@login_required
+def check_in():
+    """Award the configured daily reward once per local calendar day."""
+    if AppSetting.get("checkin_enabled", "1") != "1":
+        flash("签到功能当前未开启", "warning")
+        return redirect(url_for("user.profile"))
+
+    today = date.today()
+    if current_user.last_checkin_date == today:
+        flash("今天已经签到过了，明天再来吧", "info")
+        return redirect(url_for("user.profile"))
+
+    try:
+        base_reward = max(0, int(AppSetting.get("checkin_reward", "5") or 5))
+        streak_bonus = max(0, int(AppSetting.get("checkin_streak_bonus", "1") or 1))
+        reward_cap = max(base_reward, int(AppSetting.get("checkin_reward_cap", "20") or 20))
+    except (TypeError, ValueError):
+        base_reward, streak_bonus, reward_cap = 5, 1, 20
+
+    if current_user.last_checkin_date == today - timedelta(days=1):
+        streak = current_user.consecutive_checkins + 1
+    else:
+        streak = 1
+
+    reward = min(reward_cap, base_reward + max(0, streak - 1) * streak_bonus)
+    record = CheckIn(
+        user_id=current_user.id,
+        checkin_date=today,
+        reward_points=reward,
+        consecutive_days=streak,
+    )
+    current_user.points += reward
+    current_user.consecutive_checkins = streak
+    current_user.total_checkins += 1
+    current_user.last_checkin_date = today
+    db.session.add(record)
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("今天已经签到过了", "info")
+        return redirect(url_for("user.profile"))
+
+    log_action(
+        "user.checkin",
+        target=str(current_user.id),
+        detail=f"reward={reward}, streak={streak}",
+    )
+    flash(f"签到成功，获得 {reward} 积分，已连续签到 {streak} 天", "success")
+    return redirect(url_for("user.profile"))
 
 
 @bp.route("/profile/edit", methods=["GET", "POST"])

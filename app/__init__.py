@@ -38,6 +38,46 @@ def create_app() -> "Flask":
     login_manager.init_app(app)
     csrf.init_app(app)
 
+    # Keep existing installations compatible with newly introduced account,
+    # role and check-in fields. create_all() creates new tables but does not
+    # add columns to an existing users table, so apply a small idempotent
+    # compatibility migration during startup.
+    with app.app_context():
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(db.engine)
+        if "users" in inspector.get_table_names():
+            existing_columns = {column["name"] for column in inspector.get_columns("users")}
+            statements = []
+
+            if "role" not in existing_columns:
+                statements.append("ALTER TABLE users ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'user'")
+            if "points" not in existing_columns:
+                statements.append("ALTER TABLE users ADD COLUMN points INTEGER NOT NULL DEFAULT 0")
+            if "consecutive_checkins" not in existing_columns:
+                statements.append("ALTER TABLE users ADD COLUMN consecutive_checkins INTEGER NOT NULL DEFAULT 0")
+            if "total_checkins" not in existing_columns:
+                statements.append("ALTER TABLE users ADD COLUMN total_checkins INTEGER NOT NULL DEFAULT 0")
+            if "last_checkin_date" not in existing_columns:
+                statements.append("ALTER TABLE users ADD COLUMN last_checkin_date DATE NULL")
+
+            for statement in statements:
+                db.session.execute(text(statement))
+            if statements:
+                db.session.commit()
+
+            # Preserve the meaning of legacy is_admin records while moving to
+            # role-based permissions. SQLite and MySQL/MariaDB support this
+            # portable UPDATE statement.
+            db.session.execute(text(
+                "UPDATE users SET role = 'super_admin' "
+                "WHERE is_admin = 1 AND (role IS NULL OR role = '' OR role = 'user')"
+            ))
+            db.session.commit()
+
+        # Ensure newly added tables, including checkins, exist after upgrading.
+        db.create_all()
+
     from .models import User  # noqa: WPS433
 
     @login_manager.user_loader
@@ -133,7 +173,12 @@ def register_cli(app: Flask) -> None:
             if User.query.filter_by(username=username).first():
                 click.echo("User already exists")
                 return
-            u = User(username=username, email=email, is_admin=True)
+            u = User(
+                username=username,
+                email=email,
+                is_admin=True,
+                role="super_admin",
+            )
             u.set_password(password)
             db.session.add(u)
             db.session.commit()

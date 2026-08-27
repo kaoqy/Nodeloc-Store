@@ -16,13 +16,51 @@ from ..utils import (log_action, refresh_product_stock, slugify,
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
+ROLE_LABELS = {
+    "super_admin": "超级管理员",
+    "admin": "管理员",
+    "operator": "运营人员",
+    "support": "客服人员",
+    "user": "普通用户",
+}
+
+ENDPOINT_PERMISSIONS = {
+    "admin.index": "dashboard.view",
+    "admin.products": "products.manage",
+    "admin.product_new": "products.manage",
+    "admin.product_edit": "products.manage",
+    "admin.product_toggle": "products.manage",
+    "admin.product_delete": "products.manage",
+    "admin.product_cards": "cards.manage",
+    "admin.add_cards": "cards.manage",
+    "admin.card_toggle": "cards.manage",
+    "admin.card_delete": "cards.manage",
+    "admin.orders": "orders.manage",
+    "admin.order_cancel": "orders.manage",
+    "admin.order_deliver": "orders.manage",
+    "admin.order_detail": "orders.manage",
+    "admin.order_refund": "orders.manage",
+    "admin.users": "users.view",
+    "admin.user_toggle_admin": "users.manage",
+    "admin.user_toggle_active": "users.manage",
+    "admin.user_set_role": "users.manage",
+    "admin.settings": "settings.manage",
+    "admin.oauth_test": "settings.manage",
+    "admin.payment_test": "settings.manage",
+    "admin.logs": "logs.view",
+}
+
 
 @bp.before_request
 def require_admin():
-    """Require an authenticated administrator for every admin route."""
+    """Require authentication and the permission assigned to this endpoint."""
     if not current_user.is_authenticated:
         return redirect(url_for("auth.login", next=request.full_path))
-    if not current_user.is_admin:
+    if not current_user.can_access_admin:
+        abort(403)
+
+    permission = ENDPOINT_PERMISSIONS.get(request.endpoint)
+    if permission and not current_user.has_permission(permission):
         abort(403)
 
 
@@ -330,25 +368,59 @@ def users():
 
 @bp.route("/users/<int:uid>/toggle-admin", methods=["POST"])
 def user_toggle_admin(uid):
+    if not current_user.has_permission("users.manage"):
+        abort(403)
     user = User.query.get_or_404(uid)
     if user.id == current_user.id:
-        flash("不能修改自己的管理员权限", "danger")
+        flash("不能修改自己的管理员权限", "warning")
         return redirect(url_for("admin.users"))
     user.is_admin = not user.is_admin
+    user.role = "super_admin" if user.is_admin else "user"
     db.session.commit()
     flash(f"{user.username} 已设为{'管理员' if user.is_admin else '普通用户'}", "success")
+    log_action("admin.user.toggle_admin", target=str(user.id))
+    return redirect(url_for("admin.users"))
+
+
+@bp.route("/users/<int:uid>/role", methods=["POST"])
+def user_set_role(uid):
+    if not current_user.has_permission("users.manage"):
+        abort(403)
+
+    user = User.query.get_or_404(uid)
+    role = request.form.get("role", "user").strip()
+    if role not in ROLE_LABELS:
+        flash("无效的用户角色", "danger")
+        return redirect(url_for("admin.users"))
+    if user.id == current_user.id:
+        flash("不能修改自己的角色", "warning")
+        return redirect(url_for("admin.users"))
+
+    old_role = user.effective_role
+    user.role = role
+    user.is_admin = role == "super_admin"
+    db.session.commit()
+    log_action(
+        "admin.user.set_role",
+        target=str(user.id),
+        detail=f"{old_role}->{role}",
+    )
+    flash(f"{user.username} 的角色已设为 {ROLE_LABELS[role]}", "success")
     return redirect(url_for("admin.users"))
 
 
 @bp.route("/users/<int:uid>/toggle-active", methods=["POST"])
 def user_toggle_active(uid):
+    if not current_user.has_permission("users.manage"):
+        abort(403)
     user = User.query.get_or_404(uid)
     if user.id == current_user.id:
-        flash("不能禁用自己的管理员账户", "danger")
+        flash("不能禁用自己的账户", "warning")
         return redirect(url_for("admin.users"))
     user.is_active_flag = not user.is_active_flag
     db.session.commit()
     flash(f"{user.username} 已{'启用' if user.is_active_flag else '禁用'}", "success")
+    log_action("admin.user.toggle_active", target=str(user.id))
     return redirect(url_for("admin.users"))
 
 
@@ -365,6 +437,32 @@ def settings():
         oauth_redirect_uri = request.form.get("oauth_redirect_uri", "").strip()
         payment_id = request.form.get("payment_id", "").strip()
         payment_secret = request.form.get("payment_secret", "").strip()
+        checkin_enabled = "1" if request.form.get("checkin_enabled") == "1" else "0"
+        support_email = request.form.get("support_email", "").strip()
+        site_notice = request.form.get("site_notice", "").strip()
+
+        try:
+            checkin_reward = str(max(0, int(request.form.get("checkin_reward", "5") or 5)))
+            checkin_streak_bonus = str(max(0, int(request.form.get("checkin_streak_bonus", "1") or 1)))
+            checkin_reward_cap = str(max(0, int(request.form.get("checkin_reward_cap", "20") or 20)))
+        except ValueError:
+            flash("签到奖励、连续奖励和奖励上限必须是非负整数", "danger")
+            settings_data = {s.key: s.value for s in AppSetting.query.all()}
+            return render_template(
+                "admin/settings.html",
+                settings=settings_data,
+                role_labels=ROLE_LABELS,
+            )
+
+        if int(checkin_reward_cap) < int(checkin_reward):
+            flash("签到奖励上限不能小于基础奖励", "danger")
+            settings_data = {s.key: s.value for s in AppSetting.query.all()}
+            return render_template(
+                "admin/settings.html",
+                settings=settings_data,
+                role_labels=ROLE_LABELS,
+            )
+
         # Note: oauth_scopes is not exposed in the form — it stays as the install-time
         # default ("openid profile email"). To customize, edit instance/config.ini.
         _save_setting("site_name", site_name)
@@ -372,17 +470,29 @@ def settings():
         _save_setting("currency", currency)
         _save_setting("oauth_url", oauth_url)
         _save_setting("oauth_client_id", oauth_client_id)
-        _save_setting("oauth_client_secret", oauth_client_secret)
+        if oauth_client_secret:
+            _save_setting("oauth_client_secret", oauth_client_secret)
         _save_setting("oauth_redirect_uri", oauth_redirect_uri)
         _save_setting("payment_id", payment_id)
-        _save_setting("payment_secret", payment_secret)
+        if payment_secret:
+            _save_setting("payment_secret", payment_secret)
+        _save_setting("checkin_enabled", checkin_enabled)
+        _save_setting("checkin_reward", checkin_reward)
+        _save_setting("checkin_streak_bonus", checkin_streak_bonus)
+        _save_setting("checkin_reward_cap", checkin_reward_cap)
+        _save_setting("support_email", support_email)
+        _save_setting("site_notice", site_notice)
 
         flash("设置已保存", "success")
         log_action("settings.save")
         return redirect(url_for("admin.settings"))
 
     settings_data = {s.key: s.value for s in AppSetting.query.all()}
-    return render_template("admin/settings.html", settings=settings_data)
+    return render_template(
+        "admin/settings.html",
+        settings=settings_data,
+        role_labels=ROLE_LABELS,
+    )
 
 
 @bp.route("/settings/oauth-test", methods=["POST"])

@@ -58,24 +58,36 @@
       <span class="dot"></span>{{ site_name }}
     </div>
     <nav>
+      {% if current_user.has_permission('dashboard.view') %}
       <a href="{{ url_for('admin.index') }}" class="nav-item {% if request.endpoint == 'admin.index' %}active{% endif %}">
         <span class="ico">▦</span>概览
       </a>
+      {% endif %}
+      {% if current_user.has_permission('products.manage') %}
       <a href="{{ url_for('admin.products') }}" class="nav-item {% if 'admin.product' in (request.endpoint or '') %}active{% endif %}">
-        <span class="ico">▤</span>商品
+        <span class="ico">▤</span>商品与卡密
       </a>
+      {% endif %}
+      {% if current_user.has_permission('orders.manage') %}
       <a href="{{ url_for('admin.orders') }}" class="nav-item {% if 'admin.order' in (request.endpoint or '') %}active{% endif %}">
         <span class="ico">▣</span>订单
       </a>
-      <a href="{{ url_for('admin.users') }}" class="nav-item {% if request.endpoint == 'admin.users' %}active{% endif %}">
-        <span class="ico">◉</span>用户
+      {% endif %}
+      {% if current_user.has_permission('users.view') %}
+      <a href="{{ url_for('admin.users') }}" class="nav-item {% if request.endpoint in ['admin.users', 'admin.user_set_role', 'admin.user_toggle_active', 'admin.user_toggle_admin'] %}active{% endif %}">
+        <span class="ico">◉</span>用户与权限
       </a>
+      {% endif %}
+      {% if current_user.has_permission('logs.view') %}
       <a href="{{ url_for('admin.logs') }}" class="nav-item {% if 'admin.log' in (request.endpoint or '') %}active{% endif %}">
         <span class="ico">≡</span>日志
       </a>
+      {% endif %}
+      {% if current_user.has_permission('settings.manage') %}
       <a href="{{ url_for('admin.settings') }}" class="nav-item {% if 'admin.settings' in (request.endpoint or '') %}active{% endif %}">
         <span class="ico">⚙</span>设置
       </a>
+      {% endif %}
     </nav>
     <div class="foot">
       <a href="{{ url_for('store.index') }}">← 返回商店</a>

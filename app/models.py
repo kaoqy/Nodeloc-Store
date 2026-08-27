@@ -1,13 +1,13 @@
 """SQLAlchemy ORM models."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
 from flask_login import UserMixin
 from sqlalchemy import (
-    BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric,
+    BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric,
     String, Text, UniqueConstraint, Index, func
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -41,6 +41,11 @@ class User(UserMixin, db.Model):
 
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active_flag: Mapped[bool] = mapped_column("is_active", Boolean, default=True, nullable=False)
+    role: Mapped[str] = mapped_column(String(32), default="user", nullable=False, index=True)
+    points: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    consecutive_checkins: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_checkins: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_checkin_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -50,6 +55,42 @@ class User(UserMixin, db.Model):
     @property
     def is_active(self) -> bool:  # type: ignore[override]
         return bool(self.is_active_flag)
+
+    @property
+    def effective_role(self) -> str:
+        """Return a backwards-compatible role for existing administrators."""
+        if self.is_admin:
+            return "super_admin" if self.role in {"", "user", None} else self.role
+        return self.role or "user"
+
+    def has_permission(self, permission: str) -> bool:
+        """Check a named management permission using the built-in role policy."""
+        permissions = {
+            "super_admin": {"*"},
+            "admin": {
+                "dashboard.view", "products.manage", "cards.manage",
+                "orders.manage", "users.view", "users.manage", "logs.view",
+                "settings.manage",
+            },
+            "operator": {
+                "dashboard.view", "products.manage", "cards.manage",
+                "orders.manage",
+            },
+            "support": {"dashboard.view", "orders.manage", "users.view"},
+            "user": set(),
+        }
+        granted = permissions.get(self.effective_role, set())
+        return "*" in granted or permission in granted
+
+    @property
+    def can_access_admin(self) -> bool:
+        return self.is_admin or self.effective_role in {
+            "super_admin", "admin", "operator", "support"
+        }
+
+    checkins: Mapped[list["CheckIn"]] = relationship(
+        "CheckIn", back_populates="user", cascade="all, delete-orphan"
+    )
 
     def has_password(self) -> bool:
         return bool(self.password_hash)
@@ -64,6 +105,33 @@ class User(UserMixin, db.Model):
 
     def __repr__(self) -> str:
         return f"<User {self.id} {self.username}>"
+
+
+# --------------------------------------------------------------------------- #
+# Check-in records
+# --------------------------------------------------------------------------- #
+class CheckIn(db.Model):
+    __tablename__ = "checkins"
+    __table_args__ = (
+        UniqueConstraint("user_id", "checkin_date", name="uq_checkins_user_date"),
+        Index("ix_checkins_date", "checkin_date"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    checkin_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reward_points: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    consecutive_days: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="checkins")
 
 
 # --------------------------------------------------------------------------- #

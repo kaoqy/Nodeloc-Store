@@ -296,7 +296,12 @@ def setup_step():
                     db.session.commit()
                     current_app.logger.info("install: updated existing admin %s password", admin_user)
             else:
-                u = User(username=admin_user, email=admin_email, is_admin=True)
+                u = User(
+                    username=admin_user,
+                    email=admin_email,
+                    is_admin=True,
+                    role="super_admin",
+                )
                 u.set_password(admin_pass)
                 db.session.add(u)
                 db.session.commit()
