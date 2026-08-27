@@ -17,6 +17,14 @@
     <table style="margin-bottom:16px;">
       <tr><td class="text-mute" style="width:100px; border:0;">订单号</td><td class="mono text-xs" style="border:0;">{{ order.order_no }}</td></tr>
       <tr><td class="text-mute">商品</td><td style="border:0;">{{ order.product.name if order.product else '(已删除)' }}</td></tr>
+      <tr><td class="text-mute">交付状态</td><td style="border:0;">
+        {% if order.fulfillment_status == 'delivered' %}<span class="badge badge-success">已交付</span>
+        {% elif order.fulfillment_status == 'awaiting_manual' %}<span class="badge badge-warning">等待人工交付</span>
+        {% elif order.fulfillment_status == 'waiting_stock' %}<span class="badge badge-warning">等待补货</span>
+        {% else %}<span class="badge badge-neutral">待处理</span>{% endif %}
+      </td></tr>
+      {% if order.customer_contact %}<tr><td class="text-mute">联系方式</td><td style="border:0;">{{ order.customer_contact }}</td></tr>{% endif %}
+      {% if order.customer_note %}<tr><td class="text-mute">订单备注</td><td style="border:0; white-space:pre-wrap;">{{ order.customer_note }}</td></tr>{% endif %}
       <tr><td class="text-mute">金额</td><td style="border:0;"><strong>{{ order.total_amount }} {{ currency }}</strong></td></tr>
       {% if order.transaction_id %}<tr><td class="text-mute">交易号</td><td class="mono text-xs text-mute" style="border:0;">{{ order.transaction_id }}</td></tr>{% endif %}
       {% if order.paid_at %}<tr><td class="text-mute">支付时间</td><td style="border:0;">{{ order.paid_at.strftime('%Y-%m-%d %H:%M:%S') }}</td></tr>{% endif %}
@@ -31,6 +39,12 @@
       {% endfor %}
     </div>
     <div class="alert alert-info mt-3 text-xs">请复制保存，刷新页面后不会再次显示</div>
+    {% elif order.is_paid and order.delivery_content %}
+    <h3 class="mb-3">交付内容</h3>
+    <div class="key-block" style="white-space:pre-wrap;">{{ order.delivery_content }}</div>
+    {% if order.delivery_note %}<div class="alert alert-info mt-3">{{ order.delivery_note }}</div>{% endif %}
+    {% elif order.is_paid and order.fulfillment_status == 'awaiting_manual' %}
+    <div class="alert alert-info">支付成功，订单正在等待管理员人工交付，请稍后刷新查看</div>
     {% elif order.is_paid %}
     <div class="alert alert-warning">支付成功，但卡密暂时缺货，请联系客服</div>
     {% endif %}

@@ -112,6 +112,11 @@ def _product_edit(product):
         slug = request.form.get("slug", "").strip() or None
         summary = request.form.get("summary", "").strip() or None
         description = request.form.get("description", "").strip() or None
+        product_type = request.form.get("product_type", "card").strip()
+        if product_type not in {"card", "manual"}:
+            product_type = "card"
+        delivery_instructions = request.form.get("delivery_instructions", "").strip() or None
+        require_contact = request.form.get("require_contact") == "on"
         price = request.form.get("price", 0, type=int)
         original_price = request.form.get("original_price", 0, type=int) or None
         is_published = request.form.get("is_published") == "on"
@@ -145,6 +150,9 @@ def _product_edit(product):
             product.slug = slug
             product.summary = summary
             product.description = description
+            product.product_type = product_type
+            product.delivery_instructions = delivery_instructions
+            product.require_contact = require_contact
             product.price = price
             product.original_price = original_price
             product.is_published = is_published
@@ -158,6 +166,9 @@ def _product_edit(product):
         else:
             p = Product(
                 name=name, slug=slug, summary=summary, description=description,
+                product_type=product_type,
+                delivery_instructions=delivery_instructions,
+                require_contact=require_contact,
                 price=price, original_price=original_price,
                 is_published=is_published, auto_deliver=auto_deliver,
                 stock_visible=stock_visible, image_path=image_path,
@@ -304,8 +315,24 @@ def order_cancel(order_no):
 def order_deliver(order_no):
     order = Order.query.filter_by(order_no=order_no).with_for_update().first_or_404()
     if order.status != "paid":
-        flash("只能为已支付订单补发卡密", "warning")
+        flash("只能处理已支付订单的交付", "warning")
         return redirect(url_for("admin.order_detail", order_no=order_no))
+
+    if order.product and order.product.product_type == "manual":
+        delivery_content = request.form.get("delivery_content", "").strip()
+        delivery_note = request.form.get("delivery_note", "").strip() or None
+        if not delivery_content:
+            flash("请填写交付内容", "warning")
+            return redirect(url_for("admin.order_detail", order_no=order_no))
+        order.delivery_content = delivery_content
+        order.delivery_note = delivery_note
+        order.fulfillment_status = "delivered"
+        order.delivered_at = datetime.utcnow()
+        db.session.commit()
+        log_action("order.deliver_manual", target=order_no)
+        flash("人工交付已完成", "success")
+        return redirect(url_for("admin.order_detail", order_no=order_no))
+
     if order.cards:
         flash("该订单已有卡密，无需重复补发", "warning")
         return redirect(url_for("admin.order_detail", order_no=order_no))
@@ -317,6 +344,7 @@ def order_deliver(order_no):
     card.order_id = order.id
     card.sold_at = datetime.utcnow()
     order.delivered_at = datetime.utcnow()
+    order.fulfillment_status = "delivered"
     db.session.flush()
     refresh_product_stock(order.product)
     db.session.commit()

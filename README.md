@@ -1,8 +1,8 @@
 # NodeLoc Store
 
-> 基于 NodeLoc OAuth2 + 积分支付的卡密商店 · Flask + MySQL/MariaDB · OpenResty 反代
+> 参考 Dujiao-Next 运营与交付模式，基于 NodeLoc OAuth2 + Nodeloc Payments 的数字商品商店 · v1.0.0
 
-一个完整可商用的在线卡密商店：**NodeLoc OAuth 一键登录 + 邮箱注册双通道**，**NodeLoc 积分支付**收款，**Admin 后台管理商品/卡密/订单**，**玻璃拟态深色 UI**。
+一个完整可商用的数字商品与自动发卡平台：保留 **NodeLoc OAuth2 + 邮箱注册登录**，支付统一接入 **Nodeloc Payments**，支持卡密自动交付、人工交付、订单履约追踪、角色权限、运营设置与审计。当前衍生版本统一定义为 **v1.0.0**。
 
 ![license](https://img.shields.io/github/license/kaoqy/Nodeloc-Store)
 
@@ -11,9 +11,12 @@
 - 🚀 **首次访问即安装** — 引导式配置数据库 + Admin 账号 + NodeLoc OAuth + 支付凭据
 - 🔐 **双通道登录** — NodeLoc OAuth2 一键登录 / 邮箱注册登录，Scope 感知（`email` 未授权时自动隐藏）
 - 💎 **精美 UI** — Tailwind + 玻璃拟态 + 渐变设计，深色主题，响应式
-- 📦 **商品管理** — 图片、定价、库存可见性、上下架
+- 📦 **商品管理** — 卡密商品与人工交付商品、图片、定价、交付说明、联系方式要求、库存可见性和上下架
 - 🎫 **卡密系统** — 批量导入（每行一个）、状态管理（可用/已售/禁用）、库存自动同步
-- 💰 **NodeLoc 积分支付** — 浏览器跳转支付 + GET 回调验签（HMAC-SHA256）+ 自动发货
+- 💰 **Nodeloc Payments** — 所有订单统一走 Nodeloc Payments，支持多种回调参数、HMAC-SHA256 验签和幂等履约
+- 🚚 **统一履约** — 卡密自动发货、缺货等待补货、人工交付、交付内容与备注、用户侧履约状态查询
+- 👥 **角色权限** — 超级管理员、管理员、运营、客服和普通用户五级权限
+- 🎁 **用户运营** — 每日签到、积分、连续签到奖励、站点公告与客服信息
 - 📊 **Admin 后台** — 概览统计、商品/卡密/订单/用户管理、操作审计日志、退款
 - 🛠️ **OpenResty 反代** — 适合用 OpenResty 跑其他服务、复用现有 vhost 的部署场景
 - 🔒 **安全** — PBKDF2 密码哈希、CSRF 全部 POST、回调 HMAC 验签、操作审计日志

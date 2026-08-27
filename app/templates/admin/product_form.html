@@ -27,6 +27,25 @@
 
       <div class="form-row">
         <div class="form-group">
+          <label class="form-label">商品类型</label>
+          <select name="product_type">
+            <option value="card" {% if not product or product.product_type == 'card' %}selected{% endif %}>卡密自动交付</option>
+            <option value="manual" {% if product and product.product_type == 'manual' %}selected{% endif %}>人工交付</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">交付说明</label>
+          <textarea name="delivery_instructions" rows="3" placeholder="说明交付方式、预计时间或需要用户提供的信息">{{ product.delivery_instructions if product else '' }}</textarea>
+        </div>
+      </div>
+
+      <label class="flex items-center gap-2 mb-3" style="cursor:pointer;">
+        <input type="checkbox" name="require_contact" {% if product and product.require_contact %}checked{% endif %} />
+        <span class="text-sm">下单时必须填写联系方式</span>
+      </label>
+
+      <div class="form-row">
+        <div class="form-group">
           <label class="form-label">价格（{{ currency }}）<span class="req">*</span></label>
           <input type="number" name="price" value="{{ product.price if product else 0 }}" min="0" required />
         </div>

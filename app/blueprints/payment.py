@@ -23,8 +23,14 @@ def create(product_id):
         flash("该商品已下架", "warning")
         return redirect(url_for("store.index"))
 
-    if product.stock_count < 1:
+    if product.product_type == "card" and product.stock_count < 1:
         flash("库存不足", "warning")
+        return redirect(url_for("store.product_detail", slug=product.slug))
+
+    customer_contact = request.form.get("customer_contact", "").strip() or None
+    customer_note = request.form.get("customer_note", "").strip() or None
+    if product.require_contact and not customer_contact:
+        flash("请填写交付所需的联系方式", "warning")
         return redirect(url_for("store.product_detail", slug=product.slug))
 
     # Create pending order
@@ -37,6 +43,9 @@ def create(product_id):
         unit_price=product.price,
         total_amount=product.price,
         status="pending",
+        fulfillment_status="pending",
+        customer_contact=customer_contact,
+        customer_note=customer_note,
     )
     db.session.add(order)
     db.session.commit()
@@ -186,10 +195,17 @@ def _fulfill_order(order: Order) -> ...:
 
 
 def _fulfill_order_db(order: Order, *, commit: bool = True):
-    """Mark order paid and assign a card to the user."""
+    """Mark the order paid and start its configured fulfillment workflow."""
     if order.delivered_at is not None:
         return
     order.status = "paid"
+
+    if order.product.product_type == "manual":
+        order.fulfillment_status = "awaiting_manual"
+        db.session.flush()
+        if commit:
+            db.session.commit()
+        return
 
     card = (
         Card.query
@@ -203,7 +219,9 @@ def _fulfill_order_db(order: Order, *, commit: bool = True):
         card.order_id = order.id
         card.sold_at = datetime.utcnow()
         order.delivered_at = datetime.utcnow()
+        order.fulfillment_status = "delivered"
     else:
+        order.fulfillment_status = "waiting_stock"
         log_action("payment.stock_warning", target=order.order_no, detail="no card available")
 
     db.session.flush()

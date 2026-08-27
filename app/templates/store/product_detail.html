@@ -32,7 +32,7 @@
           {% endif %}
         </div>
 
-        {% if product.stock_visible %}
+        {% if product.stock_visible and product.product_type == 'card' %}
         <div class="product-detail-status">
           <span class="status-dot {{ 'available' if product.stock_count > 0 else 'unavailable' }}"></span>
           {% if product.stock_count > 0 %}
@@ -45,9 +45,21 @@
 
         <div class="product-detail-actions">
           {% if current_user.is_authenticated %}
-            {% if product.stock_count > 0 and product.is_published %}
+            {% if (product.product_type == 'manual' or product.stock_count > 0) and product.is_published %}
             <form method="post" action="{{ url_for('payment.create', product_id=product.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              {% if product.require_contact %}
+              <div class="form-group" style="text-align:left;">
+                <label class="form-label">联系方式 <span class="req">*</span></label>
+                <input type="text" name="customer_contact" required placeholder="邮箱、Telegram 或其他联系方式" />
+              </div>
+              {% endif %}
+              {% if product.product_type == 'manual' %}
+              <div class="form-group" style="text-align:left;">
+                <label class="form-label">订单备注</label>
+                <textarea name="customer_note" rows="3" placeholder="填写人工交付需要的信息"></textarea>
+              </div>
+              {% endif %}
               <button type="submit" class="btn btn-primary btn-lg btn-block">
                 立即购买 · {{ product.price }} {{ currency }} →
               </button>
@@ -60,9 +72,15 @@
           {% endif %}
         </div>
 
+        {% if product.delivery_instructions %}
+        <div class="alert alert-info text-sm" style="margin-top:16px; text-align:left;">
+          <strong>交付说明</strong><br />{{ product.delivery_instructions }}
+        </div>
+        {% endif %}
+
         <div class="product-trust-row">
           <span>安全支付</span>
-          <span>自动交付</span>
+          <span>{{ '人工交付' if product.product_type == 'manual' else '自动交付' }}</span>
           <span>订单可追踪</span>
         </div>
       </div>

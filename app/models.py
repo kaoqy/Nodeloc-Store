@@ -146,6 +146,11 @@ class Product(db.Model):
     summary: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     image_path: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    product_type: Mapped[str] = mapped_column(
+        String(32), default="card", nullable=False, index=True
+    )
+    delivery_instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    require_contact: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Price stored in integer "points" (NodeLoc currency unit).
     price: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -233,6 +238,13 @@ class Order(db.Model):
     merchant_points: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    fulfillment_status: Mapped[str] = mapped_column(
+        String(32), default="pending", nullable=False, index=True
+    )
+    customer_contact: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    customer_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    delivery_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    delivery_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

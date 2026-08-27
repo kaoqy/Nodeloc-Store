@@ -75,6 +75,58 @@ def create_app() -> "Flask":
             ))
             db.session.commit()
 
+        if "products" in inspector.get_table_names():
+            product_columns = {
+                column["name"] for column in inspector.get_columns("products")
+            }
+            product_statements = []
+            if "product_type" not in product_columns:
+                product_statements.append(
+                    "ALTER TABLE products ADD COLUMN product_type VARCHAR(32) NOT NULL DEFAULT 'card'"
+                )
+            if "delivery_instructions" not in product_columns:
+                product_statements.append(
+                    "ALTER TABLE products ADD COLUMN delivery_instructions TEXT NULL"
+                )
+            if "require_contact" not in product_columns:
+                product_statements.append(
+                    "ALTER TABLE products ADD COLUMN require_contact BOOLEAN NOT NULL DEFAULT 0"
+                )
+            for statement in product_statements:
+                db.session.execute(text(statement))
+            if product_statements:
+                db.session.commit()
+
+        if "orders" in inspector.get_table_names():
+            order_columns = {
+                column["name"] for column in inspector.get_columns("orders")
+            }
+            order_statements = []
+            if "fulfillment_status" not in order_columns:
+                order_statements.append(
+                    "ALTER TABLE orders ADD COLUMN fulfillment_status VARCHAR(32) NOT NULL DEFAULT 'pending'"
+                )
+            if "customer_contact" not in order_columns:
+                order_statements.append(
+                    "ALTER TABLE orders ADD COLUMN customer_contact VARCHAR(255) NULL"
+                )
+            if "customer_note" not in order_columns:
+                order_statements.append(
+                    "ALTER TABLE orders ADD COLUMN customer_note TEXT NULL"
+                )
+            if "delivery_content" not in order_columns:
+                order_statements.append(
+                    "ALTER TABLE orders ADD COLUMN delivery_content TEXT NULL"
+                )
+            if "delivery_note" not in order_columns:
+                order_statements.append(
+                    "ALTER TABLE orders ADD COLUMN delivery_note TEXT NULL"
+                )
+            for statement in order_statements:
+                db.session.execute(text(statement))
+            if order_statements:
+                db.session.commit()
+
         # Ensure newly added tables, including checkins, exist after upgrading.
         db.create_all()
 
