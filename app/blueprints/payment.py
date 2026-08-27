@@ -70,7 +70,23 @@ def create(product_id):
 @bp.route("/callback", methods=["GET", "POST"])
 def callback():
     """Handle NodeLoc browser redirects and server-side payment callbacks."""
+    # NodeLoc integrations may submit the callback as query parameters,
+    # form data, or JSON. Normalize all supported transports before checking
+    # the signature and locating the order.
     params = request.values.to_dict(flat=True)
+    if request.is_json:
+        payload = request.get_json(silent=True)
+        if isinstance(payload, dict):
+            params.update({str(key): value for key, value in payload.items()})
+
+    # Accept common signature header variants without weakening verification.
+    if not params.get("signature"):
+        header_signature = (
+            request.headers.get("X-NodeLoc-Signature")
+            or request.headers.get("X-Signature")
+        )
+        if header_signature:
+            params["signature"] = header_signature.strip()
     payment = _payment()
 
     if payment.is_configured() and not NodeLocPayment.verify_callback(params, payment.secret_key):
@@ -78,9 +94,20 @@ def callback():
         return redirect(url_for("store.index"))
 
     transaction_id = params.get("transaction_id")
-    order_no = (params.get("external_reference") or params.get("order_no") or "").strip()
+    order_no = str(
+        params.get("external_reference")
+        or params.get("order_id")
+        or params.get("order_no")
+        or params.get("out_trade_no")
+        or ""
+    ).strip()
     amount = params.get("amount")
-    status = (params.get("status") or "").strip().lower()
+    status = str(
+        params.get("status")
+        or params.get("payment_status")
+        or params.get("trade_status")
+        or ""
+    ).strip().lower()
     platform_fee = params.get("platform_fee")
     merchant_points = params.get("merchant_points")
     paid_at_str = params.get("paid_at")
@@ -110,7 +137,10 @@ def callback():
     if order.status == "paid" and order.delivered_at is not None:
         return render_template("payment/done.html", order=order)
 
-    if status in {"completed", "paid", "success", "succeeded"}:
+    if status in {
+        "completed", "complete", "paid", "success", "succeeded",
+        "successful", "approved", "finished", "trade_success",
+    }:
         order.transaction_id = transaction_id
         if platform_fee is not None:
             order.platform_fee = int(platform_fee)

@@ -61,6 +61,10 @@ def create_app() -> "Flask":
     app.register_blueprint(store_bp)
     app.register_blueprint(user_bp, url_prefix="/user")
     app.register_blueprint(payment_bp, url_prefix="/payment")
+    # NodeLoc sends payment notifications from its own server and therefore
+    # cannot provide a browser-session CSRF token. Callback authenticity is
+    # verified separately using the NodeLoc HMAC signature.
+    csrf.exempt(payment_bp)
     app.register_blueprint(admin_bp, url_prefix="/admin")
     app.register_blueprint(api_bp, url_prefix="/api")
 
