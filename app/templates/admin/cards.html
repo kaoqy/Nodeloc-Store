@@ -22,6 +22,15 @@
 </div>
 
 <div class="card" style="padding:0;">
+  <div class="card-header">
+    <h3>卡密列表</h3>
+    <div class="flex gap-2">
+      <a href="{{ url_for('admin.product_cards', pid=product.id, status='all') }}" class="btn {{ 'btn-primary' if status == 'all' else 'btn-secondary' }} btn-sm">全部</a>
+      <a href="{{ url_for('admin.product_cards', pid=product.id, status='available') }}" class="btn {{ 'btn-primary' if status == 'available' else 'btn-secondary' }} btn-sm">可用</a>
+      <a href="{{ url_for('admin.product_cards', pid=product.id, status='sold') }}" class="btn {{ 'btn-primary' if status == 'sold' else 'btn-secondary' }} btn-sm">已售</a>
+      <a href="{{ url_for('admin.product_cards', pid=product.id, status='disabled') }}" class="btn {{ 'btn-primary' if status == 'disabled' else 'btn-secondary' }} btn-sm">禁用</a>
+    </div>
+  </div>
   <div class="table-wrap">
     <table>
       <thead>
@@ -47,16 +56,20 @@
           <td class="text-xs text-mute">{{ card.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
           <td>
             <div class="flex gap-3 text-sm">
+              {% if card.status != 'sold' %}
               <form method="post" action="{{ url_for('admin.card_toggle', card_id=card.id) }}" style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn {{ 'btn-secondary' if card.status == 'disabled' else 'btn-ghost' }} btn-sm">
                   {{ '启用' if card.status == 'disabled' else '禁用' }}
                 </button>
               </form>
+              {% endif %}
+              {% if card.status != 'sold' and not card.order_id %}
               <form method="post" action="{{ url_for('admin.card_delete', card_id=card.id) }}" style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-danger btn-sm">删除</button>
               </form>
+              {% endif %}
             </div>
           </td>
         </tr>
@@ -69,11 +82,11 @@
 
 {% if pagination.pages > 1 %}
 <div class="pagination">
-  {% if pagination.has_prev %}<a href="{{ url_for('admin.product_cards', pid=product.id, page=pagination.prev_num) }}">‹</a>{% else %}<span class="disabled">‹</span>{% endif %}
+  {% if pagination.has_prev %}<a href="{{ url_for('admin.product_cards', pid=product.id, status=status, page=pagination.prev_num) }}">‹</a>{% else %}<span class="disabled">‹</span>{% endif %}
   {% for p in pagination.iter_pages() %}
-    {% if p %}<a href="{{ url_for('admin.product_cards', pid=product.id, page=p) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>{% else %}<span>…</span>{% endif %}
+    {% if p %}<a href="{{ url_for('admin.product_cards', pid=product.id, status=status, page=p) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>{% else %}<span>…</span>{% endif %}
   {% endfor %}
-  {% if pagination.has_next %}<a href="{{ url_for('admin.product_cards', pid=product.id, page=pagination.next_num) }}">›</a>{% else %}<span class="disabled">›</span>{% endif %}
+  {% if pagination.has_next %}<a href="{{ url_for('admin.product_cards', pid=product.id, status=status, page=pagination.next_num) }}">›</a>{% else %}<span class="disabled">›</span>{% endif %}
 </div>
 {% endif %}
 

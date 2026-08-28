@@ -255,11 +255,12 @@ def product_restore(pid):
 def product_cards(pid):
     product = db.get_or_404(Product, pid)
     status = request.args.get("status", "all")
+    page = request.args.get("page", 1, type=int)
     q = Card.query.filter_by(product_id=pid)
     if status != "all":
         q = q.filter_by(status=status)
-    cards = q.order_by(Card.id.desc()).all()
-    return render_template("admin/cards.html", product=product, cards=cards, status=status)
+    pagination = q.order_by(Card.id.desc()).paginate(page=page, per_page=50, error_out=False)
+    return render_template("admin/cards.html", product=product, pagination=pagination, status=status)
 
 
 @bp.route("/products/<int:pid>/cards/add", methods=["POST"])
