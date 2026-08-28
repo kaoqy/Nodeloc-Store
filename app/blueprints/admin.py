@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import (Blueprint, abort, current_app, flash, redirect, render_template,
                    request, send_from_directory, url_for)
 from flask_login import current_user
+from sqlalchemy import func, or_, and_
 from werkzeug.utils import secure_filename
 
 from ..extensions import db
-from ..models import AppSetting, AuditLog, Card, DeliveryRecord, Order, PointLedger, Product, User
+from ..models import (AppSetting, AuditLog, Card, CheckIn, DeliveryRecord,
+                      Order, PointLedger, Product, User)
 from ..utils import (log_action, refresh_product_stock, slugify,
                      unique_product_slug)
 
@@ -49,6 +51,8 @@ ENDPOINT_PERMISSIONS = {
     "admin.oauth_test": "settings.manage",
     "admin.payment_test": "settings.manage",
     "admin.logs": "logs.view",
+    "admin.user_detail": "users.view",
+    "admin.user_orders": "orders.manage",
 }
 
 
@@ -69,10 +73,10 @@ def require_admin():
 @bp.route("/")
 def index():
     today = datetime.utcnow().date()
-    total_users = db.session.query(db.func.count(User.id)).scalar() or 0
-    total_orders = db.session.query(db.func.count(Order.id)).scalar() or 0
+    total_users = db.session.query(func.count(User.id)).scalar() or 0
+    total_orders = db.session.query(func.count(Order.id)).scalar() or 0
     paid_orders = Order.query.filter_by(status="paid").count()
-    revenue = db.session.query(db.func.sum(Order.total_amount)).filter(
+    revenue = db.session.query(func.sum(Order.total_amount)).filter(
         Order.status == "paid"
     ).scalar() or 0
 
@@ -134,7 +138,6 @@ def _product_edit(product):
             slug = unique_product_slug(name, exclude_id=product.id if product else None)
         else:
             slug = slugify(slug)
-            # check uniqueness
             exists = Product.query.filter_by(slug=slug).first()
             if exists and (not product or exists.id != product.id):
                 flash("Slug 已存在，请换一个", "danger")
@@ -184,6 +187,32 @@ def _product_edit(product):
 
     return render_template("admin/product_form.html",
                            product=product, is_new=(product is None))
+
+
+@bp.route("/users/<int:uid>")
+def user_detail(uid):
+    user = db.get_or_404(User, uid)
+    orders = Order.query.filter_by(user_id=uid).order_by(Order.created_at.desc()).limit(10).all()
+    point_entries = PointLedger.query.filter_by(user_id=uid).order_by(
+        PointLedger.created_at.desc()
+    ).limit(10).all()
+    return render_template(
+        "admin/user_detail.html",
+        user=user,
+        orders=orders,
+        point_entries=point_entries,
+        role_labels=ROLE_LABELS,
+    )
+
+
+@bp.route("/users/<int:uid>/orders")
+def user_orders(uid):
+    user = db.get_or_404(User, uid)
+    page = request.args.get("page", 1, type=int)
+    pagination = Order.query.filter_by(user_id=uid).order_by(
+        Order.created_at.desc()
+    ).paginate(page=page, per_page=20, error_out=False)
+    return render_template("admin/user_orders.html", user=user, pagination=pagination)
 
 
 @bp.route("/products/<int:pid>/toggle", methods=["POST"])

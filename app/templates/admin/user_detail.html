@@ -1,0 +1,153 @@
+{% extends "admin/base.html" %}
+{% block body %}
+
+<div class="flex items-center justify-between mb-5">
+  <div>
+    <h1 style="font-size:24px;">{{ user.username }}</h1>
+    <p class="text-sm text-mute mt-1">用户详情</p>
+  </div>
+  <a href="{{ url_for('admin.users') }}" class="btn btn-secondary btn-sm">← 返回用户列表</a>
+</div>
+
+<div class="card mb-4">
+  <div class="flex items-center gap-4 mb-4">
+    <div style="width:64px; height:64px; border-radius:50%; background:var(--bg-elev-2); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:24px; color:var(--text); overflow:hidden; border:2px solid var(--border);">
+      {% if user.oauth_avatar %}
+      <img src="{{ user.oauth_avatar }}" style="width:100%; height:100%; object-fit:cover;" />
+      {% else %}
+      {{ user.username[0]|upper }}
+      {% endif %}
+    </div>
+    <div>
+      <div style="font-weight:700; font-size:18px;">{{ user.username }}</div>
+      <div class="text-sm text-mute mt-1">
+        {{ user.email or '未绑定邮箱' }}
+        <span class="badge {{ 'badge-info' if user.role in ('super_admin','admin') else 'badge-neutral' }} ml-2">
+          {{ role_labels.get(user.effective_role, user.effective_role) }}
+        </span>
+      </div>
+    </div>
+  </div>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; font-size:13px;">
+    <div><span class="text-mute">积分：</span><strong>{{ user.points }}</strong></div>
+    <div><span class="text-mute">连续签到：</span><strong>{{ user.consecutive_checkins }} 天</strong></div>
+    <div><span class="text-mute">累计签到：</span><strong>{{ user.total_checkins }} 次</strong></div>
+    <div><span class="text-mute">注册时间：</span>{{ user.created_at.strftime('%Y-%m-%d') }}</div>
+    <div><span class="text-mute">最后登录：</span>{{ user.last_login_at.strftime('%Y-%m-%d %H:%M') if user.last_login_at else '从未' }}</div>
+    <div><span class="text-mute">状态：</span>
+      {% if user.is_active_flag %}<span class="badge badge-success">正常</span>
+      {% else %}<span class="badge badge-danger">禁用</span>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">
+    <h3>积分调整</h3>
+  </div>
+  <form method="post" action="{{ url_for('admin.user_adjust_points', uid=user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">变动（负数为扣减）</label>
+        <input type="number" name="delta" required placeholder="例如：100 或 -50" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">原因</label>
+        <input type="text" name="reason" required placeholder="调账原因" />
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">确认调整</button>
+  </form>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">
+    <h3>设置角色</h3>
+  </div>
+  <form method="post" action="{{ url_for('admin.user_set_role', uid=user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">角色</label>
+        <select name="role">
+          {% for role, label in role_labels.items() %}
+          <option value="{{ role }}" {{ 'selected' if user.effective_role == role }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="display:flex; align-items:flex-end;">
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="flex gap-2 mb-4">
+  {% if user.id != current_user.id %}
+  <form method="post" action="{{ url_for('admin.user_toggle_active', uid=user.id) }}" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn {{ 'btn-secondary' if user.is_active_flag else 'btn-ghost' }} btn-sm">
+      {{ '禁用账户' if user.is_active_flag else '启用账户' }}
+    </button>
+  </form>
+  {% endif %}
+  <a href="{{ url_for('admin.user_orders', uid=user.id) }}" class="btn btn-secondary btn-sm">查看全部订单</a>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">
+    <h3>最近订单</h3>
+  </div>
+  {% if orders %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>订单号</th><th>商品</th><th>金额</th><th>状态</th><th>时间</th></tr></thead>
+      <tbody>
+        {% for order in orders %}
+        <tr>
+          <td class="mono text-xs text-mute">{{ order.order_no[:14] }}…</td>
+          <td>{{ order.product.name if order.product else '(已删除)' }}</td>
+          <td>{{ order.total_amount }}</td>
+          <td>
+            {% if order.status=='paid' %}<span class="badge badge-success">已付</span>
+            {% elif order.status=='pending' %}<span class="badge badge-warning">待付</span>
+            {% else %}<span class="badge">{{ order.status }}</span>{% endif %}
+          </td>
+          <td class="text-xs text-mute">{{ order.created_at.strftime('%m-%d %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty text-sm">暂无订单</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h3>积分流水</h3>
+  </div>
+  {% if point_entries %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>时间</th><th>变动</th><th>余额</th><th>原因</th></tr></thead>
+      <tbody>
+        {% for entry in point_entries %}
+        <tr>
+          <td class="text-xs text-mute">{{ entry.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td><strong class="{{ 'text-success' if entry.delta > 0 else 'text-danger' }}">{{ '%+d'|format(entry.delta) }}</strong></td>
+          <td>{{ entry.balance_after }}</td>
+          <td>{{ entry.reason }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty text-sm">暂无积分流水</div>
+  {% endif %}
+</div>
+
+{% endblock %}
