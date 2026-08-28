@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from flask_login import login_user, logout_user
+from sqlalchemy import or_
 
 from ..extensions import db
 from ..models import OAuthIdentity, User
@@ -10,6 +11,18 @@ from ..nodeloc import NodeLocOAuth, NodeLocError, new_state
 from ..utils import verify_password
 
 bp = Blueprint("auth", __name__)
+
+
+def _validate_password_strength(password: str) -> tuple[bool, str]:
+    if len(password) < 8:
+        return False, "密码至少 8 位"
+    if len(password) > 128:
+        return False, "密码不能超过 128 位"
+    has_digit = any(c.isdigit() for c in password)
+    has_alpha = any(c.isalpha() for c in password)
+    if not (has_digit and has_alpha):
+        return False, "密码必须包含字母和数字"
+    return True, ""
 
 
 # ── Register ──────────────────────────────────────────────────────────────
@@ -24,11 +37,15 @@ def register():
         if not username or not password:
             flash("用户名和密码不能为空", "danger")
             return render_template("auth/register.html")
+        if len(username) < 3 or len(username) > 64:
+            flash("用户名长度必须在 3-64 位之间", "danger")
+            return render_template("auth/register.html")
         if password != password2:
             flash("两次密码不一致", "danger")
             return render_template("auth/register.html")
-        if len(password) < 8:
-            flash("密码至少 8 位", "danger")
+        valid, msg = _validate_password_strength(password)
+        if not valid:
+            flash(msg, "danger")
             return render_template("auth/register.html")
         if User.query.filter_by(username=username).first():
             flash("用户名已被注册", "danger")
@@ -51,14 +68,14 @@ def register():
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        login_field = request.form.get("login", "").strip()  # username or email
+        login_field = request.form.get("login", "").strip()
         password = request.form.get("password", "")
         remember = request.form.get("remember") == "on"
         next_url = request.args.get("next", url_for("store.index"))
 
-        user = User.query.filter_by(username=login_field).first()
-        if not user:
-            user = User.query.filter_by(email=login_field).first()
+        user = User.query.filter(
+            or_(User.username == login_field, User.email == login_field)
+        ).first()
         if not user or not user.check_password(password):
             flash("用户名 / 邮箱或密码错误", "danger")
             return render_template("auth/login.html")
@@ -117,11 +134,9 @@ def oauth_callback():
         flash(f"NodeLoc 连接失败: {e}", "danger")
         return redirect(url_for("auth.login"))
 
-    # Look up or create user
     user = _find_or_create_oauth_user(nl_user, token)
     login_user(user)
 
-    # If account not bound, redirect to bind page
     if not user.has_password() and not user.oauth_uid:
         return redirect(url_for("user.bind_oauth"))
 
@@ -146,8 +161,6 @@ def _find_or_create_oauth_user(nl_user, token) -> User:
     ).first()
     user = identity.user if identity else None
 
-    # Migration compatibility: adopt a legacy binding only when its exact
-    # provider/UID pair matches. Never bind by username or email.
     if not user:
         user = User.query.filter_by(
             oauth_provider="nodeloc", oauth_uid=provider_uid
@@ -161,7 +174,6 @@ def _find_or_create_oauth_user(nl_user, token) -> User:
             db.session.add(identity)
 
     if not user:
-        # Brand-new user
         base = (nl_user.username or f"user{nl_user.id}")[:64]
         suffix = 0
         candidate = base
@@ -170,7 +182,7 @@ def _find_or_create_oauth_user(nl_user, token) -> User:
             candidate = f"{base}_{suffix}"
         user = User(username=candidate)
         db.session.add(user)
-        db.session.flush()  # get id
+        db.session.flush()
         identity = OAuthIdentity(
             user_id=user.id,
             provider="nodeloc",
@@ -185,7 +197,6 @@ def _find_or_create_oauth_user(nl_user, token) -> User:
     identity.access_token = token.access_token
     identity.refresh_token = token.refresh_token
 
-    # Keep legacy columns synchronized during the compatibility window.
     user.oauth_provider = "nodeloc"
     user.oauth_uid = provider_uid
     user.oauth_username = nl_user.username
@@ -196,7 +207,7 @@ def _find_or_create_oauth_user(nl_user, token) -> User:
     user.oauth_has_email = "email" in (token.scope or "").split()
     user.oauth_access_token = token.access_token
     user.oauth_refresh_token = token.refresh_token
-    user.oauth_token_expires_at = None  # not needed for read-only profile
+    user.oauth_token_expires_at = None
     user.last_login_at = db.func.now()
     db.session.commit()
     return user

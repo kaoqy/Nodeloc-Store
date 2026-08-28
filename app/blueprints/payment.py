@@ -33,7 +33,6 @@ def create(product_id):
         flash("请填写交付所需的联系方式", "warning")
         return redirect(url_for("store.product_detail", slug=product.slug))
 
-    # Create pending order
     order_no = f"ord_{uuid.uuid4().hex[:20]}"
     order = Order(
         order_no=order_no,
@@ -50,11 +49,8 @@ def create(product_id):
     db.session.add(order)
     db.session.commit()
 
-    # Initiate NodeLoc payment
     payment = _payment()
     if not payment.is_configured():
-        # Payment configuration is a security boundary. An unconfigured
-        # gateway must never be treated as a successful payment.
         order.status = "payment_error"
         order.fulfillment_status = "blocked"
         db.session.commit()
@@ -78,9 +74,6 @@ def create(product_id):
         if payment_url:
             return redirect(payment_url)
 
-        # A successful-looking API response without a checkout URL is not
-        # proof of payment. Keep the order blocked for investigation instead
-        # of falling through to fulfillment.
         order.status = "payment_error"
         order.fulfillment_status = "blocked"
         db.session.commit()
@@ -101,17 +94,12 @@ def create(product_id):
 @bp.route("/callback", methods=["POST"])
 @bp.route("/notify", methods=["POST"])
 def callback():
-    """Handle authenticated server-to-server payment notifications only."""
-    # NodeLoc integrations may submit the callback as query parameters,
-    # form data, or JSON. Normalize all supported transports before checking
-    # the signature and locating the order.
     params = request.values.to_dict(flat=True)
     if request.is_json:
         payload = request.get_json(silent=True)
         if isinstance(payload, dict):
             params.update({str(key): value for key, value in payload.items()})
 
-    # Accept common signature header variants without weakening verification.
     if not params.get("signature"):
         header_signature = (
             request.headers.get("X-NodeLoc-Signature")
@@ -227,7 +215,6 @@ def callback():
 
 @bp.route("/return", methods=["GET"])
 def browser_return():
-    """Render the browser return path without changing payment state."""
     order_no = str(
         request.args.get("external_reference")
         or request.args.get("order_id")
@@ -269,12 +256,7 @@ def _payment() -> NodeLocPayment:
     )
 
 
-def _fulfill_order(order: Order) -> ...:
-    return _fulfill_order_db(order) or render_template("payment/done.html", order=order)
-
-
 def _fulfill_order_db(order: Order, *, commit: bool = True):
-    """Mark the order paid and start its configured fulfillment workflow."""
     if order.delivered_at is not None:
         return
     order.status = "paid"

@@ -33,3 +33,9 @@ def product_detail(slug):
         slug=slug, is_published=True, is_archived=False
     ).first_or_404()
     return render_template("store/product_detail.html", product=product)
+
+
+@bp.route("/search")
+def search():
+    """Alias for store index with query parameter."""
+    return index()

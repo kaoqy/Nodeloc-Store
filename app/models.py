@@ -15,14 +15,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .extensions import db
 
 
-# SQLite only auto-generates primary keys when the declared type is exactly
-# INTEGER. Keep BIGINT on production databases while using INTEGER on SQLite.
 BIGINT_PK = BigInteger().with_variant(Integer, "sqlite")
 
 
-# --------------------------------------------------------------------------- #
-# Users
-# --------------------------------------------------------------------------- #
 class User(UserMixin, db.Model):
     __tablename__ = "users"
 
@@ -56,20 +51,17 @@ class User(UserMixin, db.Model):
 
     orders: Mapped[list["Order"]] = relationship("Order", back_populates="user", lazy="dynamic")
 
-    # Flask-Login needs `is_active` to be a property by that exact name.
     @property
-    def is_active(self) -> bool:  # type: ignore[override]
+    def is_active(self) -> bool:
         return bool(self.is_active_flag)
 
     @property
     def effective_role(self) -> str:
-        """Return a backwards-compatible role for existing administrators."""
         if self.is_admin:
             return "super_admin" if self.role in {"", "user", None} else self.role
         return self.role or "user"
 
     def has_permission(self, permission: str) -> bool:
-        """Check a named management permission using the built-in role policy."""
         permissions = {
             "super_admin": {"*"},
             "admin": {
@@ -112,9 +104,6 @@ class User(UserMixin, db.Model):
         return f"<User {self.id} {self.username}>"
 
 
-# --------------------------------------------------------------------------- #
-# Independent OAuth identities and point ledger
-# --------------------------------------------------------------------------- #
 class OAuthIdentity(db.Model):
     __tablename__ = "oauth_identities"
     __table_args__ = (
@@ -122,7 +111,6 @@ class OAuthIdentity(db.Model):
         UniqueConstraint("user_id", "provider", name="uq_oauth_user_provider"),
     )
 
-    # SQLite only auto-generates primary keys declared as INTEGER PRIMARY KEY.
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
@@ -165,9 +153,6 @@ class PointLedger(db.Model):
     user: Mapped[User] = relationship("User", foreign_keys=[user_id], backref="point_entries")
 
 
-# --------------------------------------------------------------------------- #
-# Check-in records
-# --------------------------------------------------------------------------- #
 class CheckIn(db.Model):
     __tablename__ = "checkins"
     __table_args__ = (
@@ -192,9 +177,6 @@ class CheckIn(db.Model):
     user: Mapped[User] = relationship("User", back_populates="checkins")
 
 
-# --------------------------------------------------------------------------- #
-# Catalog
-# --------------------------------------------------------------------------- #
 class Product(db.Model):
     __tablename__ = "products"
 
@@ -210,13 +192,11 @@ class Product(db.Model):
     delivery_instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     require_contact: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Price stored in integer "points" (NodeLoc currency unit).
     price: Mapped[int] = mapped_column(Integer, nullable=False)
     original_price: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # Inventory / visibility
     stock_visible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    stock_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # cached card count
+    stock_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     auto_deliver: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
@@ -251,17 +231,13 @@ class Product(db.Model):
         return f"<Product {self.id} {self.name}>"
 
 
-# --------------------------------------------------------------------------- #
-# Card keys (a.k.a. license keys / vouchers)
-# --------------------------------------------------------------------------- #
 class Card(db.Model):
     __tablename__ = "cards"
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey("products.id"), nullable=False, index=True)
-    content: Mapped[str] = mapped_column(Text, nullable=False)  # may be multi-line "key\tvalue"
+    content: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="available", nullable=False, index=True)
-    # statuses: available | sold | reserved | disabled
     order_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("orders.id"), nullable=True)
     sold_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -274,9 +250,6 @@ class Card(db.Model):
     )
 
 
-# --------------------------------------------------------------------------- #
-# Orders
-# --------------------------------------------------------------------------- #
 class Order(db.Model):
     __tablename__ = "orders"
 
@@ -290,9 +263,6 @@ class Order(db.Model):
     total_amount: Mapped[int] = mapped_column(Integer, nullable=False)
 
     status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False, index=True)
-    # statuses: pending | paid | cancelled | refunded | failed
-
-    # NodeLoc payment fields
     transaction_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     platform_fee: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     merchant_points: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -349,9 +319,6 @@ class DeliveryRecord(db.Model):
     order: Mapped[Order] = relationship("Order", backref="delivery_records")
 
 
-# --------------------------------------------------------------------------- #
-# App settings (singleton key/value, populated by install wizard & admin)
-# --------------------------------------------------------------------------- #
 class AppSetting(db.Model):
     __tablename__ = "app_settings"
 
@@ -363,13 +330,11 @@ class AppSetting(db.Model):
 
     @classmethod
     def get(cls, key: str, default: Optional[str] = None) -> Optional:
-        """Return a setting value, or ``default`` when the key is absent."""
         setting = db.session.get(cls, key)
         return setting.value if setting is not None else default
 
     @classmethod
     def set(cls, key: str, value: Optional[str]) -> "AppSetting":
-        """Create or update a setting and persist it immediately."""
         setting = db.session.get(cls, key)
         if setting is None:
             setting = cls(key=key, value=value)
@@ -381,18 +346,13 @@ class AppSetting(db.Model):
 
     @classmethod
     def is_db_configured(cls) -> bool:
-        """Whether the database phase of the installation has completed."""
         return cls.get("install_step") in {"db_done", "complete"}
 
     @classmethod
     def is_installed(cls) -> bool:
-        """Whether all installation phases have completed."""
         return cls.get("install_step") == "complete"
 
 
-# --------------------------------------------------------------------------- #
-# Audit log (admin actions, callback events)
-# --------------------------------------------------------------------------- #
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"
 

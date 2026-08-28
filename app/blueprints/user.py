@@ -1,10 +1,12 @@
 """user blueprint — profile, change password, bind OAuth."""
 from __future__ import annotations
 
+import secrets
 from datetime import date, timedelta
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
+from sqlalchemy import or_, exists, and_
 from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
@@ -103,16 +105,20 @@ def edit_profile():
         if not new_username:
             flash("用户名不能为空", "danger")
             return render_template("user/edit_profile.html")
-        existing = db.session.query(db.exists().where(
-            db.and_(db.text("id != :uid"), db.text("username = :u"))
-        )).params(uid=current_user.id, u=new_username).scalar()
+        if len(new_username) < 3 or len(new_username) > 64:
+            flash("用户名长度必须在 3-64 位之间", "danger")
+            return render_template("user/edit_profile.html")
+        
+        existing = User.query.filter(
+            and_(User.id != current_user.id, User.username == new_username)
+        ).first()
         if existing:
             flash("用户名已被使用", "danger")
             return render_template("user/edit_profile.html")
         if new_email:
-            existing_email = db.session.query(db.exists().where(
-                db.and_(db.text("id != :uid"), db.text("email = :e"))
-            )).params(uid=current_user.id, e=new_email).scalar()
+            existing_email = User.query.filter(
+                and_(User.id != current_user.id, User.email == new_email)
+            ).first()
             if existing_email:
                 flash("邮箱已被使用", "danger")
                 return render_template("user/edit_profile.html")
@@ -140,6 +146,9 @@ def change_password():
             return render_template("user/change_password.html")
         if len(new_pw) < 8:
             flash("新密码至少 8 位", "danger")
+            return render_template("user/change_password.html")
+        if len(new_pw) > 128:
+            flash("新密码不能超过 128 位", "danger")
             return render_template("user/change_password.html")
         current_user.set_password(new_pw)
         db.session.commit()
@@ -273,10 +282,6 @@ def orders():
 def order_detail(order_no):
     order = Order.query.filter_by(order_no=order_no, user_id=current_user.id).first_or_404()
     return render_template("payment/order_detail.html", order=order)
-
-
-# ── helpers ──────────────────────────────────────────────────────────────
-import secrets
 
 
 def _oauth() -> NodeLocOAuth:

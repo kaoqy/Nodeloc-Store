@@ -16,14 +16,9 @@ from ..utils import log_action
 bp = Blueprint("install", __name__, url_prefix="/install")
 
 
-# --------------------------------------------------------------------------- #
-# 第一阶段：数据库连接
-# --------------------------------------------------------------------------- #
 @bp.route("/db", methods=["GET", "POST"])
 def db_step():
     """Phase 1: connect to database and create tables."""
-    # 首次访问时数据库或 app_settings 表可能尚未就绪。
-    # 必须先检查表是否存在，再读取安装状态，避免首次访问直接触发 500。
     try:
         inspector = inspect(db.engine)
         if "app_settings" in inspector.get_table_names():
@@ -32,7 +27,6 @@ def db_step():
             if AppSetting.is_db_configured():
                 return redirect(url_for("install.setup_step"))
     except Exception:
-        # 数据库未配置、暂不可达或尚未建表时，应继续显示安装表单。
         db.session.rollback()
         current_app.logger.info(
             "install: database is not ready; showing initial setup page",
@@ -49,7 +43,6 @@ def db_step():
         db_pass = request.form.get("db_pass", "")
         db_name = request.form.get("db_name", "").strip()
 
-        # 基本验证
         missing = []
         if not db_host:
             missing.append("数据库主机")
@@ -73,10 +66,7 @@ def db_step():
                 },
             )
 
-        # 尝试连接数据库并建表
         try:
-            # Docker 容器名只有在应用与数据库加入同一个 Docker 网络时
-            # 才能被解析。提前检查主机名，避免把网络问题误报成数据库故障。
             try:
                 socket.getaddrinfo(db_host, int(db_port), type=socket.SOCK_STREAM)
             except (socket.gaierror, ValueError) as exc:
@@ -86,23 +76,14 @@ def db_step():
                     "DB_NETWORK，docker run 可添加 --network <MariaDB网络名>。"
                 ) from exc
 
-            # 写入临时 config.ini（仅 DB 部分）
             _write_db_config(db_host, db_port, db_user, db_pass, db_name)
-
-            # 刷新 app config
             apply_to(current_app)
 
-            # 重新绑定数据库引擎
             from ..extensions import rebind_database
             rebind_database(current_app._get_current_object())
 
-            # 检查数据库连接
             db.session.execute(text("SELECT 1"))
-
-            # 创建所有表（如果不存在）
             db.create_all()
-
-            # 在 app_settings 中记录安装进度
             AppSetting.set("install_step", "db_done")
 
             current_app.logger.info(
@@ -110,7 +91,6 @@ def db_step():
                 db_user, db_host, db_port, db_name
             )
 
-            # 跳转到第二阶段
             return redirect(url_for("install.setup_step"))
 
         except Exception as e:
@@ -128,7 +108,6 @@ def db_step():
                 },
             )
 
-    # GET 请求
     return render_template(
         "install/db.html",
         error=None,
@@ -136,21 +115,15 @@ def db_step():
     )
 
 
-# --------------------------------------------------------------------------- #
-# 第二阶段：OAuth + Payment + 管理员
-# --------------------------------------------------------------------------- #
 @bp.route("/setup", methods=["GET", "POST"])
 def setup_step():
     """Phase 2: configure OAuth, Payment, and create admin user."""
-    # 如果已经完成安装，跳转商店
     if AppSetting.is_installed():
         return redirect(url_for("store.index"))
 
-    # 检查是否已完成第一阶段
     if not AppSetting.is_db_configured():
         return redirect(url_for("install.db_step"))
 
-    # 确保数据库表存在
     inspector = inspect(db.engine)
     if "app_settings" not in inspector.get_table_names():
         return redirect(url_for("install.db_step"))
@@ -159,25 +132,17 @@ def setup_step():
     defaults = _load_setup_defaults()
 
     if request.method == "POST":
-        # --- OAuth ---
         oauth_url = request.form.get("oauth_url", "https://www.nodeloc.com").strip().rstrip("/")
         oauth_client_id = request.form.get("oauth_client_id", "").strip()
         oauth_client_secret = request.form.get("oauth_client_secret", "")
-
-        # --- Payment ---
         payment_id = request.form.get("payment_id", "").strip()
         payment_secret = request.form.get("payment_secret", "")
-
-        # --- Admin ---
         admin_user = request.form.get("admin_user", "").strip()
         admin_email = request.form.get("admin_email", "").strip() or None
         admin_pass = request.form.get("admin_pass", "")
-
-        # --- Site ---
         site_name = request.form.get("site_name", "NodeLoc Store").strip()
         site_slogan = request.form.get("site_slogan", "").strip()
 
-        # 验证必填项
         missing = []
         if not oauth_client_id:
             missing.append("OAuth Client ID")
@@ -229,7 +194,6 @@ def setup_step():
                 },
             )
 
-        # HTTPS 检查：redirect_uri 必须 HTTPS
         redirect_uri = url_for("auth.oauth_callback", _external=True, _scheme="https")
         if not redirect_uri.startswith("https://"):
             error = "请通过 HTTPS 访问安装页面，或配置反向代理提供 SSL 证书"
@@ -250,7 +214,6 @@ def setup_step():
                 },
             )
 
-        # 写入 config.ini（完整配置，包含 OAuth/Payment）
         try:
             _write_full_config(
                 site_name=site_name,
@@ -283,14 +246,11 @@ def setup_step():
                 },
             )
 
-        # 刷新 app config（让 OAuth/Payment 配置生效）
         apply_to(current_app)
 
-        # 创建管理员用户
         try:
             existing = User.query.filter_by(username=admin_user).first()
             if existing:
-                # 如果已存在但未设置密码，更新密码
                 if not existing.has_password():
                     existing.set_password(admin_pass)
                     db.session.commit()
@@ -307,17 +267,13 @@ def setup_step():
                 db.session.commit()
                 current_app.logger.info("install: created admin user %s", admin_user)
 
-            # 标记安装完成
             AppSetting.set("install_step", "complete")
             _mark_install_complete()
             apply_to(current_app)
 
-            # 记录审计日志
             log_action("install_complete", target=admin_user, detail=f"管理员 {admin_user} 完成安装")
-
             current_app.logger.info("install: phase 2 complete, store ready")
 
-            # 跳转到商店首页
             return redirect(url_for("store.index"))
 
         except Exception as e:
@@ -340,7 +296,6 @@ def setup_step():
                 },
             )
 
-    # GET 请求
     return render_template(
         "install/setup.html",
         error=None,
@@ -348,11 +303,7 @@ def setup_step():
     )
 
 
-# --------------------------------------------------------------------------- #
-# 辅助函数
-# --------------------------------------------------------------------------- #
 def _load_db_defaults() -> dict:
-    """从 config.ini 加载 DB 配置默认值（如果存在）"""
     defaults = {
         "db_host": "localhost",
         "db_port": "3306",
@@ -371,7 +322,6 @@ def _load_db_defaults() -> dict:
 
 
 def _load_setup_defaults() -> dict:
-    """从 config.ini 加载配置默认值（如果存在）"""
     defaults = {
         "site_name": "NodeLoc Store",
         "site_slogan": "",
@@ -400,7 +350,6 @@ def _load_setup_defaults() -> dict:
 
 
 def _write_db_config(host: str, port: str, user: str, pwd: str, name: str) -> None:
-    """写入数据库配置到 config.ini（只写 DB 部分，保留其他已有配置）"""
     cfg = RawConfigParser()
     if CONFIG_PATH.exists():
         cfg.read(CONFIG_PATH, encoding="utf-8")
@@ -415,7 +364,6 @@ def _write_db_config(host: str, port: str, user: str, pwd: str, name: str) -> No
     cfg.set("database", "db_pass", pwd)
     cfg.set("database", "db_name", name)
 
-    # 如果 app.installed 还没写，初始化为 0
     if cfg.has_section("app") and not cfg.has_option("app", "installed"):
         cfg.set("app", "installed", "0")
     if not cfg.has_section("app"):
@@ -438,7 +386,6 @@ def _write_full_config(
     payment_id: str,
     payment_secret: str,
 ) -> None:
-    """写入完整配置到 config.ini（包含 OAuth/Payment/App）"""
     cfg = RawConfigParser()
     if CONFIG_PATH.exists():
         cfg.read(CONFIG_PATH, encoding="utf-8")
@@ -449,7 +396,7 @@ def _write_full_config(
 
     cfg.set("app", "site_name", site_name)
     cfg.set("app", "site_slogan", site_slogan)
-    cfg.set("app", "installed", "0")  # 由数据库标志控制
+    cfg.set("app", "installed", "0")
 
     cfg.set("oauth", "url", oauth_url)
     cfg.set("oauth", "client_id", oauth_client_id)
@@ -466,7 +413,6 @@ def _write_full_config(
 
 
 def _mark_install_complete() -> None:
-    """Persist the file-based installation flag used by the global request gate."""
     cfg = RawConfigParser()
     if CONFIG_PATH.exists():
         cfg.read(CONFIG_PATH, encoding="utf-8")

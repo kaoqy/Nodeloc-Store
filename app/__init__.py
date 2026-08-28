@@ -183,13 +183,18 @@ def create_app() -> "Flask":
             if not any(endpoint.startswith(p) for p in allowed):
                 return redirect(url_for("install.db_step"))
 
-    # Administrative statistics and audit pages contain live operational
-    # data. Prevent browsers and reverse proxies from serving stale copies
-    # when users revisit or refresh those pages.
+    # ---------- Security & cache headers ----------
     @app.after_request
-    def _disable_dynamic_page_cache(response):
+    def _set_security_headers(response):
+        """Add global security headers and disable caching for private pages."""
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
         endpoint = request.endpoint or ""
-        if endpoint.startswith("admin."):
+        if endpoint.startswith("admin.") or endpoint.startswith("user.") or endpoint.startswith("payment."):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
