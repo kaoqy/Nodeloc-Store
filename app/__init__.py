@@ -183,6 +183,18 @@ def create_app() -> "Flask":
             if not any(endpoint.startswith(p) for p in allowed):
                 return redirect(url_for("install.db_step"))
 
+    # Administrative statistics and audit pages contain live operational
+    # data. Prevent browsers and reverse proxies from serving stale copies
+    # when users revisit or refresh those pages.
+    @app.after_request
+    def _disable_dynamic_page_cache(response):
+        endpoint = request.endpoint or ""
+        if endpoint.startswith("admin."):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     # ---------- Context ----------
     @app.context_processor
     def _inject_globals():

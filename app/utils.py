@@ -144,3 +144,7 @@ def log_action(action: str, *, target: str | None = None, detail: str | None = N
         detail=detail,
         ip=ip,
     ))
+    # Audit calls are frequently made after the business transaction has
+    # already been committed. Persist the audit row immediately so Flask-
+    # SQLAlchemy does not roll it back when the request-scoped session closes.
+    db.session.commit()

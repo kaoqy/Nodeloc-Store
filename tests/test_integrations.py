@@ -8,7 +8,7 @@ from sqlalchemy import inspect
 
 import app as app_package
 from app.extensions import db
-from app.models import Card, DeliveryRecord, Order, PointLedger, Product, User
+from app.models import AuditLog, Card, DeliveryRecord, Order, PointLedger, Product, User
 
 
 def configure_test_app(monkeypatch, database_path):
@@ -317,3 +317,31 @@ def test_manual_delivery_persists_single_completed_record(app, client):
         assert records[0].content == "manual-license"
         assert records[0].actor_id == admin_id
         assert records[0].completed_at is not None
+
+
+def test_log_action_persists_without_a_followup_commit(app):
+    from app.utils import log_action
+
+    with app.test_request_context("/payment/callback", headers={"X-Forwarded-For": "203.0.113.10"}):
+        log_action("payment.test", target="ORDER-AUDIT", detail="persist immediately")
+        db.session.remove()
+
+    with app.app_context():
+        row = AuditLog.query.filter_by(action="payment.test", target="ORDER-AUDIT").one()
+        assert row.detail == "persist immediately"
+        assert row.ip == "203.0.113.10"
+
+
+def test_admin_pages_disable_response_caching(app, client):
+    with app.app_context():
+        admin = make_user("admin-cache", role="super_admin", is_admin=True)
+        db.session.commit()
+        admin_id = admin.id
+
+    login(client, admin_id)
+    response = client.get("/admin/")
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store, no-cache, must-revalidate, max-age=0"
+    assert response.headers["Pragma"] == "no-cache"
+    assert response.headers["Expires"] == "0"
