@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}积分流水{% endblock %}
+{% block body %}
+<div class="container" style="max-width:900px;">
+  <div class="flex items-center justify-between mb-4" style="gap:16px; flex-wrap:wrap;">
+    <div>
+      <h1>积分流水</h1>
+      <p class="text-sm text-mute" style="margin:4px 0 0;">当前余额：{{ current_user.points }} 积分</p>
+    </div>
+    <a href="{{ url_for('user.profile') }}" class="btn btn-secondary btn-sm">返回个人中心</a>
+  </div>
+
+  <div class="card" style="padding:0;">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>变动</th>
+            <th>变动后余额</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in pagination.items %}
+          <tr>
+            <td class="text-xs text-mute">{{ item.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+            <td><strong class="{{ 'text-success' if item.delta > 0 else 'text-danger' }}">{{ '%+d'|format(item.delta) }}</strong></td>
+            <td>{{ item.balance_after }}</td>
+            <td>{{ item.reason }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-mute" style="padding:36px;">暂无积分流水</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if pagination.pages > 1 %}
+  <div class="flex justify-center gap-2 mt-4">
+    {% if pagination.has_prev %}<a href="{{ url_for('user.points', page=pagination.prev_num) }}" class="btn btn-secondary btn-sm">上一页</a>{% endif %}
+    <span class="text-sm text-mute" style="padding:7px 10px;">第 {{ pagination.page }} / {{ pagination.pages }} 页</span>
+    {% if pagination.has_next %}<a href="{{ url_for('user.points', page=pagination.next_num) }}" class="btn btn-secondary btn-sm">下一页</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

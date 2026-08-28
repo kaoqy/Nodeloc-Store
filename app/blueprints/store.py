@@ -16,7 +16,7 @@ def index():
     page = max(1, request.args.get("page", 1, type=int))
     per_page = 12
 
-    products_query = Product.query.filter_by(is_published=True)
+    products_query = Product.query.filter_by(is_published=True, is_archived=False)
     if q:
         products_query = products_query.filter(
             or_(Product.name.ilike(f"%{q}%"), Product.summary.ilike(f"%{q}%"))
@@ -29,5 +29,7 @@ def index():
 
 @bp.route("/product/<slug>")
 def product_detail(slug):
-    product = Product.query.filter_by(slug=slug, is_published=True).first_or_404()
+    product = Product.query.filter_by(
+        slug=slug, is_published=True, is_archived=False
+    ).first_or_404()
     return render_template("store/product_detail.html", product=product)

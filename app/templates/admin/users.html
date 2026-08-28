@@ -71,6 +71,16 @@
           <td>
             <strong>{{ u.points }} 积分</strong>
             <div class="text-xs text-mute">连续 {{ u.consecutive_checkins }} 天 · 共 {{ u.total_checkins }} 次</div>
+            {% if current_user.has_permission('users.manage') %}
+            <form method="post" action="{{ url_for('admin.user_adjust_points', uid=u.id) }}" class="mt-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="flex gap-2" style="align-items:center; flex-wrap:wrap;">
+                <input type="number" name="delta" required placeholder="如 10 或 -10" style="width:110px; padding:6px 8px;">
+                <input type="text" name="reason" required maxlength="255" placeholder="调账原因" style="width:150px; padding:6px 8px;">
+                <button type="submit" class="btn btn-secondary btn-sm">调整积分</button>
+              </div>
+            </form>
+            {% endif %}
           </td>
           <td>
             <span class="badge {{ 'badge-info' if u.effective_role in ['super_admin','admin'] else 'badge-neutral' }}">

@@ -5,7 +5,7 @@ from flask import Blueprint, current_app, flash, redirect, render_template, requ
 from flask_login import login_user, logout_user
 
 from ..extensions import db
-from ..models import User
+from ..models import OAuthIdentity, User
 from ..nodeloc import NodeLocOAuth, NodeLocError, new_state
 from ..utils import verify_password
 
@@ -140,17 +140,25 @@ def _oauth() -> NodeLocOAuth:
 
 
 def _find_or_create_oauth_user(nl_user, token) -> User:
-    user = User.query.filter_by(
-        oauth_provider="nodeloc", oauth_uid=str(nl_user.id)
+    provider_uid = str(nl_user.id)
+    identity = OAuthIdentity.query.filter_by(
+        provider="nodeloc", provider_uid=provider_uid
     ).first()
+    user = identity.user if identity else None
 
+    # Migration compatibility: adopt a legacy binding only when its exact
+    # provider/UID pair matches. Never bind by username or email.
     if not user:
-        # Try to match by username if no OAuth binding yet
-        user = User.query.filter_by(username=nl_user.username).first()
+        user = User.query.filter_by(
+            oauth_provider="nodeloc", oauth_uid=provider_uid
+        ).first()
         if user:
-            # Bind existing email account to OAuth
-            user.oauth_provider = "nodeloc"
-            user.oauth_uid = str(nl_user.id)
+            identity = OAuthIdentity(
+                user_id=user.id,
+                provider="nodeloc",
+                provider_uid=provider_uid,
+            )
+            db.session.add(identity)
 
     if not user:
         # Brand-new user
@@ -163,9 +171,23 @@ def _find_or_create_oauth_user(nl_user, token) -> User:
         user = User(username=candidate)
         db.session.add(user)
         db.session.flush()  # get id
+        identity = OAuthIdentity(
+            user_id=user.id,
+            provider="nodeloc",
+            provider_uid=provider_uid,
+        )
+        db.session.add(identity)
 
+    identity.username = nl_user.username
+    identity.display_name = nl_user.name
+    identity.avatar_url = nl_user.avatar_url
+    identity.scope = token.scope or ""
+    identity.access_token = token.access_token
+    identity.refresh_token = token.refresh_token
+
+    # Keep legacy columns synchronized during the compatibility window.
     user.oauth_provider = "nodeloc"
-    user.oauth_uid = str(nl_user.id)
+    user.oauth_uid = provider_uid
     user.oauth_username = nl_user.username
     user.oauth_name = nl_user.name
     user.oauth_avatar = nl_user.avatar_url

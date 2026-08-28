@@ -10,7 +10,7 @@ from flask_login import current_user
 from werkzeug.utils import secure_filename
 
 from ..extensions import db
-from ..models import AppSetting, AuditLog, Card, Order, Product, User
+from ..models import AppSetting, AuditLog, Card, DeliveryRecord, Order, PointLedger, Product, User
 from ..utils import (log_action, refresh_product_stock, slugify,
                      unique_product_slug)
 
@@ -44,6 +44,7 @@ ENDPOINT_PERMISSIONS = {
     "admin.user_toggle_admin": "users.manage",
     "admin.user_toggle_active": "users.manage",
     "admin.user_set_role": "users.manage",
+    "admin.user_adjust_points": "users.manage",
     "admin.settings": "settings.manage",
     "admin.oauth_test": "settings.manage",
     "admin.payment_test": "settings.manage",
@@ -87,12 +88,13 @@ def index():
 @bp.route("/products")
 def products():
     q = request.args.get("q", "").strip()
+    archived = request.args.get("archived", "0") == "1"
     page = request.args.get("page", 1, type=int)
-    pq = Product.query
+    pq = Product.query.filter_by(is_archived=archived)
     if q:
         pq = pq.filter(Product.name.ilike(f"%{q}%"))
     pagination = pq.order_by(Product.id.desc()).paginate(page=page, per_page=20, error_out=False)
-    return render_template("admin/products.html", pagination=pagination, q=q)
+    return render_template("admin/products.html", pagination=pagination, q=q, archived=archived)
 
 
 @bp.route("/products/new", methods=["GET", "POST"])
@@ -102,7 +104,7 @@ def product_new():
 
 @bp.route("/products/<int:pid>/edit", methods=["GET", "POST"])
 def product_edit(pid):
-    product = Product.query.get_or_404(pid)
+    product = db.get_or_404(Product, pid)
     return _product_edit(product)
 
 
@@ -186,7 +188,10 @@ def _product_edit(product):
 
 @bp.route("/products/<int:pid>/toggle", methods=["POST"])
 def product_toggle(pid):
-    product = Product.query.get_or_404(pid)
+    product = db.get_or_404(Product, pid)
+    if product.is_archived:
+        flash("归档商品不能直接上架，请先恢复商品", "warning")
+        return redirect(url_for("admin.products", archived=1))
     product.is_published = not product.is_published
     db.session.commit()
     flash(f"商品已{'上架' if product.is_published else '下架'}", "success")
@@ -195,18 +200,31 @@ def product_toggle(pid):
 
 @bp.route("/products/<int:pid>/delete", methods=["POST"])
 def product_delete(pid):
-    product = Product.query.get_or_404(pid)
-    db.session.delete(product)
+    product = db.get_or_404(Product, pid)
+    product.is_archived = True
+    product.is_published = False
+    product.archived_at = datetime.utcnow()
     db.session.commit()
-    flash("商品已删除", "success")
-    log_action("product.delete", target=product.slug)
+    flash("商品已归档，历史订单将继续保留", "success")
+    log_action("product.archive", target=product.slug)
     return redirect(url_for("admin.products"))
+
+
+@bp.route("/products/<int:pid>/restore", methods=["POST"])
+def product_restore(pid):
+    product = db.get_or_404(Product, pid)
+    product.is_archived = False
+    product.archived_at = None
+    db.session.commit()
+    flash("商品已恢复，请检查后再重新上架", "success")
+    log_action("product.restore", target=product.slug)
+    return redirect(url_for("admin.products", archived=1))
 
 
 # ── Cards ─────────────────────────────────────────────────────────────────
 @bp.route("/products/<int:pid>/cards")
 def product_cards(pid):
-    product = Product.query.get_or_404(pid)
+    product = db.get_or_404(Product, pid)
     status = request.args.get("status", "all")
     q = Card.query.filter_by(product_id=pid)
     if status != "all":
@@ -217,7 +235,7 @@ def product_cards(pid):
 
 @bp.route("/products/<int:pid>/cards/add", methods=["POST"])
 def add_cards(pid):
-    product = Product.query.get_or_404(pid)
+    product = db.get_or_404(Product, pid)
     raw = request.form.get("cards", "").strip()
     lines = list(dict.fromkeys(l.strip() for l in raw.splitlines() if l.strip()))
     existing = {
@@ -236,17 +254,69 @@ def add_cards(pid):
     # product stock in the same transaction. Previously stock_count was
     # refreshed after a commit without committing the refreshed value.
     db.session.flush()
+    waiting_orders = (
+        Order.query
+        .filter_by(product_id=pid, status="paid", fulfillment_status="waiting_stock")
+        .order_by(Order.paid_at.asc(), Order.id.asc())
+        .with_for_update()
+        .all()
+    )
+    auto_delivered = 0
+    for order in waiting_orders:
+        card = (
+            Card.query
+            .filter_by(product_id=pid, status="available")
+            .order_by(Card.id.asc())
+            .with_for_update(skip_locked=True)
+            .first()
+        )
+        if card is None:
+            break
+        delivered_at = datetime.utcnow()
+        card.status = "sold"
+        card.order_id = order.id
+        card.sold_at = delivered_at
+        order.delivered_at = delivered_at
+        order.fulfillment_status = "delivered"
+        pending_record = next(
+            (record for record in order.delivery_records if record.status == "waiting_stock"),
+            None,
+        )
+        if pending_record:
+            pending_record.status = "delivered"
+            pending_record.content = card.content
+            pending_record.note = f"补货自动发货，card_id={card.id}"
+            pending_record.completed_at = delivered_at
+        else:
+            db.session.add(DeliveryRecord(
+                order_id=order.id,
+                sequence=len(order.delivery_records) + 1,
+                delivery_type="card",
+                status="delivered",
+                content=card.content,
+                note=f"补货自动发货，card_id={card.id}",
+                completed_at=delivered_at,
+            ))
+        auto_delivered += 1
+    db.session.flush()
     refresh_product_stock(product)
     db.session.commit()
     skipped = len(existing)
-    flash(f"已添加 {added} 个卡密，跳过 {skipped} 个重复项", "success")
-    log_action("cards.add", target=f"product={pid}", detail=f"count={added}, skipped={skipped}")
+    flash(
+        f"已添加 {added} 个卡密，跳过 {skipped} 个重复项，自动补发 {auto_delivered} 个订单",
+        "success",
+    )
+    log_action(
+        "cards.add",
+        target=f"product={pid}",
+        detail=f"count={added}, skipped={skipped}, auto_delivered={auto_delivered}",
+    )
     return redirect(url_for("admin.product_cards", pid=pid))
 
 
 @bp.route("/cards/<int:card_id>/toggle", methods=["POST"])
 def card_toggle(card_id):
-    card = Card.query.get_or_404(card_id)
+    card = db.get_or_404(Card, card_id)
     if card.status == "sold":
         flash("已售卡密不能启用或禁用", "warning")
         return redirect(url_for("admin.product_cards", pid=card.product_id))
@@ -260,7 +330,7 @@ def card_toggle(card_id):
 
 @bp.route("/cards/<int:card_id>/delete", methods=["POST"])
 def card_delete(card_id):
-    card = Card.query.get_or_404(card_id)
+    card = db.get_or_404(Card, card_id)
     if card.status == "sold" or card.order_id is not None:
         flash("已售或已关联订单的卡密不能删除", "warning")
         return redirect(url_for("admin.product_cards", pid=card.product_id))
@@ -328,6 +398,27 @@ def order_deliver(order_no):
         order.delivery_note = delivery_note
         order.fulfillment_status = "delivered"
         order.delivered_at = datetime.utcnow()
+        pending_record = next(
+            (record for record in order.delivery_records if record.status == "awaiting_manual"),
+            None,
+        )
+        if pending_record:
+            pending_record.status = "delivered"
+            pending_record.content = delivery_content
+            pending_record.note = delivery_note
+            pending_record.actor_id = current_user.id
+            pending_record.completed_at = order.delivered_at
+        else:
+            db.session.add(DeliveryRecord(
+                order_id=order.id,
+                sequence=len(order.delivery_records) + 1,
+                delivery_type="manual",
+                status="delivered",
+                content=delivery_content,
+                note=delivery_note,
+                actor_id=current_user.id,
+                completed_at=order.delivered_at,
+            ))
         db.session.commit()
         log_action("order.deliver_manual", target=order_no)
         flash("人工交付已完成", "success")
@@ -345,6 +436,27 @@ def order_deliver(order_no):
     card.sold_at = datetime.utcnow()
     order.delivered_at = datetime.utcnow()
     order.fulfillment_status = "delivered"
+    pending_record = next(
+        (record for record in order.delivery_records if record.status == "waiting_stock"),
+        None,
+    )
+    if pending_record:
+        pending_record.status = "delivered"
+        pending_record.content = card.content
+        pending_record.note = f"人工补发，card_id={card.id}"
+        pending_record.actor_id = current_user.id
+        pending_record.completed_at = order.delivered_at
+    else:
+        db.session.add(DeliveryRecord(
+            order_id=order.id,
+            sequence=len(order.delivery_records) + 1,
+            delivery_type="card",
+            status="delivered",
+            content=card.content,
+            note=f"人工补发，card_id={card.id}",
+            actor_id=current_user.id,
+            completed_at=order.delivered_at,
+        ))
     db.session.flush()
     refresh_product_stock(order.product)
     db.session.commit()
@@ -394,11 +506,55 @@ def users():
     return render_template("admin/users.html", pagination=pagination, q=q)
 
 
+@bp.route("/users/<int:uid>/points", methods=["POST"])
+def user_adjust_points(uid):
+    if not current_user.has_permission("users.manage"):
+        abort(403)
+
+    user = db.get_or_404(User, uid)
+    try:
+        delta = int(request.form.get("delta", "0"))
+    except (TypeError, ValueError):
+        flash("积分变动必须是整数", "danger")
+        return redirect(url_for("admin.users"))
+
+    reason = request.form.get("reason", "").strip()
+    if delta == 0:
+        flash("积分变动不能为 0", "warning")
+        return redirect(url_for("admin.users"))
+    if not reason:
+        flash("请填写调账原因", "warning")
+        return redirect(url_for("admin.users"))
+    if user.points + delta < 0:
+        flash("扣减后积分不能小于 0", "danger")
+        return redirect(url_for("admin.users"))
+
+    user.points += delta
+    reference_id = f"{user.id}:{secrets.token_hex(12)}"
+    db.session.add(PointLedger(
+        user_id=user.id,
+        delta=delta,
+        balance_after=user.points,
+        reason=reason,
+        reference_type="admin_adjustment",
+        reference_id=reference_id,
+        actor_id=current_user.id,
+    ))
+    db.session.commit()
+    log_action(
+        "admin.user.adjust_points",
+        target=str(user.id),
+        detail=f"delta={delta}, balance={user.points}, reason={reason}",
+    )
+    flash(f"已为 {user.username} 调整 {delta:+d} 积分，当前余额 {user.points}", "success")
+    return redirect(url_for("admin.users"))
+
+
 @bp.route("/users/<int:uid>/toggle-admin", methods=["POST"])
 def user_toggle_admin(uid):
     if not current_user.has_permission("users.manage"):
         abort(403)
-    user = User.query.get_or_404(uid)
+    user = db.get_or_404(User, uid)
     if user.id == current_user.id:
         flash("不能修改自己的管理员权限", "warning")
         return redirect(url_for("admin.users"))
@@ -415,7 +571,7 @@ def user_set_role(uid):
     if not current_user.has_permission("users.manage"):
         abort(403)
 
-    user = User.query.get_or_404(uid)
+    user = db.get_or_404(User, uid)
     role = request.form.get("role", "user").strip()
     if role not in ROLE_LABELS:
         flash("无效的用户角色", "danger")
@@ -441,7 +597,7 @@ def user_set_role(uid):
 def user_toggle_active(uid):
     if not current_user.has_permission("users.manage"):
         abort(403)
-    user = User.query.get_or_404(uid)
+    user = db.get_or_404(User, uid)
     if user.id == current_user.id:
         flash("不能禁用自己的账户", "warning")
         return redirect(url_for("admin.users"))
@@ -590,7 +746,7 @@ def _save_setting(key: str, value: str) -> None:
         cfg.write(f)
 
     # Also keep in DB for runtime access
-    row = AppSetting.query.get(key)
+    row = db.session.get(AppSetting, key)
     if row:
         row.value = value
     else:

@@ -92,6 +92,14 @@ def create_app() -> "Flask":
                 product_statements.append(
                     "ALTER TABLE products ADD COLUMN require_contact BOOLEAN NOT NULL DEFAULT 0"
                 )
+            if "is_archived" not in product_columns:
+                product_statements.append(
+                    "ALTER TABLE products ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT 0"
+                )
+            if "archived_at" not in product_columns:
+                product_statements.append(
+                    "ALTER TABLE products ADD COLUMN archived_at DATETIME NULL"
+                )
             for statement in product_statements:
                 db.session.execute(text(statement))
             if product_statements:

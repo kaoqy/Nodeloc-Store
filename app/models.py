@@ -15,6 +15,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .extensions import db
 
 
+# SQLite only auto-generates primary keys when the declared type is exactly
+# INTEGER. Keep BIGINT on production databases while using INTEGER on SQLite.
+BIGINT_PK = BigInteger().with_variant(Integer, "sqlite")
+
+
 # --------------------------------------------------------------------------- #
 # Users
 # --------------------------------------------------------------------------- #
@@ -108,6 +113,59 @@ class User(UserMixin, db.Model):
 
 
 # --------------------------------------------------------------------------- #
+# Independent OAuth identities and point ledger
+# --------------------------------------------------------------------------- #
+class OAuthIdentity(db.Model):
+    __tablename__ = "oauth_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_uid", name="uq_oauth_provider_uid"),
+        UniqueConstraint("user_id", "provider", name="uq_oauth_user_provider"),
+    )
+
+    # SQLite only auto-generates primary keys declared as INTEGER PRIMARY KEY.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_uid: Mapped[str] = mapped_column(String(128), nullable=False)
+    username: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    scope: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    access_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    user: Mapped[User] = relationship("User", backref="oauth_identities")
+
+
+class PointLedger(db.Model):
+    __tablename__ = "point_ledger"
+    __table_args__ = (
+        UniqueConstraint("reference_type", "reference_id", name="uq_point_reference"),
+        Index("ix_point_ledger_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    balance_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(120), nullable=False)
+    reference_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    reference_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    actor_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship("User", foreign_keys=[user_id], backref="point_entries")
+
+
+# --------------------------------------------------------------------------- #
 # Check-in records
 # --------------------------------------------------------------------------- #
 class CheckIn(db.Model):
@@ -117,7 +175,7 @@ class CheckIn(db.Model):
         Index("ix_checkins_date", "checkin_date"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
     user_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -161,6 +219,8 @@ class Product(db.Model):
     stock_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # cached card count
     auto_deliver: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -197,7 +257,7 @@ class Product(db.Model):
 class Card(db.Model):
     __tablename__ = "cards"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)  # may be multi-line "key\tvalue"
     status: Mapped[str] = mapped_column(String(16), default="available", nullable=False, index=True)
@@ -220,7 +280,7 @@ class Card(db.Model):
 class Order(db.Model):
     __tablename__ = "orders"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
     order_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey("products.id"), nullable=False, index=True)
@@ -265,6 +325,28 @@ class Order(db.Model):
 
     def __repr__(self) -> str:
         return f"<Order {self.order_no} {self.status}>"
+
+
+class DeliveryRecord(db.Model):
+    __tablename__ = "delivery_records"
+    __table_args__ = (
+        UniqueConstraint("order_id", "sequence", name="uq_delivery_order_sequence"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    delivery_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    actor_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    order: Mapped[Order] = relationship("Order", backref="delivery_records")
 
 
 # --------------------------------------------------------------------------- #
@@ -314,7 +396,7 @@ class AppSetting(db.Model):
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
     actor_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     target: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)

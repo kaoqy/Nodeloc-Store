@@ -129,12 +129,18 @@ def refresh_product_stock(product: Product) -> None:
 # Audit
 # --------------------------------------------------------------------------- #
 def log_action(action: str, *, target: str | None = None, detail: str | None = None) -> None:
-    from flask import request
-    actor_id = current_user.id if current_user.is_authenticated else None
+    from flask import has_request_context, request
+
+    user = current_user if has_request_context() else None
+    actor_id = user.id if user is not None and getattr(user, "is_authenticated", False) else None
+    ip = None
+    if has_request_context():
+        ip = request.headers.get("X-Forwarded-For") or request.remote_addr
+
     db.session.add(AuditLog(
         actor_id=actor_id,
         action=action,
         target=target,
         detail=detail,
-        ip=(request.headers.get("X-Forwarded-For") or request.remote_addr) if request else None,
+        ip=ip,
     ))

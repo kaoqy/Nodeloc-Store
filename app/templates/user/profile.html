@@ -53,6 +53,7 @@
       <div class="card" style="padding:14px;">
         <div class="text-xs text-mute">积分余额</div>
         <strong style="font-size:22px;">{{ current_user.points }}</strong>
+        <div class="mt-2"><a href="{{ url_for('user.points') }}" class="text-sm">查看积分流水 →</a></div>
       </div>
       <div class="card" style="padding:14px;">
         <div class="text-xs text-mute">连续签到</div>

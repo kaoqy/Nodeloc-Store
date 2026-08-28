@@ -8,7 +8,7 @@ from flask_login import current_user, login_required
 from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
-from ..models import AppSetting, CheckIn, Order
+from ..models import AppSetting, CheckIn, OAuthIdentity, Order, PointLedger
 from ..nodeloc import NodeLocOAuth, NodeLocError
 from ..utils import log_action
 
@@ -67,6 +67,16 @@ def check_in():
     current_user.total_checkins += 1
     current_user.last_checkin_date = today
     db.session.add(record)
+    db.session.flush()
+    db.session.add(PointLedger(
+        user_id=current_user.id,
+        delta=reward,
+        balance_after=current_user.points,
+        reason=f"每日签到，连续 {streak} 天",
+        reference_type="checkin",
+        reference_id=str(record.id),
+        actor_id=current_user.id,
+    ))
 
     try:
         db.session.commit()
@@ -157,17 +167,31 @@ def bind_oauth():
             flash(f"绑定失败: {e}", "danger")
             return redirect(url_for("user.bind_oauth"))
 
-        # Check if another user already bound this NodeLoc account
-        existing = db.session.query(db.exists().where(
-            db.and_(
-                db.text("oauth_provider = 'nodeloc'"),
-                db.text("oauth_uid = :uid"),
-                db.text("id != :me"),
-            )
-        )).params(uid=str(nl_user.id), me=current_user.id).scalar()
+        existing = OAuthIdentity.query.filter_by(
+            provider="nodeloc", provider_uid=str(nl_user.id)
+        ).first()
         if existing:
             flash("该 NodeLoc 账号已绑定到其他账户", "warning")
             return redirect(url_for("user.profile"))
+
+        if OAuthIdentity.query.filter_by(
+            user_id=current_user.id, provider="nodeloc"
+        ).first():
+            flash("当前账户已绑定 NodeLoc 账号", "info")
+            return redirect(url_for("user.profile"))
+
+        identity = OAuthIdentity(
+            user_id=current_user.id,
+            provider="nodeloc",
+            provider_uid=str(nl_user.id),
+            username=nl_user.username,
+            display_name=nl_user.name,
+            avatar_url=nl_user.avatar_url,
+            scope=token.scope or "",
+            access_token=token.access_token,
+            refresh_token=token.refresh_token,
+        )
+        db.session.add(identity)
 
         current_user.oauth_provider = "nodeloc"
         current_user.oauth_uid = str(nl_user.id)
@@ -179,7 +203,12 @@ def bind_oauth():
         current_user.oauth_has_email = "email" in (token.scope or "").split()
         current_user.oauth_access_token = token.access_token
         current_user.oauth_refresh_token = token.refresh_token
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("该 NodeLoc 账号已被绑定，请重新检查账户状态", "warning")
+            return redirect(url_for("user.profile"))
         flash("NodeLoc 账号已绑定", "success")
         return redirect(url_for("user.profile"))
 
@@ -187,6 +216,46 @@ def bind_oauth():
     session["oauth_bind_state"] = state
     auth_url = oauth.build_authorize_url(state)
     return render_template("user/bind_oauth.html", auth_url=auth_url)
+
+
+@bp.route("/unbind-oauth", methods=["POST"])
+@login_required
+def unbind_oauth():
+    identity = OAuthIdentity.query.filter_by(
+        user_id=current_user.id, provider="nodeloc"
+    ).first()
+    if not identity:
+        flash("当前账户未绑定 NodeLoc", "info")
+        return redirect(url_for("user.profile"))
+    if not current_user.has_password():
+        flash("请先设置本地密码，再解绑唯一登录方式", "warning")
+        return redirect(url_for("user.change_password"))
+
+    db.session.delete(identity)
+    current_user.oauth_provider = None
+    current_user.oauth_uid = None
+    current_user.oauth_username = None
+    current_user.oauth_name = None
+    current_user.oauth_avatar = None
+    current_user.oauth_trust_level = None
+    current_user.oauth_scope = None
+    current_user.oauth_has_email = False
+    current_user.oauth_access_token = None
+    current_user.oauth_refresh_token = None
+    db.session.commit()
+    log_action("user.oauth_unbind", target=str(current_user.id), detail="provider=nodeloc")
+    flash("NodeLoc 账号已安全解绑", "success")
+    return redirect(url_for("user.profile"))
+
+
+@bp.route("/points")
+@login_required
+def points():
+    page = request.args.get("page", 1, type=int)
+    pagination = PointLedger.query.filter_by(user_id=current_user.id).order_by(
+        PointLedger.created_at.desc(), PointLedger.id.desc()
+    ).paginate(page=page, per_page=30, error_out=False)
+    return render_template("user/points.html", pagination=pagination)
 
 
 @bp.route("/orders")

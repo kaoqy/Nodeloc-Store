@@ -8,7 +8,7 @@ from flask import Blueprint, current_app, flash, redirect, render_template, requ
 from flask_login import current_user, login_required
 
 from ..extensions import db
-from ..models import Card, Order, Product
+from ..models import Card, DeliveryRecord, Order, Product
 from ..nodeloc import NodeLocPayment, NodeLocError, NodeLocOAuth
 from ..utils import log_action, refresh_product_stock
 
@@ -18,8 +18,8 @@ bp = Blueprint("payment", __name__)
 @bp.route("/create/<int:product_id>", methods=["POST"])
 @login_required
 def create(product_id):
-    product = Product.query.get_or_404(product_id)
-    if not product.is_published:
+    product = db.get_or_404(Product, product_id)
+    if not product.is_published or product.is_archived:
         flash("该商品已下架", "warning")
         return redirect(url_for("store.index"))
 
@@ -53,8 +53,18 @@ def create(product_id):
     # Initiate NodeLoc payment
     payment = _payment()
     if not payment.is_configured():
-        # Demo / no-payment mode: directly fulfill
-        return _fulfill_order(order)
+        # Payment configuration is a security boundary. An unconfigured
+        # gateway must never be treated as a successful payment.
+        order.status = "payment_error"
+        order.fulfillment_status = "blocked"
+        db.session.commit()
+        log_action(
+            "payment.configuration_missing",
+            target=order.order_no,
+            detail="order blocked before payment initiation",
+        )
+        flash("支付服务暂未配置，订单未支付且不会发货，请联系管理员", "danger")
+        return redirect(url_for("payment.order_detail", order_no=order.order_no))
 
     try:
         resp = payment.create_payment(
@@ -67,8 +77,20 @@ def create(product_id):
         payment_url = resp.get("payment_url")
         if payment_url:
             return redirect(payment_url)
-        # No URL returned → treat as instant completion (e.g. zero-price)
-        return _fulfill_order(order)
+
+        # A successful-looking API response without a checkout URL is not
+        # proof of payment. Keep the order blocked for investigation instead
+        # of falling through to fulfillment.
+        order.status = "payment_error"
+        order.fulfillment_status = "blocked"
+        db.session.commit()
+        log_action(
+            "payment.url_missing",
+            target=order.order_no,
+            detail=f"transaction_id={order.transaction_id or 'missing'}",
+        )
+        flash("支付平台未返回有效支付地址，订单未支付且不会发货", "danger")
+        return redirect(url_for("payment.order_detail", order_no=order.order_no))
     except NodeLocError as e:
         order.status = "failed"
         db.session.commit()
@@ -76,9 +98,10 @@ def create(product_id):
         return redirect(url_for("store.product_detail", slug=product.slug))
 
 
-@bp.route("/callback", methods=["GET", "POST"])
+@bp.route("/callback", methods=["POST"])
+@bp.route("/notify", methods=["POST"])
 def callback():
-    """Handle NodeLoc browser redirects and server-side payment callbacks."""
+    """Handle authenticated server-to-server payment notifications only."""
     # NodeLoc integrations may submit the callback as query parameters,
     # form data, or JSON. Normalize all supported transports before checking
     # the signature and locating the order.
@@ -98,9 +121,14 @@ def callback():
             params["signature"] = header_signature.strip()
     payment = _payment()
 
-    if payment.is_configured() and not NodeLocPayment.verify_callback(params, payment.secret_key):
+    if not payment.is_configured():
+        log_action("payment.callback_blocked", detail="payment gateway is not configured")
+        return "payment gateway not configured", 503
+
+    if not NodeLocPayment.verify_callback(params, payment.secret_key):
         flash("支付回调签名验证失败", "danger")
-        return redirect(url_for("store.index"))
+        log_action("payment.invalid_signature")
+        return "invalid signature", 400
 
     transaction_id = params.get("transaction_id")
     order_no = str(
@@ -123,38 +151,60 @@ def callback():
 
     order = Order.query.filter_by(order_no=order_no).with_for_update().first()
     if not order:
-        flash("订单不存在", "danger")
-        return redirect(url_for("store.index"))
+        log_action("payment.order_missing", target=order_no)
+        return "order not found", 404
 
-    if amount is not None:
-        try:
-            callback_amount = Decimal(str(amount))
-            order_amount = Decimal(str(order.total_amount))
-        except (InvalidOperation, TypeError, ValueError):
-            log_action("payment.invalid_amount", target=order_no, detail="invalid callback amount")
-            flash("支付回调金额格式错误", "danger")
-            return redirect(url_for("payment.order_detail", order_no=order.order_no))
-        if callback_amount != order_amount:
+    if amount is None:
+        log_action("payment.invalid_amount", target=order_no, detail="callback amount missing")
+        return "amount required", 400
+    try:
+        callback_amount = Decimal(str(amount))
+        order_amount = Decimal(str(order.total_amount))
+    except (InvalidOperation, TypeError, ValueError):
+        log_action("payment.invalid_amount", target=order_no, detail="invalid callback amount")
+        return "invalid amount", 400
+    if callback_amount != order_amount:
+        log_action(
+            "payment.amount_mismatch",
+            target=order_no,
+            detail=f"expected={order_amount}, received={callback_amount}",
+        )
+        return "amount mismatch", 400
+
+    if order.status == "paid":
+        if order.transaction_id != transaction_id:
             log_action(
-                "payment.amount_mismatch",
+                "payment.transaction_mismatch",
                 target=order_no,
-                detail=f"expected={order_amount}, received={callback_amount}",
+                detail=f"expected={order.transaction_id}, received={transaction_id}",
             )
-            flash("支付回调金额与订单不一致", "danger")
-            return redirect(url_for("payment.order_detail", order_no=order.order_no))
-
-    if order.status == "paid" and order.delivered_at is not None:
-        return render_template("payment/done.html", order=order)
+            return "transaction mismatch", 409
+        return "success", 200
 
     if status in {
         "completed", "complete", "paid", "success", "succeeded",
         "successful", "approved", "finished", "trade_success",
     }:
+        if not transaction_id:
+            log_action("payment.transaction_missing", target=order_no)
+            return "transaction id required", 400
+        if order.transaction_id and order.transaction_id != transaction_id:
+            log_action(
+                "payment.transaction_mismatch",
+                target=order_no,
+                detail=f"expected={order.transaction_id}, received={transaction_id}",
+            )
+            return "transaction mismatch", 409
         order.transaction_id = transaction_id
-        if platform_fee is not None:
-            order.platform_fee = int(platform_fee)
-        if merchant_points is not None:
-            order.merchant_points = int(merchant_points)
+        try:
+            if platform_fee is not None:
+                order.platform_fee = int(platform_fee)
+            if merchant_points is not None:
+                order.merchant_points = int(merchant_points)
+        except (TypeError, ValueError):
+            db.session.rollback()
+            log_action("payment.invalid_fee", target=order_no)
+            return "invalid fee", 400
         if paid_at_str:
             try:
                 order.paid_at = datetime.fromisoformat(paid_at_str.replace("Z", "+00:00"))
@@ -163,16 +213,45 @@ def callback():
         _fulfill_order_db(order, commit=False)
         db.session.commit()
         log_action("payment.completed", target=order_no, detail=f"amount={amount}")
-        return render_template("payment/done.html", order=order)
+        return "success", 200
     elif status in {"failed", "cancelled", "canceled", "expired"}:
-        order.status = "failed"
+        if order.status != "paid":
+            order.status = "failed"
         db.session.commit()
-        flash(f"支付失败: {status}", "warning")
-        return redirect(url_for("store.product_detail", slug=order.product.slug))
+        log_action("payment.failed", target=order_no, detail=f"status={status}")
+        return "success", 200
     else:
         log_action("payment.pending", target=order_no, detail=f"status={status or 'unknown'}")
-        flash("支付结果仍在处理中，请稍后刷新订单", "info")
+        return "unsupported status", 400
+
+
+@bp.route("/return", methods=["GET"])
+def browser_return():
+    """Render the browser return path without changing payment state."""
+    order_no = str(
+        request.args.get("external_reference")
+        or request.args.get("order_id")
+        or request.args.get("order_no")
+        or request.args.get("out_trade_no")
+        or ""
+    ).strip()
+    if not order_no:
+        flash("支付返回缺少订单号，请在订单中心查看结果", "warning")
+        return redirect(url_for("store.index"))
+
+    order = Order.query.filter_by(order_no=order_no).first()
+    if not order:
+        flash("订单不存在", "danger")
+        return redirect(url_for("store.index"))
+
+    if current_user.is_authenticated and order.user_id == current_user.id:
+        if order.status == "paid":
+            return render_template("payment/done.html", order=order)
+        flash("支付结果尚未由服务端确认，请稍后刷新", "info")
         return redirect(url_for("payment.order_detail", order_no=order.order_no))
+
+    flash("请登录后查看订单支付结果", "info")
+    return redirect(url_for("auth.login", next=url_for("payment.order_detail", order_no=order.order_no)))
 
 
 @bp.route("/order/<order_no>")
@@ -203,6 +282,13 @@ def _fulfill_order_db(order: Order, *, commit: bool = True):
     if order.product.product_type == "manual":
         order.fulfillment_status = "awaiting_manual"
         db.session.flush()
+        if not order.delivery_records:
+            db.session.add(DeliveryRecord(
+                order_id=order.id,
+                sequence=1,
+                delivery_type="manual",
+                status="awaiting_manual",
+            ))
         if commit:
             db.session.commit()
         return
@@ -220,8 +306,25 @@ def _fulfill_order_db(order: Order, *, commit: bool = True):
         card.sold_at = datetime.utcnow()
         order.delivered_at = datetime.utcnow()
         order.fulfillment_status = "delivered"
+        db.session.add(DeliveryRecord(
+            order_id=order.id,
+            sequence=len(order.delivery_records) + 1,
+            delivery_type="card",
+            status="delivered",
+            content=card.content,
+            note=f"card_id={card.id}",
+            completed_at=order.delivered_at,
+        ))
     else:
         order.fulfillment_status = "waiting_stock"
+        if not order.delivery_records:
+            db.session.add(DeliveryRecord(
+                order_id=order.id,
+                sequence=1,
+                delivery_type="card",
+                status="waiting_stock",
+                note="等待库存补充后自动发货",
+            ))
         log_action("payment.stock_warning", target=order.order_no, detail="no card available")
 
     db.session.flush()
