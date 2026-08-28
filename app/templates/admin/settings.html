@@ -25,9 +25,48 @@
       <div class="form-group">
         <label class="form-label">是否允许 HTTP</label>
         <select name="allow_http">
-          <option value="0" {{ 'selected' if not settings.get('allow_http') }}>否</option>
-          <option value="1" {{ 'selected' if settings.get('allow_http') }}>是</option>
+          <option value="0" {{ 'selected' if settings.get('allow_http') != '1' }}>否</option>
+          <option value="1" {{ 'selected' if settings.get('allow_http') == '1' }}>是</option>
         </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">客服邮箱</label>
+      <input type="email" name="support_email" value="{{ settings.get('support_email', '') }}" placeholder="选填" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">站点公告</label>
+      <textarea name="site_notice" rows="3" placeholder="将显示在用户首页">{{ settings.get('site_notice', '') }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">保存</button>
+  </form>
+</div>
+
+<div class="card mb-4">
+  <h3 class="mb-4">签到设置</h3>
+  <form method="post" action="{{ url_for('admin.settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">启用签到</label>
+        <select name="checkin_enabled">
+          <option value="1" {{ 'selected' if settings.get('checkin_enabled', '1') == '1' }}>是</option>
+          <option value="0" {{ 'selected' if settings.get('checkin_enabled') == '0' }}>否</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">基础奖励（积分/天）</label>
+        <input type="number" name="checkin_reward" value="{{ settings.get('checkin_reward', '5') }}" min="0" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">连续奖励（积分/天）</label>
+        <input type="number" name="checkin_streak_bonus" value="{{ settings.get('checkin_streak_bonus', '1') }}" min="0" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">奖励上限（积分）</label>
+        <input type="number" name="checkin_reward_cap" value="{{ settings.get('checkin_reward_cap', '20') }}" min="0" />
       </div>
     </div>
     <button type="submit" class="btn btn-primary">保存</button>
