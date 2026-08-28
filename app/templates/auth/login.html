@@ -1,19 +1,22 @@
 {% extends "base.html" %}
 {% block title %}登录 — {{ site_name }}{% endblock %}
 {% block body %}
-<div class="container-sm" style="padding-top:48px;">
-  <div class="card">
-    <h1 class="text-center mb-5">登录</h1>
+<div class="container-sm" style="padding-top:60px;">
+  <div class="card fade-in" style="max-width:420px; margin:0 auto;">
+    <div class="text-center mb-6">
+      <h1 style="font-size:24px;">欢迎回来</h1>
+      <p class="text-sm text-mute mt-2">登录您的 {{ site_name }} 账号</p>
+    </div>
 
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-group">
         <label class="form-label">用户名或邮箱</label>
-        <input type="text" name="login" required autofocus />
+        <input type="text" name="login" required autofocus placeholder="请输入用户名" />
       </div>
       <div class="form-group">
         <label class="form-label">密码</label>
-        <input type="password" name="password" required />
+        <input type="password" name="password" required placeholder="请输入密码" />
       </div>
       <div class="form-group flex items-center gap-2">
         <input type="checkbox" name="remember" id="remember" />
@@ -22,7 +25,7 @@
       <button type="submit" class="btn btn-primary btn-block">登录</button>
     </form>
 
-    <div class="divider" style="display:flex; align-items:center; gap:12px;">
+    <div class="divider" style="display:flex; align-items:center; gap:12px; margin:24px 0;">
       <div style="flex:1; height:1px; background:var(--border-soft);"></div>
       <span class="text-xs text-mute">或</span>
       <div style="flex:1; height:1px; background:var(--border-soft);"></div>

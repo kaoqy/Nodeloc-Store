@@ -1,39 +1,12 @@
 {% extends "admin/base.html" %}
-{% block title %}用户与权限{% endblock %}
-{% block header_title %}用户与权限{% endblock %}
 {% block body %}
-<div class="flex items-center justify-between mb-4" style="gap:16px; flex-wrap:wrap;">
-  <div>
-    <h1>用户与权限</h1>
-    <p class="text-sm text-mute" style="margin:4px 0 0;">为用户分配角色、控制后台访问范围，并管理账户状态。</p>
-  </div>
-  <form method="get" class="flex gap-2">
-    <input type="text" name="q" value="{{ q }}" placeholder="搜索用户名或邮箱" style="width:240px;" />
-    <button class="btn btn-secondary btn-sm" type="submit">搜索</button>
-    {% if q %}<a href="{{ url_for('admin.users') }}" class="btn btn-ghost btn-sm">清除</a>{% endif %}
-  </form>
-</div>
 
-<div class="card mb-4">
-  <h3 class="mb-3">内置角色权限</h3>
-  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px;">
-    <div class="card" style="padding:14px;">
-      <strong>超级管理员</strong>
-      <div class="text-xs text-mute mt-2">拥有全部权限，包括系统设置和角色管理。</div>
-    </div>
-    <div class="card" style="padding:14px;">
-      <strong>管理员</strong>
-      <div class="text-xs text-mute mt-2">管理商品、卡密、订单、用户、日志和系统设置。</div>
-    </div>
-    <div class="card" style="padding:14px;">
-      <strong>运营人员</strong>
-      <div class="text-xs text-mute mt-2">管理商品、卡密和订单，不可修改用户权限及设置。</div>
-    </div>
-    <div class="card" style="padding:14px;">
-      <strong>客服人员</strong>
-      <div class="text-xs text-mute mt-2">查看用户并处理订单，不可管理商品、卡密和设置。</div>
-    </div>
-  </div>
+<div class="flex items-center justify-between mb-5">
+  <h1 style="font-size:24px;">用户管理</h1>
+  <form method="get" class="flex gap-2">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索用户名..." style="width:200px;" class="form-control" />
+    <button class="btn btn-secondary btn-sm">搜索</button>
+  </form>
 </div>
 
 <div class="card" style="padding:0;">
@@ -42,11 +15,11 @@
       <thead>
         <tr>
           <th>ID</th>
-          <th>用户</th>
-          <th>NodeLoc</th>
-          <th>积分与签到</th>
+          <th>用户名</th>
+          <th>邮箱</th>
           <th>角色</th>
           <th>状态</th>
+          <th>积分</th>
           <th>注册时间</th>
           <th>操作</th>
         </tr>
@@ -55,83 +28,50 @@
         {% for u in pagination.items %}
         <tr>
           <td class="text-mute mono text-xs">{{ u.id }}</td>
+          <td><strong>{{ u.username }}</strong></td>
+          <td class="text-sm text-mute">{{ u.email or '-' }}</td>
           <td>
-            <strong>{{ u.username }}</strong>
-            <div class="text-xs text-mute">{{ u.email or '未绑定邮箱' }}</div>
-            {% if u.id == current_user.id %}<span class="badge badge-neutral mt-1">当前账户</span>{% endif %}
-          </td>
-          <td>
-            {% if u.oauth_provider %}
-              <span class="badge badge-info">已绑定</span>
-              {% if u.oauth_username %}<div class="text-xs text-mute mt-1">{{ u.oauth_username }}</div>{% endif %}
-            {% else %}
-              <span class="text-xs text-mute">未绑定</span>
-            {% endif %}
-          </td>
-          <td>
-            <strong>{{ u.points }} 积分</strong>
-            <div class="text-xs text-mute">连续 {{ u.consecutive_checkins }} 天 · 共 {{ u.total_checkins }} 次</div>
-            {% if current_user.has_permission('users.manage') %}
-            <form method="post" action="{{ url_for('admin.user_adjust_points', uid=u.id) }}" class="mt-2">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <div class="flex gap-2" style="align-items:center; flex-wrap:wrap;">
-                <input type="number" name="delta" required placeholder="如 10 或 -10" style="width:110px; padding:6px 8px;">
-                <input type="text" name="reason" required maxlength="255" placeholder="调账原因" style="width:150px; padding:6px 8px;">
-                <button type="submit" class="btn btn-secondary btn-sm">调整积分</button>
-              </div>
-            </form>
-            {% endif %}
-          </td>
-          <td>
-            <span class="badge {{ 'badge-info' if u.effective_role in ['super_admin','admin'] else 'badge-neutral' }}">
-              {{ role_labels.get(u.effective_role, u.effective_role) if role_labels is defined else u.effective_role }}
+            <span class="badge {{ 'badge-info' if u.role in ('super_admin','admin') else 'badge-neutral' }}">
+              {{ {'super_admin':'超管','admin':'管理','operator':'运营','support':'客服','user':'用户'}.get(u.role, u.role) }}
             </span>
-            {% if u.id != current_user.id and current_user.has_permission('users.manage') %}
-            <form method="post" action="{{ url_for('admin.user_set_role', uid=u.id) }}" class="flex gap-2 mt-2" style="align-items:center;">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <select name="role" style="min-width:130px; padding:6px 8px;">
-                {% for role, label in role_labels.items() %}
-                <option value="{{ role }}" {% if u.effective_role == role %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-              <button type="submit" class="btn btn-secondary btn-sm">保存</button>
-            </form>
-            {% endif %}
           </td>
           <td>
-            {% if u.is_active_flag %}
-              <span class="badge badge-success">正常</span>
-            {% else %}
-              <span class="badge badge-danger">已禁用</span>
-            {% endif %}
+            {% if u.is_active_flag %}<span class="badge badge-success">正常</span>
+            {% else %}<span class="badge badge-danger">禁用</span>{% endif %}
           </td>
+          <td>{{ u.points }}</td>
           <td class="text-xs text-mute">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
           <td>
-            {% if u.id != current_user.id and current_user.has_permission('users.manage') %}
-            <form method="post" action="{{ url_for('admin.user_toggle_active', uid=u.id) }}" style="display:inline;">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn {{ 'btn-secondary' if not u.is_active_flag else 'btn-ghost' }} btn-sm">
-                {{ '启用账户' if not u.is_active_flag else '禁用账户' }}
-              </button>
-            </form>
-            {% else %}
+            <div class="flex gap-3 text-sm">
+              <a href="{{ url_for('admin.user_set_role', uid=u.id) }}">角色</a>
+              {% if u.id != current_user.id %}
+              <form method="post" action="{{ url_for('admin.user_toggle_active', uid=u.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn {{ 'btn-secondary' if u.is_active_flag else 'btn-ghost' }} btn-sm">
+                  {{ '禁用' if u.is_active_flag else '启用' }}
+                </button>
+              </form>
+              {% else %}
               <span class="text-xs text-mute">不可操作</span>
-            {% endif %}
+              {% endif %}
+            </div>
           </td>
         </tr>
-        {% else %}
-        <tr><td colspan="8" class="text-center text-mute" style="padding:36px;">没有找到符合条件的用户</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  {% if not pagination.items %}<div class="empty">没有找到符合条件的用户</div>{% endif %}
 </div>
 
 {% if pagination.pages > 1 %}
-<div class="flex justify-center gap-2 mt-4">
-  {% if pagination.has_prev %}<a href="{{ url_for('admin.users', page=pagination.prev_num, q=q) }}" class="btn btn-secondary btn-sm">上一页</a>{% endif %}
-  <span class="text-sm text-mute" style="padding:7px 10px;">第 {{ pagination.page }} / {{ pagination.pages }} 页</span>
-  {% if pagination.has_next %}<a href="{{ url_for('admin.users', page=pagination.next_num, q=q) }}" class="btn btn-secondary btn-sm">下一页</a>{% endif %}
+<div class="pagination">
+  {% if pagination.has_prev %}<a href="{{ url_for('admin.users', page=pagination.prev_num, q=q) }}">‹</a>{% else %}<span class="disabled">‹</span>{% endif %}
+  {% for p in pagination.iter_pages() %}
+    {% if p %}<a href="{{ url_for('admin.users', page=p, q=q) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>{% else %}<span>…</span>{% endif %}
+  {% endfor %}
+  {% if pagination.has_next %}<a href="{{ url_for('admin.users', page=pagination.next_num, q=q) }}">›</a>{% else %}<span class="disabled">›</span>{% endif %}
 </div>
 {% endif %}
+
 {% endblock %}

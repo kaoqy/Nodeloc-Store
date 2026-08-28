@@ -1,98 +1,87 @@
 {% extends "base.html" %}
 {% block title %}{{ product.name }} · {{ site_name }}{% endblock %}
 {% block body %}
-<div class="product-detail-page">
-  <a href="{{ url_for('store.index') }}" class="detail-back">← 返回商店</a>
 
-  <article class="product-detail-card">
-    <div class="product-detail-grid">
-      <div class="product-detail-media">
-        {% if product.image_path %}
-          <img src="{{ url_for('admin.uploaded_file', filename=product.image_path) }}" alt="{{ product.name }}" />
-        {% else %}
-          <div class="product-detail-placeholder" aria-hidden="true">
-            <span class="product-detail-placeholder-ring"></span>
-            <strong>N</strong>
-          </div>
-        {% endif %}
-      </div>
+<div class="container" style="max-width:1000px; padding-top:40px;">
+  <a href="{{ url_for('store.index') }}" class="text-sm text-mute" style="display:inline-flex; align-items:center; gap:6px; margin-bottom:24px;">← 返回商店</a>
 
-      <div class="product-detail-content">
-        <span class="store-eyebrow">DIGITAL PRODUCT</span>
-        <h1>{{ product.name }}</h1>
-        {% if product.summary %}
-        <p class="product-detail-summary">{{ product.summary }}</p>
-        {% endif %}
-
-        <div class="product-detail-price">
-          <strong>{{ product.price }}</strong>
-          <span>{{ currency }}</span>
-          {% if product.original_price and product.original_price > product.price %}
-          <del>{{ product.original_price }}</del>
-          {% endif %}
-        </div>
-
-        {% if product.stock_visible and product.product_type == 'card' %}
-        <div class="product-detail-status">
-          <span class="status-dot {{ 'available' if product.stock_count > 0 else 'unavailable' }}"></span>
-          {% if product.stock_count > 0 %}
-            当前有货，剩余 {{ product.stock_count }} 件
-          {% else %}
-            当前缺货
-          {% endif %}
-        </div>
-        {% endif %}
-
-        <div class="product-detail-actions">
-          {% if current_user.is_authenticated %}
-            {% if (product.product_type == 'manual' or product.stock_count > 0) and product.is_published %}
-            <form method="post" action="{{ url_for('payment.create', product_id=product.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              {% if product.require_contact %}
-              <div class="form-group" style="text-align:left;">
-                <label class="form-label">联系方式 <span class="req">*</span></label>
-                <input type="text" name="customer_contact" required placeholder="邮箱、Telegram 或其他联系方式" />
-              </div>
-              {% endif %}
-              {% if product.product_type == 'manual' %}
-              <div class="form-group" style="text-align:left;">
-                <label class="form-label">订单备注</label>
-                <textarea name="customer_note" rows="3" placeholder="填写人工交付需要的信息"></textarea>
-              </div>
-              {% endif %}
-              <button type="submit" class="btn btn-primary btn-lg btn-block">
-                立即购买 · {{ product.price }} {{ currency }} →
-              </button>
-            </form>
-            {% else %}
-            <button disabled class="btn btn-block btn-lg product-sold-out">暂时售罄</button>
-            {% endif %}
-          {% else %}
-          <a href="{{ url_for('auth.login', next=url_for('store.product_detail', slug=product.slug)) }}" class="btn btn-primary btn-lg btn-block">登录后购买 →</a>
-          {% endif %}
-        </div>
-
-        {% if product.delivery_instructions %}
-        <div class="alert alert-info text-sm" style="margin-top:16px; text-align:left;">
-          <strong>交付说明</strong><br />{{ product.delivery_instructions }}
-        </div>
-        {% endif %}
-
-        <div class="product-trust-row">
-          <span>安全支付</span>
-          <span>{{ '人工交付' if product.product_type == 'manual' else '自动交付' }}</span>
-          <span>订单可追踪</span>
-        </div>
-      </div>
+  <div class="product-detail">
+    <div class="media fade-in">
+      {% if product.image_path %}
+      <img src="{{ url_for('admin.uploaded_file', filename=product.image_path) }}" alt="{{ product.name }}" />
+      {% else %}
+      <div class="media-placeholder">N</div>
+      {% endif %}
     </div>
 
-    {% if product.description %}
-    <section class="product-description">
-      <span class="store-eyebrow">DETAILS</span>
-      <h2>商品详情</h2>
-      <div>{{ product.description }}</div>
-    </section>
-    {% endif %}
-  </article>
+    <div class="product-info fade-in fade-in-delay-1">
+      <span class="badge badge-info">{{ '人工交付' if product.product_type == 'manual' else '自动发货' }}</span>
+      <h1 style="margin-top:16px;">{{ product.name }}</h1>
+      {% if product.summary %}
+      <p class="text-lg" style="margin-top:12px; color:var(--text-dim);">{{ product.summary }}</p>
+      {% endif %}
+
+      <div class="price">
+        {{ product.price }} <span style="font-size:18px; color:var(--text-mute); font-weight:400;">{{ currency }}</span>
+        {% if product.original_price and product.original_price > product.price %}
+        <del>{{ product.original_price }}</del>
+        {% endif %}
+      </div>
+
+      {% if product.stock_visible and product.product_type == 'card' %}
+      <div class="status">
+        <span class="status-dot {{ 'available' if product.stock_count > 0 else 'unavailable' }}"></span>
+        {% if product.stock_count > 0 %}
+          当前有货，剩余 {{ product.stock_count }} 件
+        {% else %}
+          当前缺货
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <div class="actions">
+        {% if current_user.is_authenticated %}
+          {% if (product.product_type == 'manual' or product.stock_count > 0) and product.is_published %}
+          <form method="post" action="{{ url_for('payment.create', product_id=product.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% if product.require_contact %}
+            <div class="form-group">
+              <label class="form-label">联系方式 <span class="req">*</span></label>
+              <input type="text" name="customer_contact" required placeholder="邮箱、Telegram 或其他联系方式" />
+            </div>
+            {% endif %}
+            {% if product.product_type == 'manual' %}
+            <div class="form-group">
+              <label class="form-label">订单备注</label>
+              <textarea name="customer_note" rows="3" placeholder="填写人工交付需要的信息"></textarea>
+            </div>
+            {% endif %}
+            <button type="submit" class="btn btn-primary btn-lg btn-block">
+              立即购买 · {{ product.price }} {{ currency }} →
+            </button>
+          </form>
+          {% else %}
+          <button disabled class="btn btn-block btn-lg" style="opacity:0.5; cursor:not-allowed;">暂时售罄</button>
+          {% endif %}
+        {% else %}
+        <a href="{{ url_for('auth.login', next=url_for('store.product_detail', slug=product.slug)) }}" class="btn btn-primary btn-lg btn-block">登录后购买 →</a>
+        {% endif %}
+      </div>
+
+      <div class="trust-badges">
+        <span>✓ 安全支付</span>
+        <span>✓ {{ '人工交付' if product.product_type == 'manual' else '自动交付' }}</span>
+        <span>✓ 订单可追踪</span>
+      </div>
+    </div>
+  </div>
+
+  {% if product.description %}
+  <div class="card mt-6">
+    <h3 class="mb-3">商品详情</h3>
+    <div style="color:var(--text-dim); line-height:1.8; white-space:pre-wrap;">{{ product.description }}</div>
+  </div>
+  {% endif %}
 </div>
+
 {% endblock %}

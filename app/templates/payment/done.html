@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}购买成功{% endblock %}
 {% block body %}
-<div class="container-sm" style="padding-top:48px;">
-  <div class="card text-center">
-    <div style="font-size:36px; margin-bottom:8px;">✓</div>
-    <h1>购买成功</h1>
-    <p class="text-dim text-sm mb-4">订单 <span class="mono text-xs">{{ order.order_no }}</span> 已支付</p>
+<div class="container-sm" style="padding-top:60px;">
+  <div class="card text-center fade-in" style="max-width:500px; margin:0 auto;">
+    <div style="font-size:56px; margin-bottom:16px;">✓</div>
+    <h1 style="margin-bottom:8px;">购买成功</h1>
+    <p class="text-dim text-sm mb-4">订单号：<span class="mono">{{ order.order_no }}</span></p>
 
     {% if order.cards %}
     <div style="text-align:left;">

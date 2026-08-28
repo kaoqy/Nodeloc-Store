@@ -1,60 +1,61 @@
 {% extends "admin/base.html" %}
-{% block title %}卡密 — {{ product.name }}{% endblock %}
-{% block header_title %}卡密管理 — {{ product.name }}{% endblock %}
 {% block body %}
 
-<div class="flex items-center justify-between mb-4">
+<div class="flex items-center justify-between mb-5">
   <div>
-    <a href="{{ url_for('admin.products') }}" class="text-sm text-mute">← 商品列表</a>
-    <span class="mx-2 text-mute">/</span>
-    <strong>{{ product.name }}</strong>
-    <span class="ml-3 text-xs text-mute">库存: <span class="text-success">{{ product.stock_count }}</span></span>
+    <h1 style="font-size:24px;">卡密管理</h1>
+    <p class="text-sm text-mute mt-1">商品：{{ product.name }}</p>
   </div>
+  <a href="{{ url_for('admin.products') }}" class="btn btn-secondary btn-sm">← 返回商品</a>
 </div>
 
-<div class="card mb-3">
-  <h3 class="mb-3">批量添加卡密</h3>
+<div class="card mb-4">
+  <h3 class="mb-3">添加卡密</h3>
   <form method="post" action="{{ url_for('admin.add_cards', pid=product.id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <textarea name="cards" rows="6" placeholder="每行一个卡密&#10;支持格式：&#10;卡密内容&#10;卡密内容 : 备注"></textarea>
-    <div class="form-help">每行一个。一行一个卡密，可选冒号后加备注</div>
-    <button type="submit" class="btn btn-primary btn-sm mt-2">确认添加</button>
+    <div class="form-group">
+      <label class="form-label">卡密内容（每行一个）</label>
+      <textarea name="cards" rows="5" placeholder="每行输入一个卡密" required></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">添加</button>
   </form>
-</div>
-
-<div class="flex gap-2 mb-3">
-  {% for s in ['all','available','sold','disabled'] %}
-  <a href="{{ url_for('admin.product_cards', pid=product.id, status=s) }}"
-     class="btn btn-sm {{ 'btn-primary' if status==s else 'btn-secondary' }}">
-    {{ {'all':'全部','available':'可用','sold':'已售','disabled':'禁用'}[s] }}
-  </a>
-  {% endfor %}
 </div>
 
 <div class="card" style="padding:0;">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>ID</th><th>内容</th><th>状态</th><th>售出时间</th><th>操作</th></tr></thead>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>内容</th>
+          <th>状态</th>
+          <th>添加时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
       <tbody>
-        {% for card in cards %}
+        {% for card in pagination.items %}
         <tr>
           <td class="text-mute mono text-xs">{{ card.id }}</td>
-          <td class="mono text-xs" style="max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ card.content }}">{{ card.content }}</td>
+          <td class="mono text-xs">{{ card.content[:30] }}{% if card.content|length > 30 %}…{% endif %}</td>
           <td>
-            {% if card.status=='available' %}<span class="badge badge-success">可用</span>
-            {% elif card.status=='sold' %}<span class="badge badge-warning">已售</span>
-            {% else %}<span class="badge badge-danger">禁用</span>{% endif %}
+            {% if card.status == 'available' %}<span class="badge badge-success">可用</span>
+            {% elif card.status == 'sold' %}<span class="badge badge-info">已售</span>
+            {% elif card.status == 'disabled' %}<span class="badge badge-danger">禁用</span>
+            {% else %}<span class="badge">{{ card.status }}</span>{% endif %}
           </td>
-          <td class="text-xs text-mute">{% if card.sold_at %}{{ card.sold_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}</td>
+          <td class="text-xs text-mute">{{ card.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
           <td>
             <div class="flex gap-3 text-sm">
-<form method="post" action="{{ url_for('admin.card_toggle', card_id=card.id) }}" class="inline-form">
+              <form method="post" action="{{ url_for('admin.card_toggle', card_id=card.id) }}" style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="link-button {{ 'text-warning' if card.status == 'available' else 'text-success' }}">{{ '禁用' if card.status == 'available' else '启用' }}</button>
+                <button type="submit" class="btn {{ 'btn-secondary' if card.status == 'disabled' else 'btn-ghost' }} btn-sm">
+                  {{ '启用' if card.status == 'disabled' else '禁用' }}
+                </button>
               </form>
-              <form method="post" action="{{ url_for('admin.card_delete', card_id=card.id) }}" style="display:inline;" onsubmit="return confirm('确认删除？')">
+              <form method="post" action="{{ url_for('admin.card_delete', card_id=card.id) }}" style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="text-danger" style="background:none; border:0; padding:0; cursor:pointer; font:inherit;">删除</button>
+                <button type="submit" class="btn btn-danger btn-sm">删除</button>
               </form>
             </div>
           </td>
@@ -63,6 +64,17 @@
       </tbody>
     </table>
   </div>
-  {% if not cards %}<div class="empty text-sm">暂无卡密</div>{% endif %}
+  {% if not pagination.items %}<div class="empty">暂无卡密</div>{% endif %}
 </div>
+
+{% if pagination.pages > 1 %}
+<div class="pagination">
+  {% if pagination.has_prev %}<a href="{{ url_for('admin.product_cards', pid=product.id, page=pagination.prev_num) }}">‹</a>{% else %}<span class="disabled">‹</span>{% endif %}
+  {% for p in pagination.iter_pages() %}
+    {% if p %}<a href="{{ url_for('admin.product_cards', pid=product.id, page=p) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>{% else %}<span>…</span>{% endif %}
+  {% endfor %}
+  {% if pagination.has_next %}<a href="{{ url_for('admin.product_cards', pid=product.id, page=pagination.next_num) }}">›</a>{% else %}<span class="disabled">›</span>{% endif %}
+</div>
+{% endif %}
+
 {% endblock %}

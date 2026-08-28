@@ -3,160 +3,57 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>安装 · NodeLoc Store</title>
-  <link href="{{ url_for("static", filename="css/app.css") }}" rel="stylesheet" />
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      background: radial-gradient(ellipse at 20% 50%, #0f172a 0%, #020617 100%);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0;
-      padding: 20px;
-    }
-    .glass {
-      background: rgba(255,255,255,0.03);
-      backdrop-filter: blur(32px) saturate(1.4);
-      -webkit-backdrop-filter: blur(32px) saturate(1.4);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 32px;
-      box-shadow: 0 40px 96px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04);
-    }
-    .glass-input {
-      background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 14px;
-      padding: 14px 18px;
-      color: #f1f5f9;
-      width: 100%;
-      transition: all 0.25s ease;
-      font-size: 14px;
-      outline: none;
-      font-weight: 400;
-      letter-spacing: 0.01em;
-    }
-    .glass-input:focus {
-      border-color: rgba(139, 92, 246, 0.5);
-      background: rgba(255,255,255,0.06);
-      box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.08);
-    }
-    .glass-input::placeholder { color: rgba(255,255,255,0.2); }
-    .btn-primary {
-      background: linear-gradient(135deg, #7c3aed, #4f46e5);
-      border: none;
-      border-radius: 14px;
-      padding: 14px 28px;
-      font-weight: 600;
-      font-size: 15px;
-      color: white;
-      width: 100%;
-      cursor: pointer;
-      transition: all 0.25s ease;
-      letter-spacing: 0.3px;
-      box-shadow: 0 4px 20px rgba(124, 58, 237, 0.25);
-    }
-    .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 12px 40px rgba(124, 58, 237, 0.4);
-    }
-    .step-badge {
-      display: inline-block;
-      background: rgba(139, 92, 246, 0.12);
-      color: #a78bfa;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 6px 18px;
-      border-radius: 999px;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      border: 1px solid rgba(139, 92, 246, 0.1);
-    }
-    .text-muted { color: rgba(255,255,255,0.35); }
-    .text-light { color: #f1f5f9; }
-    .alert-error {
-      background: rgba(239, 68, 68, 0.08);
-      border: 1px solid rgba(239, 68, 68, 0.12);
-      border-radius: 14px;
-      padding: 14px 18px;
-      color: #fca5a5;
-      font-size: 13px;
-      margin-bottom: 24px;
-      backdrop-filter: blur(8px);
-    }
-    .label {
-      display: block;
-      font-size: 12px;
-      font-weight: 500;
-      color: rgba(255,255,255,0.35);
-      margin-bottom: 6px;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-    }
-    .label .req { color: #f87171; }
-    .glow-text {
-      background: linear-gradient(135deg, #c4b5fd, #818cf8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-  </style>
+  <title>安装 · {{ site_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
 </head>
-<body class="installer-page">
-<div class="w-full max-w-lg px-4">
-  <div class="glass installer-card p-8 md:p-10">
-    <div class="text-center mb-8">
-      <div class="text-5xl mb-3">⚡</div>
-      <h1 class="text-3xl font-bold text-light tracking-tight">连接数据库</h1>
-      <p class="text-muted text-sm mt-2">第一步 · 配置 MariaDB / MySQL</p>
-      <div class="mt-4"><span class="step-badge">步骤 1 / 2</span></div>
-    </div>
+<body class="installer-body">
 
-    {% if error %}
-    <div class="alert-error">{{ error }}</div>
-    {% endif %}
-
-    <form method="post">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label class="label">主机 <span class="req">*</span></label>
-          <input type="text" name="db_host" class="glass-input" value="{{ defaults.db_host }}" required placeholder="localhost">
-        </div>
-        <div>
-          <label class="label">端口 <span class="req">*</span></label>
-          <input type="text" name="db_port" class="glass-input" value="{{ defaults.db_port }}" required placeholder="3306">
-        </div>
-      </div>
-
-      <div class="mt-4">
-        <label class="label">数据库名 <span class="req">*</span></label>
-        <input type="text" name="db_name" class="glass-input" value="{{ defaults.db_name }}" required placeholder="nodeloc_store">
-      </div>
-
-      <div class="mt-4">
-        <label class="label">用户名 <span class="req">*</span></label>
-        <input type="text" name="db_user" class="glass-input" value="{{ defaults.db_user }}" required placeholder="db_user">
-      </div>
-
-      <div class="mt-4">
-        <label class="label">密码</label>
-        <input type="password" name="db_pass" class="glass-input" value="{{ defaults.db_pass }}" placeholder="••••••••">
-      </div>
-
-      <div class="text-muted text-xs mt-5 leading-relaxed opacity-60">
-        💡 需要预先创建好数据库。连接成功后会自动建表。
-      </div>
-
-      <button type="submit" class="btn-primary mt-6">验证连接并继续 →</button>
-    </form>
-
-    <div class="text-center text-muted text-xs mt-8 opacity-40 tracking-wider">
-      NodeLoc Store · 安装向导
-    </div>
+<div class="installer-card fade-in">
+  <div class="text-center">
+    <div class="icon">⚡</div>
+    <h1>连接数据库</h1>
+    <p class="subtitle">第一步 · 配置 MariaDB / MySQL</p>
+    <span class="step-badge">步骤 1 / 2</span>
   </div>
+
+  {% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" style="margin-top:24px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">主机 <span class="req">*</span></label>
+        <input type="text" name="db_host" value="{{ defaults.db_host }}" required placeholder="localhost" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">端口 <span class="req">*</span></label>
+        <input type="text" name="db_port" value="{{ defaults.db_port }}" required placeholder="3306" />
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">数据库名 <span class="req">*</span></label>
+      <input type="text" name="db_name" value="{{ defaults.db_name }}" required placeholder="nodeloc_store" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">用户名 <span class="req">*</span></label>
+      <input type="text" name="db_user" value="{{ defaults.db_user }}" required placeholder="db_user" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">密码</label>
+      <input type="password" name="db_pass" value="{{ defaults.db_pass }}" placeholder="••••••••" />
+    </div>
+
+    <p class="hint">💡 需要预先创建好数据库。连接成功后会自动建表。</p>
+
+    <button type="submit" class="btn btn-primary btn-block btn-lg" style="margin-top:20px;">验证连接并继续 →</button>
+  </form>
 </div>
+
 </body>
 </html>

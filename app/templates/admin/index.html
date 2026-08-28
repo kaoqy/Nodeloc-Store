@@ -1,32 +1,32 @@
 {% extends "admin/base.html" %}
-{% block title %}概览{% endblock %}
-{% block header_title %}数据概览{% endblock %}
 {% block body %}
 
+<h1 style="margin-bottom:24px; font-size:24px;">数据概览</h1>
+
 <div class="stat-grid">
-  <div class="card stat-tile">
+  <div class="stat-tile">
     <div class="label">用户总数</div>
     <div class="value">{{ total_users }}</div>
   </div>
-  <div class="card stat-tile">
+  <div class="stat-tile">
     <div class="label">订单总数</div>
     <div class="value">{{ total_orders }}</div>
   </div>
-  <div class="card stat-tile">
+  <div class="stat-tile">
     <div class="label">已完成订单</div>
-    <div class="value text-success">{{ paid_orders }}</div>
+    <div class="value" style="color:#6ee7b7;">{{ paid_orders }}</div>
   </div>
-  <div class="card stat-tile">
+  <div class="stat-tile">
     <div class="label">总收入</div>
-    <div class="value value-accent">{{ revenue }}<span style="font-size:12px; color:var(--text-mute); font-weight:normal; margin-left:4px;">{{ currency }}</span></div>
+    <div class="value">{{ revenue }} <span style="font-size:14px; color:var(--text-mute); font-weight:400;">{{ currency }}</span></div>
   </div>
 </div>
 
-<div style="display:grid; grid-template-columns: 1.4fr 1fr; gap:14px;">
-  <div class="card" style="padding:0;">
-    <div class="card-header" style="padding:14px 18px; margin:0; border:0;">
+<div style="display:grid; grid-template-columns:1.5fr 1fr; gap:20px;">
+  <div class="card">
+    <div class="card-header">
       <h3>最新订单</h3>
-      <a href="{{ url_for('admin.orders') }}" class="text-sm">查看全部 →</a>
+      <a href="{{ url_for('admin.orders') }}" class="text-sm text-mute">查看全部 →</a>
     </div>
     {% if recent_orders %}
     <div class="table-wrap">
@@ -41,7 +41,7 @@
             <td>
               {% if o.status=='paid' %}<span class="badge badge-success">已付</span>
               {% elif o.status=='pending' %}<span class="badge badge-warning">待付</span>
-              {% else %}<span class="badge badge-danger">{{ o.status }}</span>{% endif %}
+              {% else %}<span class="badge">{{ o.status }}</span>{% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -53,18 +53,18 @@
     {% endif %}
   </div>
 
-  <div class="card" style="padding:0;">
-    <div class="card-header" style="padding:14px 18px; margin:0; border:0;">
+  <div class="card">
+    <div class="card-header">
       <h3>操作日志</h3>
-      <a href="{{ url_for('admin.logs') }}" class="text-sm">查看全部 →</a>
+      <a href="{{ url_for('admin.logs') }}" class="text-sm text-mute">查看全部 →</a>
     </div>
     {% if recent_logs %}
-    <div>
+    <div style="display:flex; flex-direction:column; gap:2px;">
       {% for log in recent_logs %}
-      <div class="flex items-start gap-3" style="padding:9px 18px; border-bottom:1px solid var(--border-soft); font-size:12.5px;">
-        <span class="text-mute mono" style="flex-shrink:0; font-size:11px;">{{ log.created_at.strftime('%m-%d %H:%M') }}</span>
+      <div class="flex items-start gap-3" style="padding:10px 0; border-bottom:1px solid var(--border-soft); font-size:12.5px;">
+        <span class="text-mute mono" style="flex-shrink:0; font-size:11px; min-width:70px;">{{ log.created_at.strftime('%m-%d %H:%M') }}</span>
         <div>
-          <div>{{ log.action }}</div>
+          <div style="color:var(--text);">{{ log.action }}</div>
           {% if log.target %}<div class="text-mute text-xs">{{ log.target }}</div>{% endif %}
         </div>
       </div>
@@ -75,4 +75,5 @@
     {% endif %}
   </div>
 </div>
+
 {% endblock %}

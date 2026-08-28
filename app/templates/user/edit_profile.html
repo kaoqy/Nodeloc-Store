@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}编辑资料{% endblock %}
 {% block body %}
-<div class="container-sm" style="padding-top:24px;">
-  <div class="card">
-    <h2 class="mb-4">编辑资料</h2>
+<div class="container-sm" style="padding-top:40px;">
+  <div class="card fade-in" style="max-width:500px; margin:0 auto;">
+    <h2 class="mb-5">编辑资料</h2>
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-group">
@@ -14,8 +14,10 @@
         <label class="form-label">邮箱</label>
         <input type="email" name="email" value="{{ current_user.email or '' }}" />
       </div>
-      <button type="submit" class="btn btn-primary">保存</button>
-      <a href="{{ url_for('user.profile') }}" class="btn btn-ghost">取消</a>
+      <div class="flex gap-2">
+        <button type="submit" class="btn btn-primary">保存</button>
+        <a href="{{ url_for('user.profile') }}" class="btn btn-ghost">取消</a>
+      </div>
     </form>
   </div>
 </div>

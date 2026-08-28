@@ -5,116 +5,85 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}{{ site_name }} · 管理{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
-  <style>
-    .admin-shell { display: flex; min-height: 100vh; }
-    .admin-side {
-      width: 200px; background: var(--bg-elev-1);
-      border-right: 1px solid var(--border);
-      display: flex; flex-direction: column;
-      flex-shrink: 0;
-    }
-    .admin-side .brand {
-      padding: 14px 16px; border-bottom: 1px solid var(--border-soft);
-      font-weight: 600; font-size: 13.5px;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .admin-side .brand .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-    .admin-side nav { flex: 1; padding: 10px 8px; }
-    .admin-side .nav-item {
-      display: flex; align-items: center; gap: 8px;
-      padding: 7px 10px; border-radius: 6px;
-      color: var(--text-dim); font-size: 13px; margin-bottom: 2px;
-    }
-    .admin-side .nav-item:hover { background: var(--bg-elev-2); color: var(--text); }
-    .admin-side .nav-item.active { background: var(--accent-soft); color: #a5b4fc; }
-    .admin-side .nav-item .ico { width: 16px; text-align: center; opacity: .7; }
-    .admin-side .foot {
-      padding: 10px; border-top: 1px solid var(--border-soft);
-    }
-    .admin-side .foot a {
-      display: block; padding: 6px 10px; font-size: 12px; color: var(--text-mute);
-      border-radius: 6px;
-    }
-    .admin-side .foot a:hover { color: var(--text); background: var(--bg-elev-2); }
-    .admin-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-    .admin-top {
-      height: 48px; padding: 0 20px;
-      border-bottom: 1px solid var(--border);
-      background: var(--bg-elev-1);
-      display: flex; align-items: center; justify-content: space-between;
-      font-size: 13px;
-    }
-    .admin-top .who { color: var(--text-mute); }
-    .admin-top .who strong { color: var(--text); font-weight: 500; }
-    .admin-content { flex: 1; padding: 20px; overflow: auto; }
-  </style>
 </head>
 <body>
 
 <div class="admin-shell">
 
-  <aside class="admin-side">
+  <aside class="admin-sidebar">
     <div class="brand">
-      <span class="dot"></span>{{ site_name }}
+      <span class="brand-mark">N</span>
+      <span>{{ site_name }}</span>
     </div>
     <nav>
       {% if current_user.has_permission('dashboard.view') %}
       <a href="{{ url_for('admin.index') }}" class="nav-item {% if request.endpoint == 'admin.index' %}active{% endif %}">
-        <span class="ico">▦</span>概览
+        <span class="icon">▦</span>概览
       </a>
       {% endif %}
       {% if current_user.has_permission('products.manage') %}
       <a href="{{ url_for('admin.products') }}" class="nav-item {% if 'admin.product' in (request.endpoint or '') %}active{% endif %}">
-        <span class="ico">▤</span>商品与卡密
+        <span class="icon">📦</span>商品管理
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('cards.manage') %}
+      <a href="#" class="nav-item disabled" onclick="return false;">
+        <span class="icon">🎫</span>卡密管理
       </a>
       {% endif %}
       {% if current_user.has_permission('orders.manage') %}
       <a href="{{ url_for('admin.orders') }}" class="nav-item {% if 'admin.order' in (request.endpoint or '') %}active{% endif %}">
-        <span class="ico">▣</span>订单
+        <span class="icon">📋</span>订单管理
       </a>
       {% endif %}
       {% if current_user.has_permission('users.view') %}
-      <a href="{{ url_for('admin.users') }}" class="nav-item {% if request.endpoint in ['admin.users', 'admin.user_set_role', 'admin.user_toggle_active', 'admin.user_toggle_admin'] %}active{% endif %}">
-        <span class="ico">◉</span>用户与权限
-      </a>
-      {% endif %}
-      {% if current_user.has_permission('logs.view') %}
-      <a href="{{ url_for('admin.logs') }}" class="nav-item {% if 'admin.log' in (request.endpoint or '') %}active{% endif %}">
-        <span class="ico">≡</span>日志
+      <a href="{{ url_for('admin.users') }}" class="nav-item {% if 'admin.user' in (request.endpoint or '') %}active{% endif %}">
+        <span class="icon">👥</span>用户管理
       </a>
       {% endif %}
       {% if current_user.has_permission('settings.manage') %}
-      <a href="{{ url_for('admin.settings') }}" class="nav-item {% if 'admin.settings' in (request.endpoint or '') %}active{% endif %}">
-        <span class="ico">⚙</span>设置
+      <a href="{{ url_for('admin.settings') }}" class="nav-item {% if request.endpoint == 'admin.settings' %}active{% endif %}">
+        <span class="icon">⚙️</span>系统设置
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('logs.view') %}
+      <a href="{{ url_for('admin.logs') }}" class="nav-item {% if request.endpoint == 'admin.logs' %}active{% endif %}">
+        <span class="icon">📝</span>操作日志
       </a>
       {% endif %}
     </nav>
-    <div class="foot">
-      <a href="{{ url_for('store.index') }}">← 返回商店</a>
+    <div class="footer">
+      <a href="{{ url_for('store.index') }}">返回商店</a>
+      <a href="{{ url_for('auth.logout') }}">退出登录</a>
     </div>
   </aside>
 
   <div class="admin-main">
-    <div class="admin-top">
-      <div class="text-mute">{% block header_title %}{% endblock %}</div>
-      <div class="who"><strong>{{ current_user.username }}</strong> · <a href="{{ url_for('auth.logout') }}" class="text-mute">退出</a></div>
+    <div class="admin-topbar">
+      <div></div>
+      <div class="user-info">
+        <strong>{{ current_user.username }}</strong> · {{ {'super_admin':'超级管理员','admin':'管理员','operator':'运营人员','support':'客服人员','user':'普通用户'}.get(current_user.effective_role, current_user.effective_role) }}
+      </div>
     </div>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-    <div style="padding:14px 20px 0;">
-      {% for cat, msg in messages %}
-      <div class="alert alert-{{ 'success' if cat == 'success' else ('danger' if cat == 'danger' else ('warning' if cat == 'warning' else 'info')) }}">{{ msg }}</div>
-      {% endfor %}
-    </div>
-    {% endif %}
-    {% endwith %}
-
     <div class="admin-content">
       {% block body %}{% endblock %}
     </div>
   </div>
+
 </div>
 
+<script>
+(function () {
+  document.querySelectorAll('form').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      const btn = form.querySelector('button[type="submit"], input[type="submit"]');
+      if (!btn || btn.dataset.noLoading === 'true') return;
+      btn.classList.add('loading');
+    });
+  });
+})();
+</script>
+
+{% block extra_scripts %}{% endblock %}
 </body>
 </html>

@@ -1,24 +1,28 @@
 {% extends "admin/base.html" %}
-{% block title %}商品管理{% endblock %}
-{% block header_title %}商品管理{% endblock %}
 {% block body %}
-<div class="flex items-center justify-between mb-4">
-  <form method="get" class="flex gap-2">
-    <input type="hidden" name="archived" value="{{ 1 if archived else 0 }}">
-    <input type="text" name="q" value="{{ q }}" placeholder="搜索商品..." style="width:220px;" />
-    <button class="btn btn-secondary btn-sm">搜索</button>
-  </form>
+
+<div class="flex items-center justify-between mb-5">
+  <h1 style="font-size:24px;">商品管理</h1>
   <div class="flex gap-2">
-    <a href="{{ url_for('admin.products', archived=0) }}" class="btn {{ 'btn-primary' if not archived else 'btn-secondary' }} btn-sm">在售商品</a>
+    <a href="{{ url_for('admin.products', archived=0) }}" class="btn {{ 'btn-primary' if not archived else 'btn-secondary' }} btn-sm">在售</a>
     <a href="{{ url_for('admin.products', archived=1) }}" class="btn {{ 'btn-primary' if archived else 'btn-secondary' }} btn-sm">回收站</a>
-    <a href="{{ url_for('admin.product_new') }}" class="btn btn-primary btn-sm">+ 新建商品</a>
+    <a href="{{ url_for('admin.product_new') }}" class="btn btn-primary btn-sm">+ 新建</a>
   </div>
 </div>
 
 <div class="card" style="padding:0;">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>ID</th><th>名称</th><th>价格</th><th>库存</th><th>状态</th><th>操作</th></tr></thead>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>名称</th>
+          <th>价格</th>
+          <th>库存</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
       <tbody>
         {% for p in pagination.items %}
         <tr>
@@ -27,27 +31,27 @@
           <td>{{ p.price }}</td>
           <td class="{{ 'text-success' if p.stock_count > 0 else 'text-danger' }}">{{ p.stock_count }}</td>
           <td>
-            {% if p.is_archived %}<span class="badge badge-neutral">已归档</span>
+            {% if p.is_archived %}<span class="badge">已归档</span>
             {% elif p.is_published %}<span class="badge badge-success">上架</span>
-            {% else %}<span class="badge badge-neutral">下架</span>{% endif %}
+            {% else %}<span class="badge">下架</span>{% endif %}
           </td>
           <td>
             <div class="flex gap-3 text-sm">
               {% if p.is_archived %}
-              <form method="post" action="{{ url_for('admin.product_restore', pid=p.id) }}" class="inline-form">
+              <form method="post" action="{{ url_for('admin.product_restore', pid=p.id) }}" style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="link-button text-success">恢复</button>
+                <button type="submit" class="btn btn-secondary btn-sm">恢复</button>
               </form>
               {% else %}
               <a href="{{ url_for('admin.product_edit', pid=p.id) }}">编辑</a>
-              <form method="post" action="{{ url_for('admin.product_toggle', pid=p.id) }}" class="inline-form">
+              <form method="post" action="{{ url_for('admin.product_toggle', pid=p.id) }}" style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="link-button {{ 'text-warning' if p.is_published else 'text-success' }}">{{ '下架' if p.is_published else '上架' }}</button>
+                <button type="submit" class="btn {{ 'btn-secondary' if p.is_published else 'btn-ghost' }} btn-sm">{{ '下架' if p.is_published else '上架' }}</button>
               </form>
               <a href="{{ url_for('admin.product_cards', pid=p.id) }}" class="text-mute">卡密</a>
-              <form method="post" action="{{ url_for('admin.product_delete', pid=p.id) }}" class="inline-form">
+              <form method="post" action="{{ url_for('admin.product_delete', pid=p.id) }}" style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="link-button text-danger">归档</button>
+                <button type="submit" class="btn btn-danger btn-sm">归档</button>
               </form>
               {% endif %}
             </div>
@@ -57,17 +61,17 @@
       </tbody>
     </table>
   </div>
+  {% if not pagination.items %}<div class="empty">暂无商品</div>{% endif %}
 </div>
-
-{% if not pagination.items %}
-<div class="empty text-sm">{{ '回收站暂无商品' if archived else '暂无商品' }}</div>
-{% endif %}
 
 {% if pagination.pages > 1 %}
-<div class="flex justify-center gap-2 mt-4">
-  {% if pagination.has_prev %}<a href="{{ url_for('admin.products', page=pagination.prev_num, q=q, archived=1 if archived else 0) }}" class="btn btn-secondary btn-sm">上一页</a>{% endif %}
-  <span class="text-sm text-mute" style="padding:7px 10px;">第 {{ pagination.page }} / {{ pagination.pages }} 页</span>
-  {% if pagination.has_next %}<a href="{{ url_for('admin.products', page=pagination.next_num, q=q, archived=1 if archived else 0) }}" class="btn btn-secondary btn-sm">下一页</a>{% endif %}
+<div class="pagination">
+  {% if pagination.has_prev %}<a href="{{ url_for('admin.products', page=pagination.prev_num, q=q, archived=1 if archived else 0) }}">‹</a>{% else %}<span class="disabled">‹</span>{% endif %}
+  {% for p in pagination.iter_pages() %}
+    {% if p %}<a href="{{ url_for('admin.products', page=p, q=q, archived=1 if archived else 0) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>{% else %}<span>…</span>{% endif %}
+  {% endfor %}
+  {% if pagination.has_next %}<a href="{{ url_for('admin.products', page=pagination.next_num, q=q, archived=1 if archived else 0) }}">›</a>{% else %}<span class="disabled">›</span>{% endif %}
 </div>
 {% endif %}
+
 {% endblock %}

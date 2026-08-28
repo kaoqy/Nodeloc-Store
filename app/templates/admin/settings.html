@@ -1,159 +1,103 @@
 {% extends "admin/base.html" %}
-{% block title %}系统设置{% endblock %}
-{% block header_title %}系统设置{% endblock %}
 {% block body %}
-<div style="max-width:680px;">
 
-  <form method="post">
+<h1 style="margin-bottom:24px; font-size:24px;">系统设置</h1>
+
+<div class="card mb-4">
+  <h3 class="mb-4">商店设置</h3>
+  <form method="post" action="{{ url_for('admin.settings') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-    <div class="card mb-3">
-      <h3 class="mb-4">基本信息</h3>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">商店名称</label>
-          <input type="text" name="site_name" value="{{ settings.get('site_name','') }}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">商店标语</label>
-          <input type="text" name="site_slogan" value="{{ settings.get('site_slogan','') }}" />
-        </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">商店名称</label>
+        <input type="text" name="site_name" value="{{ settings.get('site_name', '') }}" />
       </div>
-      <div class="form-group" style="max-width:200px;">
+      <div class="form-group">
+        <label class="form-label">商店标语</label>
+        <input type="text" name="site_slogan" value="{{ settings.get('site_slogan', '') }}" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
         <label class="form-label">货币单位</label>
-        <input type="text" name="currency" value="{{ settings.get('currency','积分') }}" />
+        <input type="text" name="currency" value="{{ settings.get('currency', '积分') }}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">是否允许 HTTP</label>
+        <select name="allow_http">
+          <option value="0" {{ 'selected' if not settings.get('allow_http') }}>否</option>
+          <option value="1" {{ 'selected' if settings.get('allow_http') }}>是</option>
+        </select>
       </div>
     </div>
-
-    <div class="card mb-3">
-      <h3 class="mb-2">运营与客服</h3>
-      <p class="text-xs text-mute mb-4">配置商店公告和用户遇到问题时显示的联系邮箱。</p>
-      <div class="form-group">
-        <label class="form-label">客服邮箱</label>
-        <input type="email" name="support_email" value="{{ settings.get('support_email','') }}" placeholder="support@example.com" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">站点公告</label>
-        <textarea name="site_notice" rows="3" placeholder="例如：卡密将在支付成功后自动发放。">{{ settings.get('site_notice','') }}</textarea>
-        <div class="form-help">留空则不显示公告。</div>
-      </div>
-    </div>
-
-    <div class="card mb-3">
-      <div class="flex items-center justify-between gap-3 mb-4" style="flex-wrap:wrap;">
-        <div>
-          <h3 class="mb-1">每日签到</h3>
-          <p class="text-xs text-mute" style="margin:0;">设置基础奖励、连续签到加成以及单日奖励上限。</p>
-        </div>
-        <label class="flex items-center gap-2 text-sm" style="cursor:pointer;">
-          <input type="checkbox" name="checkin_enabled" value="1" {% if settings.get('checkin_enabled','1') == '1' %}checked{% endif %} />
-          启用签到
-        </label>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">基础奖励</label>
-          <input type="number" name="checkin_reward" min="0" step="1" value="{{ settings.get('checkin_reward','5') }}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">连续签到每日加成</label>
-          <input type="number" name="checkin_streak_bonus" min="0" step="1" value="{{ settings.get('checkin_streak_bonus','1') }}" />
-        </div>
-      </div>
-      <div class="form-group" style="max-width:260px;">
-        <label class="form-label">单日奖励上限</label>
-        <input type="number" name="checkin_reward_cap" min="0" step="1" value="{{ settings.get('checkin_reward_cap','20') }}" />
-        <div class="form-help">奖励计算：基础奖励 + 连续天数加成，最终不超过此上限。</div>
-      </div>
-    </div>
-
-    <div class="card mb-3">
-      <h3 class="mb-2">NodeLoc OAuth</h3>
-      <p class="text-xs text-mute mb-4">在 <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank">NodeLoc</a> 创建 OAuth 应用，把下方 <code>Redirect URI</code> 填到「回调地址」一栏。</p>
-
-      <div class="form-group">
-        <label class="form-label">OAuth URL</label>
-        <input type="text" name="oauth_url" value="{{ settings.get('oauth_url','https://www.nodeloc.com') }}" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Client ID</label>
-        <input type="text" name="oauth_client_id" value="{{ settings.get('oauth_client_id','') }}" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Client Secret</label>
-        <input type="password" name="oauth_client_secret" value="{{ settings.get('oauth_client_secret','') }}" placeholder="留空保持不变" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Redirect URI（必须 HTTPS）</label>
-        <div class="copy-field">
-          <input type="text" name="oauth_redirect_uri" id="oauthRedirectUri" value="{{ settings.get('oauth_redirect_uri','') }}" />
-          <button type="button" class="btn btn-secondary btn-sm" data-copy="oauthRedirectUri">📋 复制</button>
-        </div>
-        <div class="form-help">已自动按当前访问域名生成。需 HTTPS，通过 OpenResty / Caddy / Nginx 反代 + SSL 证书实现。</div>
-      </div>
-    </div>
-
-    <div class="card mb-3">
-      <h3 class="mb-2">NodeLoc 支付</h3>
-      <p class="text-xs text-mute mb-4">在 <a href="https://www.nodeloc.com/payment/applications" target="_blank">NodeLoc</a> 创建支付应用，把下方 <code>回调地址</code> 填到「通知 URL」一栏。</p>
-
-      <div class="form-group">
-        <label class="form-label">回调地址（仅展示，需在 NodeLoc 后台填写）</label>
-        <div class="copy-field">
-          <input type="text" id="paymentCallback" readonly tabindex="-1" />
-          <button type="button" class="btn btn-secondary btn-sm" data-copy="paymentCallback">📋 复制</button>
-        </div>
-        <div class="form-help">自动按当前访问域名生成。</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Payment ID</label>
-        <input type="text" name="payment_id" value="{{ settings.get('payment_id','') }}" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Secret Key</label>
-        <input type="password" name="payment_secret" value="{{ settings.get('payment_secret','') }}" placeholder="留空保持不变" />
-      </div>
-    </div>
-
-    <button type="submit" class="btn btn-primary">保存设置</button>
+    <button type="submit" class="btn btn-primary">保存</button>
   </form>
 </div>
 
-<style>
-  .copy-field { display: flex; gap: 6px; align-items: stretch; }
-  .copy-field input { flex: 1; min-width: 0; }
-  .copy-field input[readonly] { background: var(--bg-elev-2); }
-  .copy-field .btn { flex: 0 0 auto; }
-</style>
+<div class="card mb-4">
+  <h3 class="mb-4">NodeLoc OAuth</h3>
+  <form method="post" action="{{ url_for('admin.settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">OAuth URL</label>
+        <input type="text" name="oauth_url" value="{{ settings.get('oauth_url', '') }}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Client ID</label>
+        <input type="text" name="oauth_client_id" value="{{ settings.get('oauth_client_id', '') }}" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Client Secret</label>
+      <input type="password" name="oauth_client_secret" value="{{ settings.get('oauth_client_secret', '') }}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">回调地址</label>
+      <div class="flex items-center gap-2">
+        <input type="text" value="{{ request.host_url }}auth/oauth/callback" readonly style="flex:1;" class="form-control" />
+        <button type="button" class="btn btn-secondary btn-sm" data-copy="{{ request.host_url }}auth/oauth/callback">复制</button>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">保存</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mb-4">支付设置</h3>
+  <form method="post" action="{{ url_for('admin.settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Payment ID</label>
+        <input type="text" name="payment_id" value="{{ settings.get('payment_id', '') }}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Secret Key</label>
+        <input type="password" name="payment_secret" value="{{ settings.get('payment_secret', '') }}" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">回调地址</label>
+      <div class="flex items-center gap-2">
+        <input type="text" value="{{ request.host_url }}payment/callback" readonly style="flex:1;" class="form-control" />
+        <button type="button" class="btn btn-secondary btn-sm" data-copy="{{ request.host_url }}payment/callback">复制</button>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">保存</button>
+  </form>
+</div>
 
 <script>
-(function () {
-  // Auto-fill the OAuth redirect URI / payment callback from current origin if blank.
-  var origin = window.location.origin;
-  var redirectInput = document.getElementById('oauthRedirectUri');
-  if (redirectInput && !redirectInput.value.trim()) {
-    redirectInput.value = origin + '/auth/oauth/callback';
-  }
-  var paymentInput = document.getElementById('paymentCallback');
-  if (paymentInput) paymentInput.value = origin + '/payment/callback';
-
-  // Copy buttons
-  document.querySelectorAll('[data-copy]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var target = document.getElementById(btn.getAttribute('data-copy'));
-      if (!target) return;
-      target.focus(); target.select();
-      target.setSelectionRange(0, 99999);
-      var ok = false;
-      try { ok = document.execCommand('copy'); } catch (e) {}
-      if (navigator.clipboard && !ok) {
-        navigator.clipboard.writeText(target.value).catch(function () {});
-      }
-      var orig = btn.textContent;
-      btn.textContent = '✓ 已复制';
-      setTimeout(function () { btn.textContent = orig; }, 1500);
+document.querySelectorAll('[data-copy]').forEach(btn => {
+  btn.addEventListener('click', function() {
+    navigator.clipboard.writeText(this.dataset.copy).then(() => {
+      const orig = this.textContent;
+      this.textContent = '已复制';
+      setTimeout(() => this.textContent = orig, 1500);
     });
   });
-})();
+});
 </script>
+
 {% endblock %}

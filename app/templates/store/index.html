@@ -1,111 +1,110 @@
 {% extends "base.html" %}
-{% block title %}{{ site_name }}{% endblock %}
 {% block body %}
 
-<section class="store-hero dujiao-hero">
-  <div class="store-hero-glow" aria-hidden="true"></div>
-  <div class="store-hero-content">
-    <span class="store-eyebrow">DIGITAL GOODS MARKETPLACE</span>
-    <h1>简单、安全地购买数字商品</h1>
-    <p>{{ site_slogan or '卡密自动交付、虚拟服务人工交付，所有订单统一通过 Nodeloc Payments 安全支付。' }}</p>
-    <div class="store-hero-actions">
-      <a href="#products" class="btn btn-primary btn-lg">立即选购</a>
-      {% if current_user.is_authenticated %}
-      <a href="{{ url_for('user.orders') }}" class="btn btn-ghost btn-lg">查看我的订单</a>
-      {% else %}
-      <a href="{{ url_for('auth.login') }}" class="btn btn-ghost btn-lg">登录账号</a>
-      {% endif %}
-    </div>
-  </div>
-  <div class="store-hero-orb" aria-hidden="true">
-    <span class="orb-ring orb-ring-one"></span>
-    <span class="orb-ring orb-ring-two"></span>
-    <span class="orb-core">N</span>
+<section class="hero fade-in">
+  <h1>简单、安全地<br />购买数字商品</h1>
+  <p>卡密自动交付、虚拟服务人工交付，所有订单统一通过 Nodeloc Payments 安全支付。</p>
+  <div class="hero-actions">
+    <a href="#products" class="btn btn-primary btn-lg">立即选购</a>
+    {% if current_user.is_authenticated %}
+    <a href="{{ url_for('user.orders') }}" class="btn btn-ghost btn-lg">我的订单</a>
+    {% else %}
+    <a href="{{ url_for('auth.login') }}" class="btn btn-ghost btn-lg">登录</a>
+    {% endif %}
   </div>
 </section>
 
-<section class="store-benefits" aria-label="服务优势">
-  <article class="benefit-card">
-    <span class="benefit-icon" aria-hidden="true">⚡</span>
-    <div><strong>快速交付</strong><p>卡密商品付款后自动发货</p></div>
-  </article>
-  <article class="benefit-card">
-    <span class="benefit-icon" aria-hidden="true">🔒</span>
-    <div><strong>安全支付</strong><p>统一使用 Nodeloc Payments</p></div>
-  </article>
-  <article class="benefit-card">
-    <span class="benefit-icon" aria-hidden="true">📦</span>
-    <div><strong>多种交付</strong><p>支持卡密与人工服务商品</p></div>
-  </article>
-  <article class="benefit-card">
-    <span class="benefit-icon" aria-hidden="true">🧾</span>
-    <div><strong>订单追踪</strong><p>随时查看支付与履约状态</p></div>
-  </article>
-</section>
-
-<section class="store-section" id="products">
-  <div class="store-section-heading">
+<section class="features fade-in fade-in-delay-1">
+  <div class="feature-card">
+    <span class="feature-icon">⚡</span>
     <div>
-      <span class="store-eyebrow">PRODUCTS</span>
-      <h2>热门商品</h2>
+      <strong>快速交付</strong>
+      <p>卡密商品付款后自动发货</p>
     </div>
-    <span class="store-section-meta">安全支付 · 自动交付</span>
+  </div>
+  <div class="feature-card">
+    <span class="feature-icon">🔒</span>
+    <div>
+      <strong>安全支付</strong>
+      <p>统一使用 Nodeloc Payments</p>
+    </div>
+  </div>
+  <div class="feature-card">
+    <span class="feature-icon">📦</span>
+    <div>
+      <strong>多种交付</strong>
+      <p>支持卡密与人工服务商品</p>
+    </div>
+  </div>
+  <div class="feature-card">
+    <span class="feature-icon">🧾</span>
+    <div>
+      <strong>订单追踪</strong>
+      <p>随时查看支付与履约状态</p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="products">
+  <div class="section-header">
+    <h2>热门商品</h2>
+    <span class="meta">安全支付 · 自动交付</span>
   </div>
 
-{% if pagination.items %}
-<div class="product-grid">
-  {% for product in pagination.items %}
-  <a href="{{ url_for('store.product_detail', slug=product.slug) }}" class="product-card">
-    <div class="thumb">
-      <span class="product-type-tag">{{ '人工交付' if product.product_type == 'manual' else '自动发货' }}</span>
-      {% if product.image_path %}
+  {% if pagination.items %}
+  <div class="product-grid">
+    {% for product in pagination.items %}
+    <a href="{{ url_for('store.product_detail', slug=product.slug) }}" class="product-card fade-in">
+      <div class="thumb">
+        <span class="product-type-tag">{{ '人工交付' if product.product_type == 'manual' else '自动发货' }}</span>
+        {% if product.image_path %}
         <img src="{{ url_for('admin.uploaded_file', filename=product.image_path) }}" alt="{{ product.name }}" loading="lazy" />
-      {% else %}
-        <span>📦</span>
-      {% endif %}
-    </div>
-    <div class="body">
-      <h3>{{ product.name }}</h3>
-      {% if product.summary %}<div class="summary">{{ product.summary }}</div>{% endif %}
-      <div class="footer">
-        <div class="price">{{ product.price }}<span class="currency"> {{ currency }}</span></div>
-        {% if product.product_type == 'manual' %}
-        <div class="stock in">可下单</div>
-        {% elif product.stock_visible %}
-        <div class="stock {{ 'in' if product.stock_count > 0 else 'out' }}">
-          {% if product.stock_count > 0 %}有货{% else %}缺货{% endif %}
-        </div>
+        {% else %}
+        <span class="thumb-placeholder">📦</span>
         {% endif %}
       </div>
-    </div>
-  </a>
-  {% endfor %}
-</div>
-{% else %}
-<div class="empty card">
-  <div class="icon">🛒</div>
-  <p>暂无商品</p>
-  {% if current_user.is_authenticated and current_user.can_access_admin %}
-  <a href="{{ url_for('admin.product_new') }}" class="btn btn-primary btn-sm">新建商品</a>
+      <div class="body">
+        <h3>{{ product.name }}</h3>
+        {% if product.summary %}<div class="summary">{{ product.summary }}</div>{% endif %}
+        <div class="footer">
+          <div class="price">{{ product.price }}<span class="currency">{{ currency }}</span></div>
+          {% if product.product_type == 'manual' %}
+          <div class="stock in">可下单</div>
+          {% elif product.stock_visible %}
+          <div class="stock {{ 'in' if product.stock_count > 0 else 'out' }}">
+            {% if product.stock_count > 0 %}有货{% else %}缺货{% endif %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <div class="empty-icon">🛒</div>
+    <p>暂无商品</p>
+    {% if current_user.is_authenticated and current_user.can_access_admin %}
+    <a href="{{ url_for('admin.product_new') }}" class="btn btn-primary btn-sm mt-4">新建商品</a>
+    {% endif %}
+  </div>
   {% endif %}
-</div>
-{% endif %}
 
-{% if pagination.pages > 1 %}
-<div class="pagination">
-  {% if pagination.has_prev %}
-  <a href="{{ url_for('store.index', page=pagination.prev_num, q=q) }}">‹ 上一页</a>
-  {% else %}<span class="disabled">‹ 上一页</span>{% endif %}
-  {% for p in pagination.iter_pages() %}
-    {% if p %}
-      <a href="{{ url_for('store.index', page=p, q=q) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>
-    {% else %}<span>…</span>{% endif %}
-  {% endfor %}
-  {% if pagination.has_next %}
-  <a href="{{ url_for('store.index', page=pagination.next_num, q=q) }}">下一页 ›</a>
-  {% else %}<span class="disabled">下一页 ›</span>{% endif %}
-</div>
-{% endif %}
+  {% if pagination.pages > 1 %}
+  <div class="pagination">
+    {% if pagination.has_prev %}
+    <a href="{{ url_for('store.index', page=pagination.prev_num, q=q) }}">‹</a>
+    {% else %}<span class="disabled">‹</span>{% endif %}
+    {% for p in pagination.iter_pages() %}
+      {% if p %}
+        <a href="{{ url_for('store.index', page=p, q=q) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>
+      {% else %}<span>…</span>{% endif %}
+    {% endfor %}
+    {% if pagination.has_next %}
+    <a href="{{ url_for('store.index', page=pagination.next_num, q=q) }}">›</a>
+    {% else %}<span class="disabled">›</span>{% endif %}
+  </div>
+  {% endif %}
 </section>
 
 {% endblock %}

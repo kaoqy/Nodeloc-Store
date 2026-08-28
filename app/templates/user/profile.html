@@ -1,12 +1,11 @@
 {% extends "base.html" %}
 {% block title %}个人中心 — {{ site_name }}{% endblock %}
 {% block body %}
-<div class="container-sm">
-  <h1 class="mb-4">个人中心</h1>
+<div class="container-sm" style="max-width:700px;">
 
-  <div class="card">
+  <div class="card fade-in">
     <div class="flex items-center gap-4 mb-4">
-      <div style="width:48px; height:48px; border-radius:50%; background:var(--bg-elev-2); display:flex; align-items:center; justify-content:center; font-weight:600; color:var(--text); overflow:hidden;">
+      <div style="width:56px; height:56px; border-radius:50%; background:var(--bg-elev-2); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:20px; color:var(--text); overflow:hidden; border:2px solid var(--border);">
         {% if current_user.oauth_avatar %}
         <img src="{{ current_user.oauth_avatar }}" style="width:100%; height:100%; object-fit:cover;" />
         {% else %}
@@ -14,21 +13,17 @@
         {% endif %}
       </div>
       <div>
-        <div style="font-weight:600;">{{ current_user.username }}</div>
-        <div class="text-sm text-mute">
+        <div style="font-weight:700; font-size:18px;">{{ current_user.username }}</div>
+        <div class="text-sm text-mute mt-1">
           {{ current_user.email or '未绑定邮箱' }}
-          · <span class="badge badge-info">{{ {'super_admin':'超级管理员','admin':'管理员','operator':'运营人员','support':'客服人员','user':'普通用户'}.get(current_user.effective_role, current_user.effective_role) }}</span>
+          <span class="badge badge-info ml-2">{{ {'super_admin':'超级管理员','admin':'管理员','operator':'运营人员','support':'客服人员','user':'普通用户'}.get(current_user.effective_role, current_user.effective_role) }}</span>
         </div>
       </div>
     </div>
-    <div class="text-xs text-mute">
+    <div class="text-xs text-mute mb-4">
       注册于 {{ current_user.created_at.strftime('%Y-%m-%d') }}
       {% if current_user.oauth_provider %} · NodeLoc 已绑定{% endif %}
-      {% if current_user.oauth_provider and not current_user.oauth_has_email %}
-        · <span class="text-warning">未授权 email scope</span>
-      {% endif %}
     </div>
-    <div class="divider"></div>
     <div class="flex gap-2" style="flex-wrap:wrap;">
       <a href="{{ url_for('user.edit_profile') }}" class="btn btn-secondary btn-sm">编辑资料</a>
       <a href="{{ url_for('user.change_password') }}" class="btn btn-secondary btn-sm">修改密码</a>
@@ -36,32 +31,29 @@
     </div>
   </div>
 
-  <div class="card mt-3">
-    <div class="flex items-center justify-between gap-3" style="flex-wrap:wrap;">
-      <div>
-        <h3 class="mb-2">每日签到</h3>
-        <div class="text-sm text-mute">连续签到可获得更多积分，每天仅可签到一次。</div>
-      </div>
+  <div class="card mt-4 fade-in fade-in-delay-1">
+    <div class="flex items-center justify-between mb-4">
+      <h3>每日签到</h3>
       <form method="post" action="{{ url_for('user.check_in') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-primary" {% if checked_in_today %}disabled{% endif %}>
+        <button type="submit" class="btn btn-primary btn-sm" {% if checked_in_today %}disabled{% endif %}>
           {{ '今日已签到' if checked_in_today else '立即签到' }}
         </button>
       </form>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px;">
-      <div class="card" style="padding:14px;">
-        <div class="text-xs text-mute">积分余额</div>
-        <strong style="font-size:22px;">{{ current_user.points }}</strong>
-        <div class="mt-2"><a href="{{ url_for('user.points') }}" class="text-sm">查看积分流水 →</a></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+      <div class="card" style="padding:16px; text-align:center;">
+        <div class="text-xs text-mute mb-1">积分余额</div>
+        <strong style="font-size:24px;">{{ current_user.points }}</strong>
+        <div class="mt-2"><a href="{{ url_for('user.points') }}" class="text-sm">查看流水 →</a></div>
       </div>
-      <div class="card" style="padding:14px;">
-        <div class="text-xs text-mute">连续签到</div>
-        <strong style="font-size:22px;">{{ current_user.consecutive_checkins }} 天</strong>
+      <div class="card" style="padding:16px; text-align:center;">
+        <div class="text-xs text-mute mb-1">连续签到</div>
+        <strong style="font-size:24px;">{{ current_user.consecutive_checkins }} 天</strong>
       </div>
-      <div class="card" style="padding:14px;">
-        <div class="text-xs text-mute">累计签到</div>
-        <strong style="font-size:22px;">{{ current_user.total_checkins }} 次</strong>
+      <div class="card" style="padding:16px; text-align:center;">
+        <div class="text-xs text-mute mb-1">累计签到</div>
+        <strong style="font-size:24px;">{{ current_user.total_checkins }} 次</strong>
       </div>
     </div>
     {% if recent_checkins %}
@@ -69,15 +61,18 @@
     <div class="text-xs text-mute mb-2">最近签到记录</div>
     <div class="flex gap-2" style="flex-wrap:wrap;">
       {% for item in recent_checkins %}
-      <span class="badge badge-neutral">{{ item.checkin_date.strftime('%m-%d') }} · +{{ item.reward_points }}</span>
+      <span class="badge">{{ item.checkin_date.strftime('%m-%d') }} · +{{ item.reward_points }}</span>
       {% endfor %}
     </div>
     {% endif %}
   </div>
 
-  <div class="card mt-3">
-    <h3 class="mb-3">我的订单</h3>
-    <a href="{{ url_for('user.orders') }}" class="btn btn-primary btn-sm">查看全部订单 →</a>
+  <div class="card mt-4 fade-in fade-in-delay-2">
+    <div class="flex items-center justify-between">
+      <h3>我的订单</h3>
+      <a href="{{ url_for('user.orders') }}" class="btn btn-primary btn-sm">查看全部 →</a>
+    </div>
   </div>
+
 </div>
 {% endblock %}
