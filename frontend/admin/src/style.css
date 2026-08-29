@@ -12,8 +12,8 @@
 }
 
 @layer components {
-  .glass { @apply border border-white/10 bg-white/5 shadow-xl shadow-black/20 backdrop-blur-xl; }
-  .panel { @apply glass rounded-2xl p-5; }
+  .glass { background: rgb(24 24 27 / 0.72); border: 1px solid rgb(255 255 255 / 0.1); backdrop-filter: blur(20px); }
+  .panel { @apply rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl shadow-black/20 backdrop-blur-xl; }
   .btn-primary { @apply rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-4 py-2 font-medium text-white transition hover:brightness-110 disabled:opacity-50; }
   .btn-muted { @apply rounded-xl border border-white/10 bg-white/5 px-4 py-2 transition hover:bg-white/10; }
   .field { @apply w-full rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-slate-100 placeholder:text-slate-500 focus:border-indigo-400; }
