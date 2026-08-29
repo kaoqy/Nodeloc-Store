@@ -1,0 +1,1 @@
+<script setup lang="ts">const model=defineModel<string>({default:''});defineProps<{placeholder?:string}>()</script><template><div class="relative"><span class="absolute left-3 top-2.5 text-slate-500">⌕</span><input v-model="model" class="field pl-9" :placeholder="placeholder||'搜索…'"/></div></template>

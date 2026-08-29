@@ -1,0 +1,38 @@
+app:
+  name: "NodeLoc Store"
+  slogan: "数字商品自动发卡平台"
+  scheme: "https"
+  domain: "localhost:8080"
+
+database:
+  driver: "sqlite"
+  dsn: "db/store.db"
+  # driver: "mysql"
+  # dsn: "user:pass@tcp(localhost:3306)/nodeloc_store?charset=utf8mb4&parseTime=True&loc=Local"
+
+server:
+  port: 8080
+  mode: "debug"
+
+jwt:
+  secret: "change-me-in-production"
+  access_ttl: 7200
+  refresh_ttl: 604800
+
+nodeloc:
+  base_url: "https://www.nodeloc.com"
+  client_id: ""
+  client_secret: ""
+  redirect_uri: ""
+  scopes: "openid profile email"
+  payment_id: ""
+  payment_secret: ""
+
+redis:
+  addr: ""
+  password: ""
+  db: 0
+
+log:
+  level: "info"
+  format: "json"

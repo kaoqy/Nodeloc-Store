@@ -1,0 +1,15 @@
+{
+  "name": "nodeloc-store-frontend",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "dev:user": "pnpm --filter user dev",
+    "dev:admin": "pnpm --filter admin dev",
+    "build": "pnpm --filter user build && pnpm --filter admin build",
+    "build:user": "pnpm --filter user build",
+    "build:admin": "pnpm --filter admin build"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
