@@ -16,12 +16,9 @@ RUN apk add --no-cache ca-certificates tzdata curl
 
 WORKDIR /app
 COPY --from=builder /nodeloc-store .
+COPY config.yml.example ./config.yml
 
-# Create web directories (frontend will be built separately if needed)
 RUN mkdir -p ./web/user ./web/admin
-
-# Copy config if it exists
-COPY config.yml.example ./config.yml 2>/dev/null || true
 
 ENV TZ=Asia/Shanghai
 EXPOSE 8080
