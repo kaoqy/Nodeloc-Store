@@ -2,7 +2,7 @@
 FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
@@ -12,7 +12,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /nodeloc-store ./cmd/s
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app
 COPY frontend/ ./frontend/
-RUN cd frontend && npm install -g pnpm && pnpm install && pnpm build
+RUN cd frontend && npm install -g pnpm && pnpm install
+RUN cd frontend/user && pnpm build
+RUN cd frontend/admin && pnpm build
 
 # Runtime
 FROM alpine:3.21
