@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,7 +28,7 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	container, err := container.New(cfg)
+	ctn, err := container.New(cfg)
 	if err != nil {
 		log.Fatalf("Failed to build container: %v", err)
 	}
@@ -40,11 +42,17 @@ func main() {
 	})
 
 	// Register module routes
-	container.Identity.Handler.RegisterRoutes(router, &cfg.JWT)
-	container.Payment.Handler.RegisterRoutes(router)
-	container.Catalog.Handler.RegisterRoutes(router, &cfg.JWT)
-	container.Notification.Handler.RegisterRoutes(router)
-	container.Audit.Handler.RegisterRoutes(router)
+	ctn.Identity.Handler.RegisterRoutes(router, &cfg.JWT)
+	ctn.Payment.Handler.RegisterRoutes(router, &cfg.JWT)
+	ctn.Catalog.Handler.RegisterRoutes(router, &cfg.JWT)
+	ctn.Notification.Handler.RegisterRoutes(router, &cfg.JWT)
+	ctn.Audit.Handler.RegisterRoutes(router, &cfg.JWT)
+
+	// Static files — user storefront
+	setupStatic(router, "/web/user", "/")
+
+	// Static files — admin panel
+	setupStatic(router, "/web/admin", "/admin")
 
 	// Start server
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
@@ -72,4 +80,40 @@ func main() {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 	log.Println("Server exited")
+}
+
+// setupStatic serves static files from a directory and provides SPA fallback.
+func setupStatic(router *gin.Engine, dir string, basePath string) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		log.Printf("Failed to resolve static dir %s: %v", dir, err)
+		return
+	}
+
+	// Check if directory exists
+	if _, err := os.Stat(absDir); os.IsNotExist(err) {
+		log.Printf("Static dir %s does not exist, skipping", absDir)
+		return
+	}
+
+	// Serve static files
+	router.Static(basePath, absDir)
+
+	// SPA fallback — serve index.html for unknown routes
+	router.NoRoute(func(c *gin.Context) {
+		// Don't interfere with API routes
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+
+		indexPath := filepath.Join(absDir, "index.html")
+		if _, err := os.Stat(indexPath); err == nil {
+			c.File(indexPath)
+		} else {
+			c.String(http.StatusNotFound, "Frontend not built")
+		}
+	})
+
+	log.Printf("Static files served from %s at %s", absDir, basePath)
 }
