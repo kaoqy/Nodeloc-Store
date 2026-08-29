@@ -1,33 +1,27 @@
 # syntax=docker/dockerfile:1
 
+# Stage 1: Build Go backend
 FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /nodeloc-store ./cmd/server
 
-# Frontend build stage
-FROM node:22-alpine AS frontend-builder
-WORKDIR /app
-COPY frontend/ ./frontend/
-RUN cd frontend/user && npm install && npm run build 2>&1 || echo "User build had issues"
-RUN cd frontend/admin && npm install && npm run build 2>&1 || echo "Admin build had issues"
-
-# Final stage
+# Stage 2: Final minimal image
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata curl
 
 WORKDIR /app
 COPY --from=builder /nodeloc-store .
 
-# Copy frontend builds if they exist
-COPY --from=frontend-builder /app/frontend/user/dist ./web/user
-COPY --from=frontend-builder /app/frontend/admin/dist ./web/admin
+# Create web directories (frontend will be built separately if needed)
+RUN mkdir -p ./web/user ./web/admin
 
-COPY config.yml.example ./config.yml
+# Copy config if it exists
+COPY config.yml.example ./config.yml 2>/dev/null || true
 
 ENV TZ=Asia/Shanghai
 EXPOSE 8080
