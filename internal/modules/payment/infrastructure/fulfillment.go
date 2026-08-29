@@ -1,4 +1,4 @@
-package payment
+package infrastructure
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
-	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/domain"
 	"gorm.io/gorm"
 )
 
@@ -72,7 +71,7 @@ func (s *FulfillmentService) autoDeliverCard(ctx context.Context, order *models.
 			Sequence:     1,
 			DeliveryType: "card",
 			Status:       "waiting_stock",
-			Note:         "等待库存补充后自动发货",
+			Note:         strPtr("等待库存补充后自动发货"),
 		})
 		return tx.Commit().Error
 	}
@@ -92,8 +91,8 @@ func (s *FulfillmentService) autoDeliverCard(ctx context.Context, order *models.
 		Sequence:     1,
 		DeliveryType: "card",
 		Status:       "delivered",
-		Content:      card.Content,
-		Note:         fmt.Sprintf("card_id=%d", card.ID),
+		Content:      &card.Content,
+		Note:         strPtr(fmt.Sprintf("card_id=%d", card.ID)),
 		CompletedAt:  &now,
 	})
 
@@ -104,6 +103,8 @@ func (s *FulfillmentService) autoDeliverCard(ctx context.Context, order *models.
 
 	return tx.Commit().Error
 }
+
+func strPtr(s string) *string { return &s }
 
 // Refund releases cards back to available status.
 func (s *FulfillmentService) Refund(ctx context.Context, order *models.Order) error {

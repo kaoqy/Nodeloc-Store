@@ -1,6 +1,8 @@
 package identity
 
 import (
+	"time"
+
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity/infrastructure"
@@ -16,9 +18,27 @@ type Module struct {
 
 // Wire constructs the identity module from shared dependencies.
 func Wire(db *gorm.DB, cfg *config.Config) *Module {
-	repo := infrastructure.NewGORMUserRepo(db)
-	oauth := infrastructure.NewNodeLocOAuthClient(&cfg.NodeLoc)
-	tokens := infrastructure.NewJWTService(&cfg.JWT)
+	repo := infrastructure.NewGormUserRepo(db)
+
+	oauth, err := infrastructure.NewNodeLocOAuth(infrastructure.NodeLocOAuthConfig{
+		BaseURL:      cfg.NodeLoc.BaseURL,
+		ClientID:     cfg.NodeLoc.ClientID,
+		ClientSecret: cfg.NodeLoc.ClientSecret,
+		RedirectURI:  cfg.NodeLoc.RedirectURI,
+	}, nil)
+	if err != nil {
+		panic("identity: failed to create OAuth client: " + err.Error())
+	}
+
+	tokens, err := infrastructure.NewJWTService(infrastructure.JWTConfig{
+		Secret:     cfg.JWT.Secret,
+		Issuer:     "nodeloc-store",
+		AccessTTL:  time.Duration(cfg.JWT.AccessTTL) * time.Second,
+		RefreshTTL: time.Duration(cfg.JWT.RefreshTTL) * time.Second,
+	})
+	if err != nil {
+		panic("identity: failed to create JWT service: " + err.Error())
+	}
 
 	svc, err := application.NewService(repo, oauth, tokens)
 	if err != nil {

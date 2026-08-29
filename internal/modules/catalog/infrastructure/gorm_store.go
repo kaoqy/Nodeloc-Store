@@ -2,7 +2,6 @@ package infrastructure
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/domain"
@@ -15,10 +14,10 @@ type GormCardRepo struct{ db *gorm.DB }
 type GormCategoryRepo struct{ db *gorm.DB }
 type GormCouponRepo struct{ db *gorm.DB }
 
-func NewProductRepo(db *gorm.DB) *GormProductRepo { return &GormProductRepo{db: db} }
-func NewCardRepo(db *gorm.DB) *GormCardRepo { return &GormCardRepo{db: db} }
+func NewProductRepo(db *gorm.DB) *GormProductRepo   { return &GormProductRepo{db: db} }
+func NewCardRepo(db *gorm.DB) *GormCardRepo         { return &GormCardRepo{db: db} }
 func NewCategoryRepo(db *gorm.DB) *GormCategoryRepo { return &GormCategoryRepo{db: db} }
-func NewCouponRepo(db *gorm.DB) *GormCouponRepo { return &GormCouponRepo{db: db} }
+func NewCouponRepo(db *gorm.DB) *GormCouponRepo     { return &GormCouponRepo{db: db} }
 
 func (r *GormProductRepo) List(ctx context.Context, publishedOnly bool) ([]domain.Product, error) {
 	var products []domain.Product
@@ -50,12 +49,74 @@ func (r *GormProductRepo) GetBySlug(ctx context.Context, slug string, publishedO
 	return &product, nil
 }
 
-func (r *GormProductRepo) Create(ctx context.Contex
-... [truncated 3693 bytes] ...
- = ?", card.ProductID).
-				UpdateColumn("stock_count", gorm.Expr("CASE WHEN stock_count > 0 THEN stock_count - 1 ELSE 0 END")).Error
-		}
+func (r *GormProductRepo) Create(ctx context.Context, product *domain.Product) error {
+	return r.db.WithContext(ctx).Create(product).Error
+}
+
+func (r *GormProductRepo) Update(ctx context.Context, product *domain.Product) error {
+	return r.db.WithContext(ctx).Save(product).Error
+}
+
+func (r *GormProductRepo) UpdateStockCount(ctx context.Context, productID uint, count int) error {
+	return r.db.WithContext(ctx).Model(&domain.Product{}).Where("id = ?", productID).UpdateColumn("stock_count", count).Error
+}
+
+func (r *GormProductRepo) Delete(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Delete(&domain.Product{}, id).Error
+}
+
+func (r *GormCardRepo) ListByProduct(ctx context.Context, productID uint) ([]domain.Card, error) {
+	var cards []domain.Card
+	err := r.db.WithContext(ctx).Where("product_id = ?", productID).Order("id ASC").Find(&cards).Error
+	return cards, err
+}
+
+func (r *GormCardRepo) GetByID(ctx context.Context, id uint) (*domain.Card, error) {
+	var card domain.Card
+	if err := r.db.WithContext(ctx).First(&card, id).Error; err != nil {
+		return nil, err
+	}
+	return &card, nil
+}
+
+func (r *GormCardRepo) Create(ctx context.Context, card *domain.Card) error {
+	return r.db.WithContext(ctx).Create(card).Error
+}
+
+func (r *GormCardRepo) BulkCreate(ctx context.Context, cards []domain.Card) error {
+	if len(cards) == 0 {
 		return nil
+	}
+	return r.db.WithContext(ctx).CreateInBatches(cards, 500).Error
+}
+
+func (r *GormCardRepo) CreateBatch(ctx context.Context, cards []domain.Card) error {
+	return r.BulkCreate(ctx, cards)
+}
+
+func (r *GormCardRepo) Update(ctx context.Context, card *domain.Card) error {
+	return r.db.WithContext(ctx).Save(card).Error
+}
+
+func (r *GormCardRepo) Delete(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Delete(&domain.Card{}, id).Error
+}
+
+func (r *GormCardRepo) CountByProduct(ctx context.Context, productID uint) (int64, int64, error) {
+	var available, total int64
+	r.db.WithContext(ctx).Model(&domain.Card{}).Where("product_id = ? AND status = ?", productID, domain.CardStatusAvailable).Count(&available)
+	r.db.WithContext(ctx).Model(&domain.Card{}).Where("product_id = ?", productID).Count(&total)
+	return available, total, nil
+}
+
+func (r *GormCardRepo) UpdateProductStock(ctx context.Context, productID uint) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&domain.Card{}).Where("product_id = ? AND status = ?", productID, domain.CardStatusAvailable).Count(&count).Error; err != nil {
+			return err
+		}
+		return tx.Model(&domain.Product{}).Where("id = ?", productID).
+			UpdateColumn("stock_count", count).Error
 	})
 }
 

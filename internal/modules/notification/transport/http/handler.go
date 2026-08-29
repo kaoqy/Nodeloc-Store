@@ -17,7 +17,7 @@ type Handler struct{ service *application.Service }
 
 func NewHandler(service *application.Service) *Handler { return &Handler{service: service} }
 
-func (h *Handler) RegisterRoutes(engine *gin.Engine, jwtConfig *config.JWTConfig) {
+func (h *Handler) RegisterRoutes(engine gin.IRouter, jwtConfig *config.JWTConfig) {
 	api := engine.Group("/api/v1")
 	api.Use(middleware.JWTMiddleware(jwtConfig))
 	api.GET("/notifications", h.List)

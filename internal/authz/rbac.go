@@ -1,9 +1,8 @@
-package bootstrap
+package authz
 
 import (
 	"log"
 
-	"github.com/kaoqy/Nodeloc-Store/internal/authz"
 	"gorm.io/gorm"
 )
 
@@ -38,7 +37,7 @@ const (
 
 // InitRBAC initializes RBAC with default roles and permissions
 func InitRBAC(db *gorm.DB) error {
-	if err := authz.Init(db); err != nil {
+	if err := Init(db); err != nil {
 		return err
 	}
 
@@ -74,17 +73,12 @@ func InitRBAC(db *gorm.DB) error {
 	for role, resources := range permissions {
 		for resource, actions := range resources {
 			for _, action := range actions {
-				if resource == "*" {
-					// Super admin: add wildcard permission
-					authz.Enforcer.AddPolicy(role, "*", "*")
-				} else {
-					authz.Enforcer.AddPolicy(role, resource, action)
-				}
+				Enforcer.AddPolicy(role, resource, action)
 			}
 		}
 	}
 
-	if err := authz.Enforcer.SavePolicy(); err != nil {
+	if err := Enforcer.SavePolicy(); err != nil {
 		return err
 	}
 

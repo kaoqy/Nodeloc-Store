@@ -28,7 +28,7 @@ func NewHandler(service *application.Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(router gin.IRoutes, jwtConfig *config.JWTConfig) {
+func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig) {
 	payment := router.Group("/api/v1/payment")
 	payment.Use(middleware.JWTMiddleware(jwtConfig))
 	payment.POST("/create", h.CreatePayment)

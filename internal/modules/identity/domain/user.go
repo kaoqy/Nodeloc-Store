@@ -9,19 +9,18 @@ import (
 )
 
 var (
-	ErrUserNotFound          = errors.New("user not found")
-	ErrIdentityNotFound      = errors.New("oauth identity not found")
-	ErrUsernameTaken         = errors.New("username is already in use")
-	ErrEmailTaken            = errors.New("email is already in use")
-	ErrIdentityAlreadyBound  = errors.New("oauth identity is already bound")
-	ErrInvalidCredentials    = errors.New("invalid credentials")
-	ErrInactiveUser          = errors.New("user account is inactive")
-	ErrInvalidInput          = errors.New("invalid input")
-	ErrLastLoginMethod       = errors.New("cannot remove the last login method")
+	ErrUserNotFound         = errors.New("user not found")
+	ErrIdentityNotFound     = errors.New("oauth identity not found")
+	ErrUsernameTaken        = errors.New("username is already in use")
+	ErrEmailTaken           = errors.New("email is already in use")
+	ErrIdentityAlreadyBound = errors.New("oauth identity is already bound")
+	ErrInvalidCredentials   = errors.New("invalid credentials")
+	ErrInactiveUser         = errors.New("user account is inactive")
+	ErrInvalidInput         = errors.New("invalid input")
+	ErrLastLoginMethod      = errors.New("cannot remove the last login method")
 )
 
-// User is the identity module's user aggregate. Its persistence fields mirror
-// internal/models.User while keeping this module independent of other modules.
+// User is the identity module's user aggregate.
 type User struct {
 	ID              uint           `gorm:"primarykey" json:"id"`
 	CreatedAt       time.Time      `json:"created_at"`
@@ -34,9 +33,36 @@ type User struct {
 	IsActive        bool           `gorm:"column:is_active;default:true;not null" json:"is_active"`
 	Role            string         `gorm:"size:32;default:'user';not null;index" json:"role"`
 	Points          int            `gorm:"default:0;not null" json:"points"`
-	ConsecutiveDays int            `gorm:"default:0;not null" json:"consecutive
-... [truncated 2041 bytes] ...
-  *string        `gorm:"type:text" json:"-"`
+	ConsecutiveDays int            `gorm:"default:0;not null" json:"consecutive_days"`
+	Nickname        string         `gorm:"size:64" json:"nickname"`
+	AvatarURL       string         `gorm:"size:255" json:"avatar_url"`
+	Bio             string         `gorm:"type:text" json:"bio"`
+	OAuthProvider   *string        `gorm:"size:32;index" json:"oauth_provider,omitempty"`
+	OAuthUID        *string        `gorm:"size:190;index" json:"oauth_uid,omitempty"`
+	OAuthUsername   *string        `gorm:"size:64" json:"oauth_username,omitempty"`
+	OAuthName       *string        `gorm:"size:64" json:"oauth_name,omitempty"`
+	OAuthAvatar     *string        `gorm:"size:255" json:"oauth_avatar,omitempty"`
+	OAuthTrustLevel *int           `json:"oauth_trust_level,omitempty"`
+	OAuthScope      *string        `gorm:"size:255" json:"oauth_scope,omitempty"`
+	OAuthHasEmail   bool           `gorm:"default:false" json:"oauth_has_email"`
+	LastLoginIP     string         `gorm:"size:45" json:"-"`
+	LastLoginAt     *time.Time     `json:"last_login_at,omitempty"`
+}
+
+// OAuthIdentity links a local User to an OAuth provider identity.
+type OAuthIdentity struct {
+	ID           uint           `gorm:"primarykey" json:"id"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+	UserID       uint           `gorm:"uniqueIndex:idx_user_provider;not null" json:"user_id"`
+	Provider     string         `gorm:"size:32;uniqueIndex:idx_provider_uid;not null" json:"provider"`
+	ProviderUID  string         `gorm:"size:190;uniqueIndex:idx_provider_uid;not null" json:"provider_uid"`
+	Username     *string        `gorm:"size:64" json:"username,omitempty"`
+	DisplayName  *string        `gorm:"size:64" json:"display_name,omitempty"`
+	AvatarURL    *string        `gorm:"size:255" json:"avatar_url,omitempty"`
+	Scope        *string        `gorm:"size:255" json:"scope,omitempty"`
+	AccessToken  *string        `gorm:"type:text" json:"-"`
 	RefreshToken *string        `gorm:"type:text" json:"-"`
 }
 

@@ -7,6 +7,7 @@ import (
 	"github.com/casbin/casbin/v2"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"gorm.io/gorm"
+)
 
 var Enforcer *casbin.Enforcer
 
@@ -27,6 +28,7 @@ e = some(where (p.eft == allow))
 m = g(r.sub, p.sub) && r.obj == p.obj && r.act == p.act
 `
 
+// Init initializes the Casbin enforcer with the database-backed policy store.
 func Init(db *gorm.DB) error {
 	adapter, err := gormadapter.NewAdapterByDB(db)
 	if err != nil {
@@ -53,10 +55,8 @@ func SeedDefaults() error {
 		return nil
 	}
 
-	// Super admin: wildcard
 	Enforcer.AddPolicy("super_admin", "*", "*")
 
-	// Admin
 	adminPerms := [][2]string{
 		{"dashboard", "view"}, {"products", "view"}, {"products", "manage"},
 		{"cards", "view"}, {"cards", "manage"}, {"orders", "view"}, {"orders", "manage"},
@@ -68,7 +68,6 @@ func SeedDefaults() error {
 		Enforcer.AddPolicy("admin", p[0], p[1])
 	}
 
-	// Operator
 	operatorPerms := [][2]string{
 		{"dashboard", "view"}, {"products", "view"}, {"products", "manage"},
 		{"cards", "view"}, {"cards", "manage"}, {"orders", "view"}, {"orders", "manage"},
@@ -77,7 +76,6 @@ func SeedDefaults() error {
 		Enforcer.AddPolicy("operator", p[0], p[1])
 	}
 
-	// Support
 	supportPerms := [][2]string{
 		{"dashboard", "view"}, {"orders", "view"}, {"orders", "manage"}, {"users", "view"},
 	}
@@ -93,6 +91,7 @@ func SeedDefaults() error {
 	return nil
 }
 
+// AddRoleForUser assigns a role to a user.
 func AddRoleForUser(userID, role string) {
 	if Enforcer == nil {
 		return
@@ -100,6 +99,7 @@ func AddRoleForUser(userID, role string) {
 	Enforcer.AddRoleForUser(userID, role)
 }
 
+// HasPermission checks if a user has permission to perform an action on an object.
 func HasPermission(userID uint, obj, act string) bool {
 	if Enforcer == nil {
 		return false
@@ -108,11 +108,12 @@ func HasPermission(userID uint, obj, act string) bool {
 	return ok
 }
 
+// RolePermissions returns all role-permission mappings.
 func RolePermissions() map[string][]string {
 	if Enforcer == nil {
 		return nil
 	}
-	policies := Enforcer.GetPolicy()
+	policies, _ := Enforcer.GetPolicy()
 	result := make(map[string][]string)
 	for _, p := range policies {
 		if len(p) == 3 {
