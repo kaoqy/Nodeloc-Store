@@ -1,0 +1,124 @@
+{% extends "admin/base.html" %}
+{% block body %}
+
+<div class="flex items-center justify-between mb-5">
+  <h1 style="font-size:24px;">优惠券管理</h1>
+</div>
+
+<div class="card mb-4">
+  <h3 class="mb-3">新建优惠券</h3>
+  <form method="post" action="{{ url_for('admin.coupon_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">代码 <span class="req">*</span></label>
+        <input type="text" name="code" required placeholder="SUMMER2024" style="text-transform:uppercase;" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">折扣类型</label>
+        <select name="discount_type">
+          <option value="fixed">固定金额</option>
+          <option value="percent">百分比</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">折扣值 <span class="req">*</span></label>
+        <input type="number" name="discount_value" required min="1" placeholder="10 或 20" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">最低订单金额</label>
+        <input type="number" name="min_order_amount" value="0" min="0" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">最大使用次数 (0 = 无限)</label>
+        <input type="number" name="max_uses" value="0" min="0" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">有效期</label>
+        <div class="flex gap-2">
+          <input type="datetime-local" name="valid_from" placeholder="开始" />
+          <input type="datetime-local" name="valid_until" placeholder="结束" />
+        </div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="flex items-center gap-2">
+        <input type="checkbox" name="is_active" checked />
+        <span>激活</span>
+      </label>
+    </div>
+    <button type="submit" class="btn btn-primary">创建优惠券</button>
+  </form>
+</div>
+
+<div class="card" style="padding:0;">
+  <div class="card-header">
+    <h3>现有优惠券</h3>
+  </div>
+  {% if coupons %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>代码</th>
+          <th>类型</th>
+          <th>值</th>
+          <th>最低金额</th>
+          <th>使用/上限</th>
+          <th>有效期</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for coupon in coupons %}
+        <tr>
+          <td><strong class="mono">{{ coupon.code }}</strong></td>
+          <td>
+            {% if coupon.discount_type == 'fixed' %}<span class="badge">固定</span>
+            {% else %}<span class="badge">百分比</span>{% endif %}
+          </td>
+          <td>{{ coupon.discount_value }}{% if coupon.discount_type == 'percent' %}%{% endif %}</td>
+          <td>{{ coupon.min_order_amount }}</td>
+          <td>{{ coupon.used_count }} / {{ coupon.max_uses or '∞' }}</td>
+          <td>
+            <div class="text-xs">
+              {{ coupon.valid_from.strftime('%m-%d') if coupon.valid_from else '-' }}
+              ~
+              {{ coupon.valid_until.strftime('%m-%d') if coupon.valid_until else '-' }}
+            </div>
+          </td>
+          <td>
+            {% if coupon.is_valid() %}<span class="badge badge-success">有效</span>
+            {% elif not coupon.is_active %}<span class="badge badge-danger">禁用</span>
+            {% else %}<span class="badge badge-warning">过期</span>{% endif %}
+          </td>
+          <td>
+            <div class="flex gap-3 text-sm">
+              <form method="post" action="{{ url_for('admin.coupon_toggle', coupon_id=coupon.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn {{ 'btn-secondary' if coupon.is_active else 'btn-ghost' }} btn-sm">
+                  {{ '禁用' if coupon.is_active else '启用' }}
+                </button>
+              </form>
+              <form method="post" action="{{ url_for('admin.coupon_delete', coupon_id=coupon.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger btn-sm">删除</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">暂无优惠券</div>
+  {% endif %}
+</div>
+
+{% endblock %}

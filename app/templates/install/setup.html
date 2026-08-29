@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>安装 · {{ site_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+</head>
+<body class="installer-body">
+
+<div class="installer-card wide fade-in">
+  <div class="text-center">
+    <div class="icon">⚙️</div>
+    <h1>应用配置</h1>
+    <p class="subtitle">第二步 · 配置 OAuth、支付和管理员</p>
+    <span class="step-badge" style="background:rgba(16,185,129,0.1); color:#6ee7b7; border-color:rgba(16,185,129,0.2);">✅ 数据库已连接</span>
+  </div>
+
+  {% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" style="margin-top:24px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="section-title">🏪 商店信息</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">商店名称</label>
+        <input type="text" name="site_name" value="{{ defaults.site_name }}" placeholder="NodeLoc Store" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">商店标语</label>
+        <input type="text" name="site_slogan" value="{{ defaults.site_slogan }}" placeholder="卡密商店 · Powered by NodeLoc" />
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">🔐 NodeLoc OAuth</div>
+    <p class="hint mb-3">在 <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank" style="color:var(--text);">NodeLoc</a> 创建 OAuth 应用，把下面的 <strong>回调地址</strong> 填到「回调地址」一栏。</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">OAuth URL</label>
+        <input type="text" name="oauth_url" value="{{ defaults.oauth_url }}" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Client ID <span class="req">*</span></label>
+        <input type="text" name="oauth_client_id" value="{{ defaults.oauth_client_id }}" required />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Client Secret <span class="req">*</span></label>
+      <input type="password" name="oauth_client_secret" value="{{ defaults.oauth_client_secret }}" required />
+    </div>
+    <div class="form-group">
+      <label class="form-label">回调地址（自动生成）</label>
+      <div class="copy-field">
+        <input type="text" id="oauthRedirectUri" readonly />
+        <button type="button" class="copy-btn" data-copy="oauthRedirectUri">📋 复制</button>
+      </div>
+      <p class="hint">必须 HTTPS。如果显示 http，请通过反向代理提供 SSL 证书。</p>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">💳 NodeLoc 支付</div>
+    <p class="hint mb-3">在 <a href="https://www.nodeloc.com/payment/applications" target="_blank" style="color:var(--text);">NodeLoc</a> 创建支付应用，把下面的 <strong>回调地址</strong> 填到「通知 URL」一栏。</p>
+    <div class="form-group">
+      <label class="form-label">回调地址（自动生成）</label>
+      <div class="copy-field">
+        <input type="text" id="paymentCallback" readonly />
+        <button type="button" class="copy-btn" data-copy="paymentCallback">📋 复制</button>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Payment ID <span class="req">*</span></label>
+        <input type="text" name="payment_id" value="{{ defaults.payment_id }}" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Secret Key <span class="req">*</span></label>
+        <input type="password" name="payment_secret" value="{{ defaults.payment_secret }}" required />
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">👤 管理员账号</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">用户名 <span class="req">*</span></label>
+        <input type="text" name="admin_user" value="{{ defaults.admin_user }}" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label">邮箱</label>
+        <input type="email" name="admin_email" value="{{ defaults.admin_email }}" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">密码 <span class="req">*</span>（至少 8 位）</label>
+      <input type="password" name="admin_pass" value="{{ defaults.admin_pass }}" required minlength="8" />
+    </div>
+
+    <div class="divider"></div>
+
+    <button type="submit" class="btn btn-primary btn-block btn-lg">✔ 完成安装</button>
+  </form>
+</div>
+
+<script>
+(function () {
+  var origin = window.location.origin;
+  var ri = document.getElementById('oauthRedirectUri');
+  if (ri) ri.value = origin + '/auth/oauth/callback';
+  var pc = document.getElementById('paymentCallback');
+  if (pc) pc.value = origin + '/payment/callback';
+
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var t = document.getElementById(this.dataset.copy);
+      if (!t) return;
+      t.focus(); t.select(); t.setSelectionRange(0, 99999);
+      try { document.execCommand('copy'); } catch (e) {}
+      if (navigator.clipboard) navigator.clipboard.writeText(t.value).catch(function(){});
+      var orig = this.textContent;
+      this.textContent = '✓ 已复制';
+      setTimeout(function () { this.textContent = orig; }.bind(this), 1400);
+    });
+  });
+})();
+</script>
+
+</body>
+</html>

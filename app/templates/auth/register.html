@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}注册 — {{ site_name }}{% endblock %}
+{% block body %}
+<div class="container-sm" style="padding-top:60px;">
+  <div class="card fade-in" style="max-width:420px; margin:0 auto;">
+    <div class="text-center mb-6">
+      <h1 style="font-size:24px;">创建账号</h1>
+      <p class="text-sm text-mute mt-2">注册 {{ site_name }} 账号</p>
+    </div>
+
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-group">
+        <label class="form-label">用户名 <span class="req">*</span></label>
+        <input type="text" name="username" required autofocus placeholder="请输入用户名" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">邮箱（可选）</label>
+        <input type="email" name="email" placeholder="请输入邮箱" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">密码 <span class="req">*</span></label>
+        <input type="password" name="password" required minlength="8" placeholder="至少 8 位" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">确认密码 <span class="req">*</span></label>
+        <input type="password" name="password2" required minlength="8" placeholder="再次输入密码" />
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">注册</button>
+    </form>
+
+    <p class="text-center text-sm text-dim mt-4">
+      已有账号？<a href="{{ url_for('auth.login') }}">登录</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

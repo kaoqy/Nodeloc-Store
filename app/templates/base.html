@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}{{ site_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="{{ url_for('store.index') }}" class="nav-brand">
+      <span class="brand-mark">N</span>
+      <span>{{ site_name }}</span>
+    </a>
+    <button class="nav-menu-toggle" id="nav-menu-toggle" aria-label="菜单">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="nav-links" id="nav-links">
+      {% if current_user.is_authenticated %}
+        <a href="{{ url_for('user.profile') }}">{{ current_user.username }}</a>
+        <a href="{{ url_for('user.orders') }}">订单</a>
+        <a href="{{ url_for('notifications.index') }}">通知</a>
+        {% if current_user.can_access_admin %}
+        <a href="{{ url_for('admin.index') }}">管理</a>
+        {% endif %}
+        <a href="{{ url_for('auth.logout') }}" class="text-mute">退出</a>
+      {% else %}
+        <a href="{{ url_for('auth.login') }}">登录</a>
+        <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-sm">注册</a>
+      {% endif %}
+    </div>
+  </div>
+</nav>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="container" style="padding-top:20px;">
+  {% for cat, msg in messages %}
+  <div class="alert alert-{{ 'success' if cat == 'success' else ('danger' if cat == 'danger' else ('warning' if cat == 'warning' else 'info')) }}">{{ msg }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+<main class="page">
+{% block body %}{% endblock %}
+</main>
+
+<footer class="site-footer">
+  &copy; {{ current_year }} {{ site_name }}
+</footer>
+
+<script>
+(function () {
+  const toggle = document.getElementById('nav-menu-toggle');
+  const links = document.getElementById('nav-links');
+  if (toggle && links) {
+    toggle.addEventListener('click', function () {
+      links.classList.toggle('is-open');
+    });
+    links.querySelectorAll('a').forEach(function (a) {
+      a.addEventListener('click', function () {
+        links.classList.remove('is-open');
+      });
+    });
+  }
+
+  document.querySelectorAll('form').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      const btn = form.querySelector('button[type="submit"], input[type="submit"]');
+      if (!btn || btn.dataset.noLoading === 'true') return;
+      btn.classList.add('loading');
+    });
+  });
+})();
+</script>
+
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

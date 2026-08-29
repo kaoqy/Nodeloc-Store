@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}{{ site_name }} · 管理{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+</head>
+<body>
+
+<div class="admin-shell">
+
+  <aside class="admin-sidebar">
+    <div class="brand">
+      <span class="brand-mark">N</span>
+      <span>{{ site_name }}</span>
+    </div>
+    <nav>
+      {% if current_user.has_permission('dashboard.view') %}
+      <a href="{{ url_for('admin.index') }}" class="nav-item {% if request.endpoint == 'admin.index' %}active{% endif %}">
+        <span class="icon">▦</span>概览
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('products.manage') %}
+      <a href="{{ url_for('admin.products') }}" class="nav-item {% if 'admin.product' in (request.endpoint or '') %}active{% endif %}">
+        <span class="icon">📦</span>商品管理
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('cards.manage') %}
+      <a href="#" class="nav-item disabled" onclick="return false;">
+        <span class="icon">🎫</span>卡密管理
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('orders.manage') %}
+      <a href="{{ url_for('admin.orders') }}" class="nav-item {% if 'admin.order' in (request.endpoint or '') %}active{% endif %}">
+        <span class="icon">📋</span>订单管理
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('users.view') %}
+      <a href="{{ url_for('admin.users') }}" class="nav-item {% if 'admin.user' in (request.endpoint or '') %}active{% endif %}">
+        <span class="icon">👥</span>用户管理
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('products.manage') %}
+      <a href="{{ url_for('admin.categories') }}" class="nav-item {% if 'admin.category' in (request.endpoint or '') %}active{% endif %}">
+        <span class="icon">📁</span>分类管理
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('settings.manage') %}
+      <a href="{{ url_for('admin.coupons') }}" class="nav-item {% if 'admin.coupon' in (request.endpoint or '') %}active{% endif %}">
+        <span class="icon">🎟️</span>优惠券
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('settings.manage') %}
+      <a href="{{ url_for('admin.settings') }}" class="nav-item {% if request.endpoint == 'admin.settings' %}active{% endif %}">
+        <span class="icon">⚙️</span>系统设置
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('logs.view') %}
+      <a href="{{ url_for('admin.logs') }}" class="nav-item {% if request.endpoint == 'admin.logs' %}active{% endif %}">
+        <span class="icon">📝</span>操作日志
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('settings.manage') %}
+      <a href="{{ url_for('admin.notifications') }}" class="nav-item {% if 'admin.notification' in (request.endpoint or '') %}active{% endif %}">
+        <span class="icon">🔔</span>通知管理
+      </a>
+      {% endif %}
+    </nav>
+    <div class="footer">
+      <a href="{{ url_for('store.index') }}">返回商店</a>
+      <a href="{{ url_for('auth.logout') }}">退出登录</a>
+    </div>
+  </aside>
+
+  <div class="admin-main">
+    <div class="admin-topbar">
+      <div></div>
+      <div class="user-info">
+        <strong>{{ current_user.username }}</strong> · {{ {'super_admin':'超级管理员','admin':'管理员','operator':'运营人员','support':'客服人员','user':'普通用户'}.get(current_user.effective_role, current_user.effective_role) }}
+      </div>
+    </div>
+    <div class="admin-content">
+      {% block body %}{% endblock %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  document.querySelectorAll('form').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      const btn = form.querySelector('button[type="submit"], input[type="submit"]');
+      if (!btn || btn.dataset.noLoading === 'true') return;
+      btn.classList.add('loading');
+    });
+  });
+})();
+</script>
+
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,93 @@
+{% extends "admin/base.html" %}
+{% block body %}
+
+<div class="flex items-center justify-between mb-5">
+  <div>
+    <h1 style="font-size:24px;">卡密管理</h1>
+    <p class="text-sm text-mute mt-1">商品：{{ product.name }}</p>
+  </div>
+  <a href="{{ url_for('admin.products') }}" class="btn btn-secondary btn-sm">← 返回商品</a>
+</div>
+
+<div class="card mb-4">
+  <h3 class="mb-3">添加卡密</h3>
+  <form method="post" action="{{ url_for('admin.add_cards', pid=product.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+      <label class="form-label">卡密内容（每行一个）</label>
+      <textarea name="cards" rows="5" placeholder="每行输入一个卡密" required></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">添加</button>
+  </form>
+</div>
+
+<div class="card" style="padding:0;">
+  <div class="card-header">
+    <h3>卡密列表</h3>
+    <div class="flex gap-2">
+      <a href="{{ url_for('admin.product_cards', pid=product.id, status='all') }}" class="btn {{ 'btn-primary' if status == 'all' else 'btn-secondary' }} btn-sm">全部</a>
+      <a href="{{ url_for('admin.product_cards', pid=product.id, status='available') }}" class="btn {{ 'btn-primary' if status == 'available' else 'btn-secondary' }} btn-sm">可用</a>
+      <a href="{{ url_for('admin.product_cards', pid=product.id, status='sold') }}" class="btn {{ 'btn-primary' if status == 'sold' else 'btn-secondary' }} btn-sm">已售</a>
+      <a href="{{ url_for('admin.product_cards', pid=product.id, status='disabled') }}" class="btn {{ 'btn-primary' if status == 'disabled' else 'btn-secondary' }} btn-sm">禁用</a>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>内容</th>
+          <th>状态</th>
+          <th>添加时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for card in pagination.items %}
+        <tr>
+          <td class="text-mute mono text-xs">{{ card.id }}</td>
+          <td class="mono text-xs">{{ card.content[:30] }}{% if card.content|length > 30 %}…{% endif %}</td>
+          <td>
+            {% if card.status == 'available' %}<span class="badge badge-success">可用</span>
+            {% elif card.status == 'sold' %}<span class="badge badge-info">已售</span>
+            {% elif card.status == 'disabled' %}<span class="badge badge-danger">禁用</span>
+            {% else %}<span class="badge">{{ card.status }}</span>{% endif %}
+          </td>
+          <td class="text-xs text-mute">{{ card.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>
+            <div class="flex gap-3 text-sm">
+              {% if card.status != 'sold' %}
+              <form method="post" action="{{ url_for('admin.card_toggle', card_id=card.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn {{ 'btn-secondary' if card.status == 'disabled' else 'btn-ghost' }} btn-sm">
+                  {{ '启用' if card.status == 'disabled' else '禁用' }}
+                </button>
+              </form>
+              {% endif %}
+              {% if card.status != 'sold' and not card.order_id %}
+              <form method="post" action="{{ url_for('admin.card_delete', card_id=card.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger btn-sm">删除</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not pagination.items %}<div class="empty">暂无卡密</div>{% endif %}
+</div>
+
+{% if pagination.pages > 1 %}
+<div class="pagination">
+  {% if pagination.has_prev %}<a href="{{ url_for('admin.product_cards', pid=product.id, status=status, page=pagination.prev_num) }}">‹</a>{% else %}<span class="disabled">‹</span>{% endif %}
+  {% for p in pagination.iter_pages() %}
+    {% if p %}<a href="{{ url_for('admin.product_cards', pid=product.id, status=status, page=p) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>{% else %}<span>…</span>{% endif %}
+  {% endfor %}
+  {% if pagination.has_next %}<a href="{{ url_for('admin.product_cards', pid=product.id, status=status, page=pagination.next_num) }}">›</a>{% else %}<span class="disabled">›</span>{% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

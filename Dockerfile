@@ -1,33 +1,28 @@
-# syntax=docker/dockerfile:1
-FROM golang:1.26-alpine AS builder
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    FLASK_RUN_HOST=0.0.0.0 \
+    FLASK_RUN_PORT=5000
 
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
 
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /nodeloc-store ./cmd/server
+# Install system deps for Pillow
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libjpeg-dev zlib1g-dev libpng-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Frontend build
-FROM node:22-alpine AS frontend-builder
-WORKDIR /app
-COPY frontend/ ./frontend/
-RUN cd frontend && npm install -g pnpm && pnpm install && pnpm build
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Runtime
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata
+COPY app/ ./app/
+COPY run.py .
 
-WORKDIR /app
-COPY --from=builder /nodeloc-store .
-COPY --from=frontend-builder /app/frontend/user/dist ./web/user
-COPY --from=frontend-builder /app/frontend/admin/dist ./web/admin
-COPY config.yml.example ./config.yml
+# Create upload dirs
+RUN mkdir -p /app/uploads/products /app/instance && \
+    chmod 777 /app/uploads /app/uploads/products /app/instance
 
-ENV TZ=Asia/Shanghai
-EXPOSE 8080
+EXPOSE 5000
 
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1
-
-ENTRYPOINT ["./nodeloc-store"]
+# gunicorn for production; CMD override allowed
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "info", "run:app"]

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}购买成功{% endblock %}
+{% block body %}
+<div class="container-sm" style="padding-top:60px;">
+  <div class="card text-center fade-in" style="max-width:500px; margin:0 auto;">
+    <div style="font-size:56px; margin-bottom:16px;">✓</div>
+    <h1 style="margin-bottom:8px;">购买成功</h1>
+    <p class="text-dim text-sm mb-4">订单号：<span class="mono">{{ order.order_no }}</span></p>
+
+    {% if order.cards %}
+    <div style="text-align:left;">
+      <h3 class="mb-3">您的卡密</h3>
+      <div class="keys">
+        {% for card in order.cards %}
+        <div class="key-block">{{ card.content }}</div>
+        {% endfor %}
+      </div>
+      <div class="alert alert-info mt-3 text-xs">请复制保存，刷新页面后不会再次显示</div>
+    </div>
+    {% else %}
+    <div class="alert alert-warning">卡密暂时缺货，请联系客服</div>
+    {% endif %}
+
+    <div class="divider"></div>
+    <div class="flex gap-2 justify-center">
+      <a href="{{ url_for('user.orders') }}" class="btn btn-primary btn-sm">查看订单</a>
+      <a href="{{ url_for('store.index') }}" class="btn btn-secondary btn-sm">继续购物</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

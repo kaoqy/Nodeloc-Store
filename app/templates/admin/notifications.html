@@ -1,0 +1,71 @@
+{% extends "admin/base.html" %}
+{% block body %}
+
+<h1 style="margin-bottom:24px; font-size:24px;">通知管理</h1>
+
+<div class="card mb-4">
+  <h3 class="mb-3">发送通知</h3>
+  <form method="post" action="{{ url_for('admin.notification_send') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+      <label class="form-label">标题 <span class="req">*</span></label>
+      <input type="text" name="title" required placeholder="通知标题" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">内容</label>
+      <textarea name="content" rows="3" placeholder="通知内容"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">发送给用户（留空则发送给所有人）</label>
+      <input type="number" name="user_id" placeholder="用户 ID" />
+    </div>
+    <div class="form-group">
+      <label class="flex items-center gap-2">
+        <input type="checkbox" name="notify_all" />
+        <span>发送给所有用户</span>
+      </label>
+    </div>
+    <button type="submit" class="btn btn-primary">发送</button>
+  </form>
+</div>
+
+<div class="card" style="padding:0;">
+  <div class="card-header">
+    <h3>已发送通知</h3>
+  </div>
+  {% if pagination.items %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>用户</th>
+          <th>标题</th>
+          <th>类型</th>
+          <th>已读</th>
+          <th>时间</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for notification in pagination.items %}
+        <tr>
+          <td class="text-mute mono text-xs">{{ notification.id }}</td>
+          <td>{{ notification.user.username if notification.user else '-' }}</td>
+          <td>{{ notification.title }}</td>
+          <td><span class="badge">{{ notification.type }}</span></td>
+          <td>
+            {% if notification.is_read %}<span class="badge badge-success">已读</span>
+            {% else %}<span class="badge badge-warning">未读</span>{% endif %}
+          </td>
+          <td class="text-xs text-mute">{{ notification.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">暂无通知</div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="container-sm text-center" style="padding-top:100px;">
+  <div class="card fade-in" style="max-width:400px; margin:0 auto;">
+    <div style="font-size:56px; opacity:0.3; margin-bottom:16px;">{{ {'404':'🔍','403':'🔒','500':'⚠️'}[code|default('404')] }}</div>
+    <h1 style="font-size:32px; margin-bottom:8px;">{{ code|default('404') }}</h1>
+    <p class="text-dim mb-5">{{ message|default('页面出错了') }}</p>
+    <a href="{{ url_for('store.index') }}" class="btn btn-primary btn-sm">返回首页</a>
+  </div>
+</div>
+{% endblock %}

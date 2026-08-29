@@ -1,0 +1,104 @@
+{% extends "admin/base.html" %}
+{% block body %}
+
+<h1 style="margin-bottom:24px; font-size:24px;">{{ '编辑商品' if product else '新建商品' }}</h1>
+
+<div class="card" style="max-width:700px;">
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="form-group">
+      <label class="form-label">商品名称 <span class="req">*</span></label>
+      <input type="text" name="name" value="{{ product.name if product else '' }}" required placeholder="请输入商品名称" />
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Slug</label>
+        <input type="text" name="slug" value="{{ product.slug if product else '' }}" placeholder="留空自动生成" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">分类</label>
+        <select name="category_id">
+          <option value="">无分类</option>
+          {% for cat in categories %}
+          <option value="{{ cat.id }}" {{ 'selected' if product and product.category_id == cat.id }}>{{ cat.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">简介</label>
+      <input type="text" name="summary" value="{{ product.summary if product else '' }}" placeholder="一句话介绍" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">详细描述</label>
+      <textarea name="description" rows="5" placeholder="商品详细描述">{{ product.description if product else '' }}</textarea>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">商品类型</label>
+        <select name="product_type">
+          <option value="card" {{ 'selected' if product and product.product_type == 'card' }}>卡密商品</option>
+          <option value="manual" {{ 'selected' if product and product.product_type == 'manual' }}>人工交付</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">价格 <span class="req">*</span></label>
+        <input type="number" name="price" value="{{ product.price if product else 0 }}" required min="0" />
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">原价</label>
+        <input type="number" name="original_price" value="{{ product.original_price if product else '' }}" min="0" placeholder="可选" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">排序</label>
+        <input type="number" name="sort_order" value="{{ product.sort_order if product else 0 }}" min="0" />
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">商品图片</label>
+      <input type="file" name="image" accept="image/*" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">交付说明</label>
+      <textarea name="delivery_instructions" rows="3" placeholder="购买后显示的交付说明">{{ product.delivery_instructions if product else '' }}</textarea>
+    </div>
+
+    <div class="flex gap-3">
+      <label class="flex items-center gap-2 text-sm" style="color:var(--text-dim);">
+        <input type="checkbox" name="is_published" {{ 'checked' if not product or product.is_published }} />
+        立即上架
+      </label>
+      <label class="flex items-center gap-2 text-sm" style="color:var(--text-dim);">
+        <input type="checkbox" name="auto_deliver" {{ 'checked' if product and product.auto_deliver }} />
+        自动发货
+      </label>
+      <label class="flex items-center gap-2 text-sm" style="color:var(--text-dim);">
+        <input type="checkbox" name="stock_visible" {{ 'checked' if not product or product.stock_visible }} />
+        显示库存
+      </label>
+      <label class="flex items-center gap-2 text-sm" style="color:var(--text-dim);">
+        <input type="checkbox" name="require_contact" {{ 'checked' if product and product.require_contact }} />
+        需要联系方式
+      </label>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="flex gap-2">
+      <button type="submit" class="btn btn-primary">保存</button>
+      <a href="{{ url_for('admin.products') }}" class="btn btn-ghost">取消</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

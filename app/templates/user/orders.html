@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}我的订单{% endblock %}
+{% block body %}
+<div class="container" style="max-width:900px;">
+  <h1 class="mb-5">我的订单</h1>
+
+  <div class="card" style="padding:0;">
+    {% if pagination.items %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>订单号</th>
+            <th>商品</th>
+            <th>金额</th>
+            <th>状态</th>
+            <th>时间</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in pagination.items %}
+          <tr>
+            <td class="mono text-xs text-mute">{{ order.order_no[:18] }}…</td>
+            <td>{{ order.product.name if order.product else '(已删除)' }}</td>
+            <td>{{ order.total_amount }} {{ currency }}</td>
+            <td>
+              {% if order.status == 'paid' %}<span class="badge badge-success">已支付</span>
+              {% elif order.status == 'pending' %}<span class="badge badge-warning">待支付</span>
+              {% elif order.status == 'failed' %}<span class="badge badge-danger">失败</span>
+              {% elif order.status == 'refunded' %}<span class="badge">已退款</span>
+              {% else %}<span class="badge">{{ order.status }}</span>{% endif %}
+            </td>
+            <td class="text-xs text-mute">{{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>
+              {% if order.is_paid %}
+              <a href="{{ url_for('payment.order_detail', order_no=order.order_no) }}" class="text-sm">查看</a>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty">
+      <div class="empty-icon">📋</div>
+      <p>暂无订单</p>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if pagination.pages > 1 %}
+  <div class="pagination">
+    {% if pagination.has_prev %}<a href="{{ url_for('user.orders', page=pagination.prev_num) }}">‹</a>{% else %}<span class="disabled">‹</span>{% endif %}
+    {% for p in pagination.iter_pages() %}
+      {% if p %}<a href="{{ url_for('user.orders', page=p) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>{% else %}<span>…</span>{% endif %}
+    {% endfor %}
+    {% if pagination.has_next %}<a href="{{ url_for('user.orders', page=pagination.next_num) }}">›</a>{% else %}<span class="disabled">›</span>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

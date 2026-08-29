@@ -1,55 +1,32 @@
-# Binaries
-*.exe
-*.dll
+# Python
+__pycache__/
+*.py[cod]
 *.so
-*.dylib
+*.egg-info/
+.venv/
+venv/
+env/
 
-# Test
-*.test
-*.out
+# Instance / data
+instance/
+data/
+*.db
+*.sqlite3
+uploads/products/*
+!uploads/products/.gitkeep
 
-# Go workspace
-go.work
-
-# Vendor
-vendor/
+# Env / secrets
+.env
+*.env
+.env.*
 
 # IDE
-.idea/
 .vscode/
-*.swp
-*.swo
+.idea/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Local config
-config.yml
-.env
-
-# Local DB
-db/
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-
-# Uploads
-uploads/
-
 # Logs
-logs/
 *.log
-
-# Temp
-tmp/
-temp/
-
-# Dependencies (frontend)
-node_modules/
-dist/
-
-# Local secrets
-*.pem
-*.key

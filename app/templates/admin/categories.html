@@ -1,0 +1,106 @@
+{% extends "admin/base.html" %}
+{% block body %}
+
+<div class="flex items-center justify-between mb-5">
+  <h1 style="font-size:24px;">分类管理</h1>
+</div>
+
+<div class="card mb-4">
+  <h3 class="mb-3">新建分类</h3>
+  <form method="post" action="{{ url_for('admin.category_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">名称 <span class="req">*</span></label>
+        <input type="text" name="name" required placeholder="分类名称" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Slug</label>
+        <input type="text" name="slug" placeholder="留空自动生成" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">描述</label>
+      <input type="text" name="description" placeholder="分类描述" />
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">图标 (emoji)</label>
+        <input type="text" name="icon" placeholder="📦" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">排序</label>
+        <input type="number" name="sort_order" value="0" min="0" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="flex items-center gap-2">
+        <input type="checkbox" name="is_visible" checked />
+        <span>可见</span>
+      </label>
+    </div>
+    <button type="submit" class="btn btn-primary">创建分类</button>
+  </form>
+</div>
+
+<div class="card" style="padding:0;">
+  <div class="card-header">
+    <h3>现有分类</h3>
+  </div>
+  {% if categories %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>图标</th>
+          <th>名称</th>
+          <th>Slug</th>
+          <th>商品数</th>
+          <th>排序</th>
+          <th>可见</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cat in categories %}
+        <tr>
+          <td class="text-mute mono text-xs">{{ cat.id }}</td>
+          <td style="font-size:20px;">{{ cat.icon or '-' }}</td>
+          <td><strong>{{ cat.name }}</strong></td>
+          <td class="text-mute mono text-xs">{{ cat.slug }}</td>
+          <td>{{ cat.products.count() }}</td>
+          <td>{{ cat.sort_order }}</td>
+          <td>
+            {% if cat.is_visible %}<span class="badge badge-success">是</span>
+            {% else %}<span class="badge badge-danger">否</span>{% endif %}
+          </td>
+          <td>
+            <div class="flex gap-3 text-sm">
+              <form method="post" action="{{ url_for('admin.category_edit', cid=cat.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="name" value="{{ cat.name }}" />
+                <input type="hidden" name="slug" value="{{ cat.slug }}" />
+                <input type="hidden" name="description" value="{{ cat.description or '' }}" />
+                <input type="hidden" name="icon" value="{{ cat.icon or '' }}" />
+                <input type="hidden" name="sort_order" value="{{ cat.sort_order }}" />
+                <input type="hidden" name="is_visible" {{ 'value="on"' if cat.is_visible }} />
+                <button type="submit" class="btn btn-secondary btn-sm">编辑</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.category_delete', cid=cat.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger btn-sm" {{ 'disabled' if cat.products.count() > 0 }}>删除</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">暂无分类</div>
+  {% endif %}
+</div>
+
+{% endblock %}

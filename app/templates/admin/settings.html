@@ -1,0 +1,142 @@
+{% extends "admin/base.html" %}
+{% block body %}
+
+<h1 style="margin-bottom:24px; font-size:24px;">系统设置</h1>
+
+<div class="card mb-4">
+  <h3 class="mb-4">商店设置</h3>
+  <form method="post" action="{{ url_for('admin.settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">商店名称</label>
+        <input type="text" name="site_name" value="{{ settings.get('site_name', '') }}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">商店标语</label>
+        <input type="text" name="site_slogan" value="{{ settings.get('site_slogan', '') }}" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">货币单位</label>
+        <input type="text" name="currency" value="{{ settings.get('currency', '积分') }}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">是否允许 HTTP</label>
+        <select name="allow_http">
+          <option value="0" {{ 'selected' if settings.get('allow_http') != '1' }}>否</option>
+          <option value="1" {{ 'selected' if settings.get('allow_http') == '1' }}>是</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">客服邮箱</label>
+      <input type="email" name="support_email" value="{{ settings.get('support_email', '') }}" placeholder="选填" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">站点公告</label>
+      <textarea name="site_notice" rows="3" placeholder="将显示在用户首页">{{ settings.get('site_notice', '') }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">保存</button>
+  </form>
+</div>
+
+<div class="card mb-4">
+  <h3 class="mb-4">签到设置</h3>
+  <form method="post" action="{{ url_for('admin.settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">启用签到</label>
+        <select name="checkin_enabled">
+          <option value="1" {{ 'selected' if settings.get('checkin_enabled', '1') == '1' }}>是</option>
+          <option value="0" {{ 'selected' if settings.get('checkin_enabled') == '0' }}>否</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">基础奖励（积分/天）</label>
+        <input type="number" name="checkin_reward" value="{{ settings.get('checkin_reward', '5') }}" min="0" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">连续奖励（积分/天）</label>
+        <input type="number" name="checkin_streak_bonus" value="{{ settings.get('checkin_streak_bonus', '1') }}" min="0" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">奖励上限（积分）</label>
+        <input type="number" name="checkin_reward_cap" value="{{ settings.get('checkin_reward_cap', '20') }}" min="0" />
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">保存</button>
+  </form>
+</div>
+
+<div class="card mb-4">
+  <h3 class="mb-4">NodeLoc OAuth</h3>
+  <form method="post" action="{{ url_for('admin.settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">OAuth URL</label>
+        <input type="text" name="oauth_url" value="{{ settings.get('oauth_url', '') }}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Client ID</label>
+        <input type="text" name="oauth_client_id" value="{{ settings.get('oauth_client_id', '') }}" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Client Secret</label>
+      <input type="password" name="oauth_client_secret" value="{{ settings.get('oauth_client_secret', '') }}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">回调地址</label>
+      <div class="flex items-center gap-2">
+        <input type="text" value="{{ request.host_url }}auth/oauth/callback" readonly style="flex:1;" class="form-control" />
+        <button type="button" class="btn btn-secondary btn-sm" data-copy="{{ request.host_url }}auth/oauth/callback">复制</button>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">保存</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mb-4">支付设置</h3>
+  <form method="post" action="{{ url_for('admin.settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Payment ID</label>
+        <input type="text" name="payment_id" value="{{ settings.get('payment_id', '') }}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Secret Key</label>
+        <input type="password" name="payment_secret" value="{{ settings.get('payment_secret', '') }}" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">回调地址</label>
+      <div class="flex items-center gap-2">
+        <input type="text" value="{{ request.host_url }}payment/callback" readonly style="flex:1;" class="form-control" />
+        <button type="button" class="btn btn-secondary btn-sm" data-copy="{{ request.host_url }}payment/callback">复制</button>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">保存</button>
+  </form>
+</div>
+
+<script>
+document.querySelectorAll('[data-copy]').forEach(btn => {
+  btn.addEventListener('click', function() {
+    navigator.clipboard.writeText(this.dataset.copy).then(() => {
+      const orig = this.textContent;
+      this.textContent = '已复制';
+      setTimeout(() => this.textContent = orig, 1500);
+    });
+  });
+});
+</script>
+
+{% endblock %}

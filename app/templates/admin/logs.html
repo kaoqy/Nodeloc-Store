@@ -1,0 +1,44 @@
+{% extends "admin/base.html" %}
+{% block body %}
+
+<h1 style="margin-bottom:24px; font-size:24px;">操作日志</h1>
+
+<div class="card" style="padding:0;">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>时间</th>
+          <th>操作</th>
+          <th>对象</th>
+          <th>详情</th>
+          <th>IP</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in pagination.items %}
+        <tr>
+          <td class="text-xs text-mute mono">{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td class="text-sm">{{ log.action }}</td>
+          <td class="text-xs text-mute">{{ log.target or '-' }}</td>
+          <td class="text-xs text-mute" style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ log.detail }}">{{ log.detail or '-' }}</td>
+          <td class="text-xs text-mute mono">{{ log.ip or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not pagination.items %}<div class="empty">暂无日志</div>{% endif %}
+</div>
+
+{% if pagination.pages > 1 %}
+<div class="pagination">
+  {% if pagination.has_prev %}<a href="{{ url_for('admin.logs', page=pagination.prev_num, action=action) }}">‹</a>{% else %}<span class="disabled">‹</span>{% endif %}
+  {% for p in pagination.iter_pages() %}
+    {% if p %}<a href="{{ url_for('admin.logs', page=p, action=action) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>{% else %}<span>…</span>{% endif %}
+  {% endfor %}
+  {% if pagination.has_next %}<a href="{{ url_for('admin.logs', page=pagination.next_num, action=action) }}">›</a>{% else %}<span class="disabled">›</span>{% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

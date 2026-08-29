@@ -1,0 +1,79 @@
+{% extends "admin/base.html" %}
+{% block body %}
+
+<h1 style="margin-bottom:24px; font-size:24px;">数据概览</h1>
+
+<div class="stat-grid">
+  <div class="stat-tile">
+    <div class="label">用户总数</div>
+    <div class="value">{{ total_users }}</div>
+  </div>
+  <div class="stat-tile">
+    <div class="label">订单总数</div>
+    <div class="value">{{ total_orders }}</div>
+  </div>
+  <div class="stat-tile">
+    <div class="label">已完成订单</div>
+    <div class="value" style="color:#6ee7b7;">{{ paid_orders }}</div>
+  </div>
+  <div class="stat-tile">
+    <div class="label">总收入</div>
+    <div class="value">{{ revenue }} <span style="font-size:14px; color:var(--text-mute); font-weight:400;">{{ currency }}</span></div>
+  </div>
+</div>
+
+<div style="display:grid; grid-template-columns:1.5fr 1fr; gap:20px;">
+  <div class="card">
+    <div class="card-header">
+      <h3>最新订单</h3>
+      <a href="{{ url_for('admin.orders') }}" class="text-sm text-mute">查看全部 →</a>
+    </div>
+    {% if recent_orders %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>订单号</th><th>用户</th><th>金额</th><th>状态</th></tr></thead>
+        <tbody>
+          {% for o in recent_orders %}
+          <tr>
+            <td class="mono text-xs text-mute">{{ o.order_no[:14] }}…</td>
+            <td class="text-sm">{{ o.user.username if o.user else '-' }}</td>
+            <td class="text-sm">{{ o.total_amount }}</td>
+            <td>
+              {% if o.status=='paid' %}<span class="badge badge-success">已付</span>
+              {% elif o.status=='pending' %}<span class="badge badge-warning">待付</span>
+              {% else %}<span class="badge">{{ o.status }}</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty text-sm">暂无订单</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>操作日志</h3>
+      <a href="{{ url_for('admin.logs') }}" class="text-sm text-mute">查看全部 →</a>
+    </div>
+    {% if recent_logs %}
+    <div style="display:flex; flex-direction:column; gap:2px;">
+      {% for log in recent_logs %}
+      <div class="flex items-start gap-3" style="padding:10px 0; border-bottom:1px solid var(--border-soft); font-size:12.5px;">
+        <span class="text-mute mono" style="flex-shrink:0; font-size:11px; min-width:70px;">{{ log.created_at.strftime('%m-%d %H:%M') }}</span>
+        <div>
+          <div style="color:var(--text);">{{ log.action }}</div>
+          {% if log.target %}<div class="text-mute text-xs">{{ log.target }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty text-sm">暂无日志</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

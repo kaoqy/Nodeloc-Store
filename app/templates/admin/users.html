@@ -1,0 +1,77 @@
+{% extends "admin/base.html" %}
+{% block body %}
+
+<div class="flex items-center justify-between mb-5">
+  <h1 style="font-size:24px;">用户管理</h1>
+  <form method="get" class="flex gap-2">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索用户名..." style="width:200px;" class="form-control" />
+    <button class="btn btn-secondary btn-sm">搜索</button>
+  </form>
+</div>
+
+<div class="card" style="padding:0;">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>用户名</th>
+          <th>邮箱</th>
+          <th>角色</th>
+          <th>状态</th>
+          <th>积分</th>
+          <th>注册时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in pagination.items %}
+        <tr>
+          <td class="text-mute mono text-xs">{{ u.id }}</td>
+          <td><strong>{{ u.username }}</strong></td>
+          <td class="text-sm text-mute">{{ u.email or '-' }}</td>
+          <td>
+            <span class="badge {{ 'badge-info' if u.role in ('super_admin','admin') else 'badge-neutral' }}">
+              {{ {'super_admin':'超管','admin':'管理','operator':'运营','support':'客服','user':'用户'}.get(u.role, u.role) }}
+            </span>
+          </td>
+          <td>
+            {% if u.is_active_flag %}<span class="badge badge-success">正常</span>
+            {% else %}<span class="badge badge-danger">禁用</span>{% endif %}
+          </td>
+          <td>{{ u.points }}</td>
+          <td class="text-xs text-mute">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+          <td>
+            <div class="flex gap-3 text-sm">
+              <a href="{{ url_for('admin.user_set_role', uid=u.id) }}">角色</a>
+              {% if u.id != current_user.id %}
+              <form method="post" action="{{ url_for('admin.user_toggle_active', uid=u.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn {{ 'btn-secondary' if u.is_active_flag else 'btn-ghost' }} btn-sm">
+                  {{ '禁用' if u.is_active_flag else '启用' }}
+                </button>
+              </form>
+              {% else %}
+              <span class="text-xs text-mute">不可操作</span>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not pagination.items %}<div class="empty">没有找到符合条件的用户</div>{% endif %}
+</div>
+
+{% if pagination.pages > 1 %}
+<div class="pagination">
+  {% if pagination.has_prev %}<a href="{{ url_for('admin.users', page=pagination.prev_num, q=q) }}">‹</a>{% else %}<span class="disabled">‹</span>{% endif %}
+  {% for p in pagination.iter_pages() %}
+    {% if p %}<a href="{{ url_for('admin.users', page=p, q=q) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>{% else %}<span>…</span>{% endif %}
+  {% endfor %}
+  {% if pagination.has_next %}<a href="{{ url_for('admin.users', page=pagination.next_num, q=q) }}">›</a>{% else %}<span class="disabled">›</span>{% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

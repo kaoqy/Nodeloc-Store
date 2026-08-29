@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>安装 · {{ site_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+</head>
+<body class="installer-body">
+
+<div class="installer-card fade-in">
+  <div class="text-center">
+    <div class="icon">⚡</div>
+    <h1>连接数据库</h1>
+    <p class="subtitle">第一步 · 配置 MariaDB / MySQL</p>
+    <span class="step-badge">步骤 1 / 2</span>
+  </div>
+
+  {% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" style="margin-top:24px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">主机 <span class="req">*</span></label>
+        <input type="text" name="db_host" value="{{ defaults.db_host }}" required placeholder="localhost" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">端口 <span class="req">*</span></label>
+        <input type="text" name="db_port" value="{{ defaults.db_port }}" required placeholder="3306" />
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">数据库名 <span class="req">*</span></label>
+      <input type="text" name="db_name" value="{{ defaults.db_name }}" required placeholder="nodeloc_store" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">用户名 <span class="req">*</span></label>
+      <input type="text" name="db_user" value="{{ defaults.db_user }}" required placeholder="db_user" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">密码</label>
+      <input type="password" name="db_pass" value="{{ defaults.db_pass }}" placeholder="••••••••" />
+    </div>
+
+    <p class="hint">💡 需要预先创建好数据库。连接成功后会自动建表。</p>
+
+    <button type="submit" class="btn btn-primary btn-block btn-lg" style="margin-top:20px;">验证连接并继续 →</button>
+  </form>
+</div>
+
+</body>
+</html>
