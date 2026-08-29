@@ -11,6 +11,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /nodeloc-store ./cmd/s
 
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app
+ENV PNPM_ALLOW_SCRIPTS=1
 COPY frontend/ ./frontend/
 RUN cd frontend && npm install -g pnpm && pnpm install
 RUN cd frontend/user && pnpm build 2>&1 || echo "User build had issues"
