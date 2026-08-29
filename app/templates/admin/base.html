@@ -41,6 +41,16 @@
         <span class="icon">👥</span>用户管理
       </a>
       {% endif %}
+      {% if current_user.has_permission('products.manage') %}
+      <a href="{{ url_for('admin.categories') }}" class="nav-item {% if 'admin.category' in (request.endpoint or '') %}active{% endif %}">
+        <span class="icon">📁</span>分类管理
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('settings.manage') %}
+      <a href="{{ url_for('admin.coupons') }}" class="nav-item {% if 'admin.coupon' in (request.endpoint or '') %}active{% endif %}">
+        <span class="icon">🎟️</span>优惠券
+      </a>
+      {% endif %}
       {% if current_user.has_permission('settings.manage') %}
       <a href="{{ url_for('admin.settings') }}" class="nav-item {% if request.endpoint == 'admin.settings' %}active{% endif %}">
         <span class="icon">⚙️</span>系统设置
@@ -49,6 +59,11 @@
       {% if current_user.has_permission('logs.view') %}
       <a href="{{ url_for('admin.logs') }}" class="nav-item {% if request.endpoint == 'admin.logs' %}active{% endif %}">
         <span class="icon">📝</span>操作日志
+      </a>
+      {% endif %}
+      {% if current_user.has_permission('settings.manage') %}
+      <a href="{{ url_for('admin.notifications') }}" class="nav-item {% if 'admin.notification' in (request.endpoint or '') %}active{% endif %}">
+        <span class="icon">🔔</span>通知管理
       </a>
       {% endif %}
     </nav>

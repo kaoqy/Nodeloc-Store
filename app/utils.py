@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import functools
+import hashlib
+import hmac as _hmac
 import re
 import secrets
 from typing import Callable
@@ -12,13 +14,6 @@ from sqlalchemy import func
 
 from .extensions import db
 from .models import AuditLog, Product
-
-
-# --------------------------------------------------------------------------- #
-# Password hashing (PBKDF2 — no external bcrypt needed, ships with stdlib)
-# --------------------------------------------------------------------------- #
-import hashlib
-import hmac as _hmac
 
 
 _PWD_ITER = 260000
@@ -49,7 +44,6 @@ def verify_password(password: str, stored: str | None) -> bool:
     return _hmac.compare_digest(candidate, expected)
 
 
-# Patch the model so the auth flow is simple.
 from .models import User  # noqa: E402
 
 
@@ -67,9 +61,6 @@ def _user_password_helpers():
 _user_password_helpers()
 
 
-# --------------------------------------------------------------------------- #
-# Decorators
-# --------------------------------------------------------------------------- #
 def admin_required(view: Callable) -> Callable:
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
@@ -86,9 +77,6 @@ def request_path() -> str:
     return request.full_path if request.method == "GET" else request.path
 
 
-# --------------------------------------------------------------------------- #
-# Slug helper
-# --------------------------------------------------------------------------- #
 _SLUG_RE = re.compile(r"[^a-z0-9\u4e00-\u9fff\-]+", re.IGNORECASE)
 
 
@@ -114,9 +102,6 @@ def unique_product_slug(name: str, exclude_id: int | None = None) -> str:
         i += 1
 
 
-# --------------------------------------------------------------------------- #
-# Inventory helpers
-# --------------------------------------------------------------------------- #
 def refresh_product_stock(product: Product) -> None:
     from .models import Card
     n = db.session.query(func.count(Card.id)).filter(
@@ -125,9 +110,6 @@ def refresh_product_stock(product: Product) -> None:
     product.stock_count = int(n)
 
 
-# --------------------------------------------------------------------------- #
-# Audit
-# --------------------------------------------------------------------------- #
 def log_action(action: str, *, target: str | None = None, detail: str | None = None) -> None:
     from flask import has_request_context, request
 
@@ -144,7 +126,4 @@ def log_action(action: str, *, target: str | None = None, detail: str | None = N
         detail=detail,
         ip=ip,
     ))
-    # Audit calls are frequently made after the business transaction has
-    # already been committed. Persist the audit row immediately so Flask-
-    # SQLAlchemy does not roll it back when the request-scoped session closes.
     db.session.commit()

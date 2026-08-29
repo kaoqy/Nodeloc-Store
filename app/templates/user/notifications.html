@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}通知中心{% endblock %}
+{% block body %}
+<div class="container" style="max-width:700px;">
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h1>通知中心</h1>
+      <p class="text-sm text-mute mt-1">{{ unread_count }} 条未读</p>
+    </div>
+    {% if unread_count > 0 %}
+    <form method="post" action="{{ url_for('notifications.mark_all_read') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-secondary btn-sm">全部标记已读</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="card" style="padding:0;">
+    {% if pagination.items %}
+    <div style="display:flex; flex-direction:column;">
+      {% for notification in pagination.items %}
+      <div class="flex items-start gap-3" style="padding:14px 18px; border-bottom:1px solid var(--border-soft); {{ 'background:var(--accent-soft);' if not notification.is_read }}">
+        <div style="width:8px; height:8px; border-radius:50%; background:{{ 'var(--text)' if not notification.is_read else 'transparent' }}; flex-shrink:0; margin-top:6px;"></div>
+        <div style="flex:1;">
+          <div style="font-weight:600; font-size:13px;">{{ notification.title }}</div>
+          {% if notification.content %}<div class="text-sm text-mute mt-1" style="font-size:12.5px;">{{ notification.content }}</div>{% endif %}
+          <div class="text-xs text-mute mt-1">{{ notification.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+        </div>
+        {% if not notification.is_read %}
+        <form method="post" action="{{ url_for('notifications.mark_read', nid=notification.id) }}" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-ghost btn-sm">已读</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">
+      <div class="empty-icon">🔔</div>
+      <p>暂无通知</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

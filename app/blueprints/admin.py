@@ -11,10 +11,21 @@ from sqlalchemy import func, or_, and_
 from werkzeug.utils import secure_filename
 
 from ..extensions import db
-from ..models import (AppSetting, AuditLog, Card, CheckIn, DeliveryRecord,
-                      Order, PointLedger, Product, User)
+from ..models import (AppSetting, AuditLog, Card, Category, CheckIn,
+                      Coupon, DeliveryRecord, Notification, Order,
+                      PointLedger, Product, User)
 from ..utils import (log_action, refresh_product_stock, slugify,
                      unique_product_slug)
+
+
+def _get_unread_notification_count() -> int:
+    """Get unread notification count for current user (for base template)."""
+    from flask_login import current_user
+    if not current_user.is_authenticated:
+        return 0
+    return Notification.query.filter_by(
+        user_id=current_user.id, is_read=False
+    ).count()
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -53,6 +64,16 @@ ENDPOINT_PERMISSIONS = {
     "admin.logs": "logs.view",
     "admin.user_detail": "users.view",
     "admin.user_orders": "orders.manage",
+    "admin.categories": "products.manage",
+    "admin.category_new": "products.manage",
+    "admin.category_edit": "products.manage",
+    "admin.category_delete": "products.manage",
+    "admin.coupons": "settings.manage",
+    "admin.coupon_new": "settings.manage",
+    "admin.coupon_edit": "settings.manage",
+    "admin.coupon_delete": "settings.manage",
+    "admin.notifications": "settings.manage",
+    "admin.notification_send": "settings.manage",
 }
 
 
@@ -128,6 +149,7 @@ def _product_edit(product):
         is_published = request.form.get("is_published") == "on"
         auto_deliver = request.form.get("auto_deliver") == "on"
         stock_visible = request.form.get("stock_visible") == "on"
+        category_id = request.form.get("category_id", type=int) or None
 
         if not name:
             flash("商品名称不能为空", "danger")
@@ -163,6 +185,7 @@ def _product_edit(product):
             product.is_published = is_published
             product.auto_deliver = auto_deliver
             product.stock_visible = stock_visible
+            product.category_id = category_id
             if image_path:
                 product.image_path = image_path
             db.session.commit()
@@ -177,6 +200,7 @@ def _product_edit(product):
                 price=price, original_price=original_price,
                 is_published=is_published, auto_deliver=auto_deliver,
                 stock_visible=stock_visible, image_path=image_path,
+                category_id=category_id,
             )
             db.session.add(p)
             db.session.commit()
@@ -186,7 +210,8 @@ def _product_edit(product):
         return redirect(url_for("admin.products"))
 
     return render_template("admin/product_form.html",
-                           product=product, is_new=(product is None))
+                           product=product, is_new=(product is None),
+                           categories=Category.query.order_by(Category.sort_order).all())
 
 
 @bp.route("/users/<int:uid>")
@@ -742,6 +767,95 @@ def payment_test():
         return {"ok": False, "msg": str(e)}
 
 
+# ── Categories ──────────────────────────────────────────────────────────
+@bp.route("/categories")
+def categories():
+    cats = Category.query.order_by(Category.sort_order, Category.id).all()
+    return render_template("admin/categories.html", categories=cats)
+
+
+@bp.route("/categories/new", methods=["POST"])
+def category_new():
+    name = request.form.get("name", "").strip()
+    slug = request.form.get("slug", "").strip()
+    description = request.form.get("description", "").strip()
+    icon = request.form.get("icon", "").strip()
+    sort_order = request.form.get("sort_order", 0, type=int)
+    is_visible = request.form.get("is_visible") == "on"
+
+    if not name:
+        flash("分类名称不能为空", "danger")
+        return redirect(url_for("admin.categories"))
+
+    if not slug:
+        slug = slugify(name)
+    else:
+        slug = slugify(slug)
+
+    if Category.query.filter_by(slug=slug).first():
+        flash("分类 slug 已存在", "danger")
+        return redirect(url_for("admin.categories"))
+
+    cat = Category(
+        name=name, slug=slug, description=description,
+        icon=icon, sort_order=sort_order, is_visible=is_visible,
+    )
+    db.session.add(cat)
+    db.session.commit()
+    flash("分类已创建", "success")
+    log_action("category.create", target=slug)
+    return redirect(url_for("admin.categories"))
+
+
+@bp.route("/categories/<int:cid>/edit", methods=["POST"])
+def category_edit(cid):
+    cat = db.get_or_404(Category, cid)
+    name = request.form.get("name", "").strip()
+    slug = request.form.get("slug", "").strip()
+    description = request.form.get("description", "").strip()
+    icon = request.form.get("icon", "").strip()
+    sort_order = request.form.get("sort_order", 0, type=int)
+    is_visible = request.form.get("is_visible") == "on"
+
+    if not name:
+        flash("分类名称不能为空", "danger")
+        return redirect(url_for("admin.categories"))
+
+    if not slug:
+        slug = slugify(name)
+    else:
+        slug = slugify(slug)
+
+    existing = Category.query.filter_by(slug=slug).first()
+    if existing and existing.id != cid:
+        flash("分类 slug 已存在", "danger")
+        return redirect(url_for("admin.categories"))
+
+    cat.name = name
+    cat.slug = slug
+    cat.description = description
+    cat.icon = icon
+    cat.sort_order = sort_order
+    cat.is_visible = is_visible
+    db.session.commit()
+    flash("分类已更新", "success")
+    log_action("category.edit", target=slug)
+    return redirect(url_for("admin.categories"))
+
+
+@bp.route("/categories/<int:cid>/delete", methods=["POST"])
+def category_delete(cid):
+    cat = db.get_or_404(Category, cid)
+    if cat.products.count() > 0:
+        flash("无法删除包含商品的分类", "danger")
+        return redirect(url_for("admin.categories"))
+    db.session.delete(cat)
+    db.session.commit()
+    flash("分类已删除", "success")
+    log_action("category.delete", target=str(cid))
+    return redirect(url_for("admin.categories"))
+
+
 # ── Audit log ─────────────────────────────────────────────────────────────
 @bp.route("/logs")
 def logs():
@@ -803,6 +917,123 @@ def _save_image(file_obj) -> str:
     return filename
 
 
-@bp.route("/uploads/<path:filename>")
-def uploaded_file(filename):
-    return send_from_directory(current_app.config["UPLOAD_FOLDER"], filename)
+@bp.route("/notifications")
+def notifications():
+    page = request.args.get("page", 1, type=int)
+    pagination = Notification.query.order_by(Notification.created_at.desc()).paginate(
+        page=page, per_page=30, error_out=False
+    )
+    return render_template("admin/notifications.html", pagination=pagination)
+
+
+@bp.route("/notifications/send", methods=["POST"])
+def notification_send():
+    title = request.form.get("title", "").strip()
+    content = request.form.get("content", "").strip()
+    user_id = request.form.get("user_id", type=int)
+    notify_all = request.form.get("notify_all") == "on"
+
+    if not title:
+        flash("通知标题不能为空", "danger")
+        return redirect(url_for("admin.notifications"))
+
+    if notify_all:
+        # Send to all users (batched)
+        batch_size = 100
+        offset = 0
+        while True:
+            users = User.query.limit(batch_size).offset(offset).all()
+            if not users:
+                break
+            for user in users:
+                db.session.add(Notification(
+                    user_id=user.id,
+                    type="system",
+                    title=title,
+                    content=content,
+                ))
+            db.session.flush()
+            offset += batch_size
+        db.session.commit()
+        flash("已发送系统通知给所有用户", "success")
+        log_action("notification.broadcast", target=f"users={User.query.count()}", detail=title)
+    elif user_id:
+        user = db.get_or_404(User, user_id)
+        db.session.add(Notification(
+            user_id=user.id,
+            type="system",
+            title=title,
+            content=content,
+        ))
+        db.session.commit()
+        flash(f"已发送通知给 {user.username}", "success")
+        log_action("notification.send", target=str(user.id), detail=title)
+    else:
+        flash("请选择发送对象", "danger")
+    return redirect(url_for("admin.notifications"))
+
+
+# ── Coupons ──────────────────────────────────────────────────────────────
+@bp.route("/coupons")
+def coupons():
+    coupon_list = Coupon.query.order_by(Coupon.created_at.desc()).all()
+    return render_template("admin/coupons.html", coupons=coupon_list)
+
+
+@bp.route("/coupons/new", methods=["POST"])
+def coupon_new():
+    code = request.form.get("code", "").strip().upper()
+    discount_type = request.form.get("discount_type", "fixed").strip()
+    discount_value = request.form.get("discount_value", 0, type=int)
+    min_order_amount = request.form.get("min_order_amount", 0, type=int)
+    max_uses = request.form.get("max_uses", 0, type=int)
+    valid_from = request.form.get("valid_from", "").strip()
+    valid_until = request.form.get("valid_until", "").strip()
+    is_active = request.form.get("is_active") == "on"
+
+    if not code:
+        flash("优惠券代码不能为空", "danger")
+        return redirect(url_for("admin.coupons"))
+    if discount_type not in ("fixed", "percent"):
+        flash("无效的折扣类型", "danger")
+        return redirect(url_for("admin.coupons"))
+    if discount_value <= 0:
+        flash("折扣值必须大于 0", "danger")
+        return redirect(url_for("admin.coupons"))
+    if Coupon.query.filter_by(code=code).first():
+        flash("优惠券代码已存在", "danger")
+        return redirect(url_for("admin.coupons"))
+
+    valid_from_dt = datetime.fromisoformat(valid_from) if valid_from else None
+    valid_until_dt = datetime.fromisoformat(valid_until) if valid_until else None
+
+    coupon = Coupon(
+        code=code, discount_type=discount_type, discount_value=discount_value,
+        min_order_amount=min_order_amount, max_uses=max_uses,
+        valid_from=valid_from_dt, valid_until=valid_until_dt, is_active=is_active,
+    )
+    db.session.add(coupon)
+    db.session.commit()
+    flash("优惠券已创建", "success")
+    log_action("coupon.create", target=code)
+    return redirect(url_for("admin.coupons"))
+
+
+@bp.route("/coupons/<int:coupon_id>/toggle", methods=["POST"])
+def coupon_toggle(coupon_id):
+    coupon = db.get_or_404(Coupon, coupon_id)
+    coupon.is_active = not coupon.is_active
+    db.session.commit()
+    flash(f"优惠券已{'启用' if coupon.is_active else '禁用'}", "success")
+    log_action("coupon.toggle", target=coupon.code)
+    return redirect(url_for("admin.coupons"))
+
+
+@bp.route("/coupons/<int:coupon_id>/delete", methods=["POST"])
+def coupon_delete(coupon_id):
+    coupon = db.get_or_404(Coupon, coupon_id)
+    db.session.delete(coupon)
+    db.session.commit()
+    flash("优惠券已删除", "success")
+    log_action("coupon.delete", target=coupon.code)
+    return redirect(url_for("admin.coupons"))

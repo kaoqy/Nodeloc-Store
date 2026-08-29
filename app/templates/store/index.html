@@ -14,6 +14,14 @@
   </div>
 </section>
 
+{% if site_notice %}
+<section class="fade-in">
+  <div class="alert alert-info">
+    <strong>📢 公告</strong><br />{{ site_notice }}
+  </div>
+</section>
+{% endif %}
+
 <section class="features fade-in fade-in-delay-1">
   <div class="feature-card">
     <span class="feature-icon">⚡</span>
@@ -48,8 +56,24 @@
 <section class="section" id="products">
   <div class="section-header">
     <h2>热门商品</h2>
-    <span class="meta">安全支付 · 自动交付</span>
+    <div class="flex gap-2">
+      <form method="get" action="{{ url_for('store.index') }}" class="flex gap-2">
+        <input type="text" name="q" value="{{ q }}" placeholder="搜索商品..." style="width:200px;" class="form-control" />
+        <button class="btn btn-secondary btn-sm">搜索</button>
+      </form>
+    </div>
   </div>
+
+  {% if categories %}
+  <div class="flex gap-2 mb-4" style="flex-wrap:wrap;">
+    <a href="{{ url_for('store.index') }}" class="btn {{ 'btn-primary' if not current_category else 'btn-secondary' }} btn-sm">全部</a>
+    {% for cat in categories %}
+    <a href="{{ url_for('store.category', slug=cat.slug) }}" class="btn {{ 'btn-primary' if current_category == cat.slug else 'btn-secondary' }} btn-sm">
+      {{ cat.icon or '' }} {{ cat.name }}
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   {% if pagination.items %}
   <div class="product-grid">
@@ -93,15 +117,15 @@
   {% if pagination.pages > 1 %}
   <div class="pagination">
     {% if pagination.has_prev %}
-    <a href="{{ url_for('store.index', page=pagination.prev_num, q=q) }}">‹</a>
+    <a href="{{ url_for('store.index', page=pagination.prev_num, q=q, category=current_category) }}">‹</a>
     {% else %}<span class="disabled">‹</span>{% endif %}
     {% for p in pagination.iter_pages() %}
       {% if p %}
-        <a href="{{ url_for('store.index', page=p, q=q) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>
+        <a href="{{ url_for('store.index', page=p, q=q, category=current_category) }}" class="{{ 'active' if p==pagination.page else '' }}">{{ p }}</a>
       {% else %}<span>…</span>{% endif %}
     {% endfor %}
     {% if pagination.has_next %}
-    <a href="{{ url_for('store.index', page=pagination.next_num, q=q) }}">›</a>
+    <a href="{{ url_for('store.index', page=pagination.next_num, q=q, category=current_category) }}">›</a>
     {% else %}<span class="disabled">›</span>{% endif %}
   </div>
   {% endif %}

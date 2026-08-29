@@ -177,6 +177,24 @@ class CheckIn(db.Model):
     user: Mapped[User] = relationship("User", back_populates="checkins")
 
 
+class Category(db.Model):
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    icon: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_visible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    products: Mapped[list["Product"]] = relationship("Product", back_populates="category")
+
+    def __repr__(self) -> str:
+        return f"<Category {self.id} {self.name}>"
+
+
 class Product(db.Model):
     __tablename__ = "products"
 
@@ -203,6 +221,10 @@ class Product(db.Model):
     archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    category_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("categories.id"), nullable=True, index=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -212,6 +234,7 @@ class Product(db.Model):
         "Card", back_populates="product", lazy="dynamic",
         primaryjoin="and_(Card.product_id==Product.id, Card.status=='available')",
     )
+    category: Mapped[Optional[Category]] = relationship("Category", back_populates="products")
 
     def to_dict(self) -> dict:
         return {
@@ -225,6 +248,7 @@ class Product(db.Model):
             "original_price": self.original_price,
             "stock_count": self.stock_count,
             "is_published": self.is_published,
+            "category_id": self.category_id,
         }
 
     def __repr__(self) -> str:
@@ -317,6 +341,58 @@ class DeliveryRecord(db.Model):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     order: Mapped[Order] = relationship("Order", backref="delivery_records")
+
+
+class Coupon(db.Model):
+    __tablename__ = "coupons"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    discount_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    discount_value: Mapped[int] = mapped_column(Integer, nullable=False)
+    min_order_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_uses: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    valid_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def is_valid(self) -> bool:
+        if not self.is_active:
+            return False
+        if self.max_uses > 0 and self.used_count >= self.max_uses:
+            return False
+        now = datetime.utcnow()
+        if self.valid_from and now < self.valid_from:
+            return False
+        if self.valid_until and now > self.valid_until:
+            return False
+        return True
+
+    def calculate_discount(self, amount: int) -> int:
+        if self.discount_type == "percent":
+            return min(amount, int(amount * self.discount_value / 100))
+        elif self.discount_type == "fixed":
+            return min(amount, self.discount_value)
+        return 0
+
+
+class Notification(db.Model):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    link: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship("User", backref="notifications")
 
 
 class AppSetting(db.Model):

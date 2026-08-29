@@ -100,6 +100,10 @@ def create_app() -> "Flask":
                 product_statements.append(
                     "ALTER TABLE products ADD COLUMN archived_at DATETIME NULL"
                 )
+            if "category_id" not in product_columns:
+                product_statements.append(
+                    "ALTER TABLE products ADD COLUMN category_id INTEGER NULL"
+                )
             for statement in product_statements:
                 db.session.execute(text(statement))
             if product_statements:
@@ -155,6 +159,7 @@ def create_app() -> "Flask":
     from .blueprints.payment import bp as payment_bp
     from .blueprints.admin import bp as admin_bp
     from .blueprints.api import bp as api_bp
+    from .blueprints.notifications import bp as notifications_bp
 
     app.register_blueprint(install_bp)
     app.register_blueprint(auth_bp, url_prefix="/auth")
@@ -227,6 +232,7 @@ def create_app() -> "Flask":
         return render_template("errors/generic.html", code=500, message="服务器开小差了"), 500
 
     register_cli(app)
+    app.register_blueprint(notifications_bp)
     return app
 
 
