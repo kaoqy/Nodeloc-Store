@@ -198,3 +198,25 @@ func translateGormError(err error) error {
 	}
 	return err
 }
+
+func (r *GormUserRepo) List(ctx context.Context, limit, offset int) ([]*domain.User, int64, error) {
+	var users []*domain.User
+	var total int64
+	query := r.db.WithContext(ctx).Model(&domain.User{})
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if err := query.Order("created_at DESC").Limit(limit).Offset(offset).Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
+}
