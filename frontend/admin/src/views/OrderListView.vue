@@ -73,9 +73,11 @@ onMounted(load)
             <td colspan="7" class="py-12 text-center text-[#6b6b80]">暂无订单</td>
           </tr>
           <tr v-for="order in orders" :key="order.order_no">
-            <RouterLink :to="`/orders/${order.order_no}`" class="text-indigo-300 hover:text-indigo-200">
-              {{ order.order_no }}
-            </RouterLink>
+            <td>
+              <RouterLink :to="`/orders/${order.order_no}`" class="text-indigo-300 hover:text-indigo-200">
+                {{ order.order_no }}
+              </RouterLink>
+            </td>
             <td>{{ order.user?.username || '-' }}</td>
             <td>{{ order.product_name || order.product?.name || '数字商品' }}</td>
             <td>¥{{ Number(order.total_amount).toFixed(2) }}</td>

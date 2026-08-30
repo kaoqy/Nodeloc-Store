@@ -1,18 +1,53 @@
 import client from './client'
 import type { Card, Category, Coupon, PaginationParams, Product } from '../types'
-export const listProducts=(params?:PaginationParams)=>client.get<{data:Product[]}>('/admin/products',{params}).then(r=>r.data)
-export const createProduct=(product:Partial<Product>)=>client.post<{data:Product}>('/admin/products',{product}).then(r=>r.data)
-export const updateProduct=(id:number,product:Partial<Product>)=>client.put<{data:Product}>(`/admin/products/${id}`,{product}).then(r=>r.data)
-export const deleteProduct=(id:number)=>client.delete(`/admin/products/${id}`)
-export const listCards=(id:number)=>client.get<{data:Card[]}>(`/admin/products/${id}/cards`).then(r=>r.data)
-export const addCard=(id:number,card:Partial<Card>)=>client.post<{data:Card}>(`/admin/products/${id}/cards`,{card}).then(r=>r.data)
-export const batchAddCards=(id:number,cards:string[])=>client.post<{data:Card[]}>(`/admin/products/${id}/cards/batch-add`,{cards}).then(r=>r.data)
-export const deleteCard=(id:number,cardId:number)=>client.delete(`/admin/products/${id}/cards/${cardId}`)
-export const listCategories=()=>client.get<{data:Category[]}>('/admin/categories').then(r=>r.data)
-export const createCategory=(category:Partial<Category>)=>client.post('/admin/categories',{category}).then(r=>r.data)
-export const updateCategory=(id:number,category:Partial<Category>)=>client.put(`/admin/categories/${id}`,{category}).then(r=>r.data)
-export const deleteCategory=(id:number)=>client.delete(`/admin/categories/${id}`)
-export const listCoupons=()=>client.get<{data:Coupon[]}>('/admin/coupons').then(r=>r.data)
-export const createCoupon=(coupon:Partial<Coupon>)=>client.post('/admin/coupons',{coupon}).then(r=>r.data)
-export const updateCoupon=(id:number,coupon:Partial<Coupon>)=>client.put(`/admin/coupons/${id}`,{coupon}).then(r=>r.data)
-export const deleteCoupon=(id:number)=>client.delete(`/admin/coupons/${id}`)
+
+export const listProducts = (params?: PaginationParams) =>
+  client.get<{data: Product[]}>('/admin/products', { params }).then(r => r.data.data)
+
+export const getProduct = (id: number) =>
+  client.get<{data: Product}>(`/admin/products/${id}`).then(r => r.data.data)
+
+export const createProduct = (product: Partial<Product>) =>
+  client.post<{data: Product}>('/admin/products', { product }).then(r => r.data.data)
+
+export const updateProduct = (id: number, product: Partial<Product>) =>
+  client.put<{data: Product}>(`/admin/products/${id}`, { product }).then(r => r.data.data)
+
+export const deleteProduct = (id: number) =>
+  client.delete(`/admin/products/${id}`)
+
+export const listCards = (id: number, params?: PaginationParams) =>
+  client.get<{data: Card[]}>(`/admin/products/${id}/cards`, { params }).then(r => r.data.data)
+
+export const addCard = (id: number, card: Partial<Card>) =>
+  client.post<{data: Card}>(`/admin/products/${id}/cards`, { card }).then(r => r.data.data)
+
+export const batchAddCards = (id: number, cards: string[]) =>
+  client.post<{data: Card[]; count: number}>(`/admin/products/${id}/cards/batch-add`, { cards }).then(r => r.data)
+
+export const deleteCard = (id: number, cardId: number) =>
+  client.delete(`/admin/products/${id}/cards/${cardId}`)
+
+export const listCategories = () =>
+  client.get<{data: Category[]}>('/admin/categories').then(r => r.data.data)
+
+export const createCategory = (category: Partial<Category>) =>
+  client.post<{data: Category}>('/admin/categories', { category }).then(r => r.data.data)
+
+export const updateCategory = (id: number, category: Partial<Category>) =>
+  client.put<{data: Category}>(`/admin/categories/${id}`, { category }).then(r => r.data.data)
+
+export const deleteCategory = (id: number) =>
+  client.delete(`/admin/categories/${id}`)
+
+export const listCoupons = () =>
+  client.get<{data: Coupon[]}>('/admin/coupons').then(r => r.data.data)
+
+export const createCoupon = (coupon: Partial<Coupon>) =>
+  client.post<{data: Coupon}>('/admin/coupons', { coupon }).then(r => r.data.data)
+
+export const updateCoupon = (id: number, coupon: Partial<Coupon>) =>
+  client.put<{data: Coupon}>(`/admin/coupons/${id}`, { coupon }).then(r => r.data.data)
+
+export const deleteCoupon = (id: number) =>
+  client.delete(`/admin/coupons/${id}`)

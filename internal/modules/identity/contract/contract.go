@@ -16,6 +16,7 @@ type UserRepo interface {
 	FindByOAuth(ctx context.Context, provider, providerUID string) (*domain.User, error)
 	UsernameExists(ctx context.Context, username string) (bool, error)
 	EmailExists(ctx context.Context, email string) (bool, error)
+	List(ctx context.Context, limit, offset int) ([]*domain.User, int64, error)
 
 	CreateOAuthIdentity(ctx context.Context, identity *domain.OAuthIdentity) error
 	UpdateOAuthIdentity(ctx context.Context, identity *domain.OAuthIdentity) error

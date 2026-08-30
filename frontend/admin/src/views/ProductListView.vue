@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { listProducts } from '../api/products'
+import { listProducts, deleteProduct as deleteProductApi } from '../api/products'
 import { useRouter } from 'vue-router'
 import type { Product } from '../types'
 
@@ -25,10 +25,10 @@ function editProduct(id: number) {
   router.push(`/products/${id}`)
 }
 
-function deleteProduct(id: number) {
-  if (confirm('确定要删除此商品吗？')) {
-    // TODO: implement delete
-  }
+async function deleteProduct(id: number) {
+  if (!confirm('确定要删除此商品吗？')) return
+  await deleteProductApi(id)
+  await load()
 }
 
 onMounted(load)

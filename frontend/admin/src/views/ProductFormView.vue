@@ -5,7 +5,7 @@ import { getProduct, createProduct, updateProduct } from '../api/products'
 import { listCategories } from '../api/categories'
 import type { Category } from '../types'
 
-const route = useRouter()
+const route = useRoute()
 const router = useRouter()
 const isEdit = ref(false)
 const loading = ref(true)

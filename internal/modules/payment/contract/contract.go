@@ -18,8 +18,11 @@ type OrderRepo interface {
 	SaveTransaction(ctx context.Context, transaction *domain.Transaction) error
 	GetOrderByNo(ctx context.Context, orderNo string) (*models.Order, error)
 	ListOrdersByUser(ctx context.Context, userID uint, limit, offset int) ([]models.Order, int64, error)
+	ListAllOrders(ctx context.Context, limit, offset int, status string) ([]models.Order, int64, error)
 	MarkOrderPaid(ctx context.Context, orderNo, transactionID string, platformFee, merchantPoints *int) (*models.Order, error)
 	MarkOrderRefunded(ctx context.Context, orderNo string) error
+	UpdateOrderStatus(ctx context.Context, orderNo string, status string) (*models.Order, error)
+	SetOrderDeliveryContent(ctx context.Context, orderNo string, content string) (*models.Order, error)
 }
 
 // UserLookup is a lightweight interface for checking user existence/status.

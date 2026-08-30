@@ -17,10 +17,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-zinc-950 text-zinc-100">
+  <div class="flex min-h-screen flex-col bg-[#09090b] text-zinc-100">
     <NavBar />
-    <main>
+    <main class="flex-1">
       <router-view />
     </main>
+    <footer class="border-t border-white/[0.08] py-6 text-center text-xs text-[#71717a]">
+      <p>Nodeloc Store · 数字商品交易平台</p>
+    </footer>
   </div>
 </template>

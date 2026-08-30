@@ -36,6 +36,15 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	payment.GET("/orders/:order_no", h.GetOrder)
 	payment.GET("/orders", h.ListOrders)
 
+	// Admin order management
+	adminOrders := router.Group("/api/v1/admin/orders")
+	adminOrders.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin())
+	adminOrders.GET("", h.AdminListOrders)
+	adminOrders.GET("/:order_no", h.AdminGetOrder)
+	adminOrders.POST("/:order_no/cancel", h.AdminCancelOrder)
+	adminOrders.POST("/:order_no/deliver", h.AdminDeliverOrder)
+	adminOrders.POST("/:order_no/refund", h.AdminRefundOrder)
+
 	// Callback is CSRF-exempt and uses HMAC signature verification instead
 	router.POST("/api/v1/payment/callback", h.Callback)
 }
@@ -233,4 +242,95 @@ func writeError(c *gin.Context, err error) {
 		status = http.StatusNotFound
 	}
 	c.JSON(status, gin.H{"error": err.Error()})
+}
+
+// ── Admin Order Handlers ───────────────────────────────────────────
+
+func (h *Handler) AdminListOrders(c *gin.Context) {
+	limit, err := parseNonNegativeInt(c.DefaultQuery("limit", "20"))
+	if err != nil || limit == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be a positive integer"})
+		return
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset, err := parseNonNegativeInt(c.DefaultQuery("offset", "0"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "offset must be a non-negative integer"})
+		return
+	}
+	status := c.DefaultQuery("status", "")
+
+	result, err := h.service.AdminListOrders(c.Request.Context(), limit, offset, status)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": result.Orders, "total": result.Total, "limit": result.Limit, "offset": result.Offset})
+}
+
+func (h *Handler) AdminGetOrder(c *gin.Context) {
+	orderNo := strings.TrimSpace(c.Param("order_no"))
+	if orderNo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "order_no is required"})
+		return
+	}
+	order, err := h.service.AdminGetOrder(c.Request.Context(), orderNo)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": order})
+}
+
+func (h *Handler) AdminCancelOrder(c *gin.Context) {
+	orderNo := strings.TrimSpace(c.Param("order_no"))
+	if orderNo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "order_no is required"})
+		return
+	}
+	order, err := h.service.AdminCancelOrder(c.Request.Context(), orderNo)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": order})
+}
+
+type adminDeliverRequest struct {
+	DeliveryContent string `json:"delivery_content" binding:"required"`
+}
+
+func (h *Handler) AdminDeliverOrder(c *gin.Context) {
+	orderNo := strings.TrimSpace(c.Param("order_no"))
+	if orderNo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "order_no is required"})
+		return
+	}
+	var request adminDeliverRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	order, err := h.service.AdminDeliverOrder(c.Request.Context(), orderNo, request.DeliveryContent)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": order})
+}
+
+func (h *Handler) AdminRefundOrder(c *gin.Context) {
+	orderNo := strings.TrimSpace(c.Param("order_no"))
+	if orderNo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "order_no is required"})
+		return
+	}
+	order, err := h.service.AdminRefundOrder(c.Request.Context(), orderNo)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": order})
 }

@@ -12,6 +12,6 @@ export async function getOrder(orderNo: string) {
 }
 
 export async function listOrders() {
-  const { data } = await client.get<{ orders: Order[] }>('/payment/orders')
+  const { data } = await client.get<{ orders: Order[]; total: number }>('/payment/orders')
   return data
 }

@@ -263,6 +263,34 @@ func (s *Service) GetOrder(ctx context.Context, userID uint, orderNo string) (*m
 	return order, nil
 }
 
+func (s *Service) AdminGetOrder(ctx context.Context, orderNo string) (*models.Order, error) {
+	order, err := s.orders.GetOrderByNo(ctx, strings.TrimSpace(orderNo))
+	if err != nil {
+		return nil, err
+	}
+	return order, nil
+}
+
+func (s *Service) AdminListOrders(ctx context.Context, limit, offset int, status string) (*OrderList, error) {
+	orders, total, err := s.orders.ListAllOrders(ctx, limit, offset, status)
+	if err != nil {
+		return nil, err
+	}
+	return &OrderList{Orders: orders, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+func (s *Service) AdminCancelOrder(ctx context.Context, orderNo string) (*models.Order, error) {
+	return s.orders.UpdateOrderStatus(ctx, strings.TrimSpace(orderNo), "cancelled")
+}
+
+func (s *Service) AdminDeliverOrder(ctx context.Context, orderNo string, content string) (*models.Order, error) {
+	return s.orders.SetOrderDeliveryContent(ctx, strings.TrimSpace(orderNo), content)
+}
+
+func (s *Service) AdminRefundOrder(ctx context.Context, orderNo string) (*models.Order, error) {
+	return s.orders.UpdateOrderStatus(ctx, strings.TrimSpace(orderNo), "refunded")
+}
+
 func (s *Service) ListOrders(ctx context.Context, userID uint, limit, offset int) (*OrderList, error) {
 	if userID == 0 {
 		return nil, ErrForbidden

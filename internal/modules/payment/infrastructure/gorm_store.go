@@ -160,6 +160,78 @@ func (s *GormStore) MarkOrderRefunded(ctx context.Context, orderNo string) error
 	return nil
 }
 
+func (s *GormStore) ListAllOrders(ctx context.Context, limit, offset int, status string) ([]models.Order, int64, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := s.db.WithContext(ctx).Model(&models.Order{})
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	orders := make([]models.Order, 0)
+	err := query.
+		Preload("Product").
+		Preload("User").
+		Preload("Cards").
+		Order("created_at DESC, id DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&orders).Error
+	return orders, total, err
+}
+
+func (s *GormStore) UpdateOrderStatus(ctx context.Context, orderNo string, status string) (*models.Order, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	if orderNo == "" {
+		return nil, ErrOrderNotFound
+	}
+	result := s.db.WithContext(ctx).Model(&models.Order{}).
+		Where("order_no = ?", orderNo).
+		Update("status", status)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, ErrOrderNotFound
+	}
+	return s.GetOrderByNo(ctx, orderNo)
+}
+
+func (s *GormStore) SetOrderDeliveryContent(ctx context.Context, orderNo string, content string) (*models.Order, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	if orderNo == "" {
+		return nil, ErrOrderNotFound
+	}
+	now := time.Now().UTC()
+	result := s.db.WithContext(ctx).Model(&models.Order{}).
+		Where("order_no = ?", orderNo).
+		Updates(map[string]any{
+			"delivery_content":   content,
+			"fulfillment_status": "delivered",
+			"delivered_at":       now,
+			"status":             "completed",
+		})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, ErrOrderNotFound
+	}
+	return s.GetOrderByNo(ctx, orderNo)
+}
+
 // Fulfill atomically performs automatic card delivery. Manual products are
 // queued for manual handling, while insufficient card inventory is marked as
 // waiting_stock so a later stock import can retry fulfillment safely.

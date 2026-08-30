@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { listCards, deleteCard } from '../api/cards'
+import { useRoute } from 'vue-router'
+import { listCards, batchAddCards, deleteCard } from '../api/products'
 import type { Card } from '../types'
 
 const loading = ref(true)
@@ -8,6 +9,7 @@ const cards = ref<Card[]>([])
 const search = ref('')
 const page = ref(1)
 const perPage = ref(20)
+const productId = ref<number | null>(null)
 
 const statusText: Record<string, string> = {
   available: '可用',
@@ -16,11 +18,12 @@ const statusText: Record<string, string> = {
 }
 
 async function load() {
+  if (!productId.value) return
   loading.value = true
   try {
     const params: any = { page: page.value, per_page: perPage.value }
     if (search.value) params.q = search.value
-    const result = await listCards(params)
+    const result = await listCards(productId.value, params)
     cards.value = result.data
   } finally {
     loading.value = false
@@ -28,12 +31,27 @@ async function load() {
 }
 
 async function deleteC(id: number) {
+  if (!productId.value) return
   if (!confirm('确定删除此卡密？')) return
-  await deleteCard(id)
+  await deleteCard(productId.value, id)
   await load()
 }
 
-onMounted(load)
+async function importCards() {
+  if (!productId.value) return
+  const input = prompt('请输入卡密内容（每行一个）：')
+  if (!input) return
+  const lines = input.split('\n').map((l: string) => l.trim()).filter(Boolean)
+  if (!lines.length) return
+  await batchAddCards(productId.value, lines)
+  await load()
+}
+
+const route = useRoute()
+onMounted(() => {
+  productId.value = Number(route.params.id)
+  load()
+})
 </script>
 
 <template>
@@ -44,7 +62,7 @@ onMounted(load)
         <button class="btn-secondary" @click="load">筛选</button>
       </div>
       <div class="flex items-center gap-2">
-        <button class="btn-secondary">导入卡密</button>
+        <button class="btn-secondary" @click="importCards">导入卡密</button>
         <button class="btn-primary">+ 新建卡密</button>
       </div>
     </div>
