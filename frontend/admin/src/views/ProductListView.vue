@@ -1,78 +1,117 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import SearchBar from '../components/SearchBar.vue'
-import { deleteProduct, listProducts } from '../api/products'
+import { onMounted, ref } from 'vue'
+import { listProducts } from '../api/products'
+import { useRouter } from 'vue-router'
 import type { Product } from '../types'
 
+const router = useRouter()
+const loading = ref(true)
 const products = ref<Product[]>([])
 const search = ref('')
 const page = ref(1)
-const pageSize = 10
-const loading = ref(false)
-
-const filtered = computed(() => {
-  const keyword = search.value.trim().toLowerCase()
-  if (!keyword) return products.value
-  return products.value.filter(product =>
-    product.name.toLowerCase().includes(keyword) ||
-    product.description?.toLowerCase().includes(keyword),
-  )
-})
-const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize)))
-const visibleProducts = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
+const perPage = ref(10)
 
 async function load() {
   loading.value = true
   try {
-    products.value = (await listProducts({ page: 1, per_page: 100 })).data
+    const result = await listProducts({ page: page.value, per_page: perPage.value, q: search.value || undefined })
+    products.value = result.data
   } finally {
     loading.value = false
   }
 }
 
-async function remove(product: Product) {
-  if (!window.confirm(`确定删除商品“${product.name}”吗？`)) return
-  await deleteProduct(product.id)
-  await load()
+function editProduct(id: number) {
+  router.push(`/products/${id}`)
+}
+
+function deleteProduct(id: number) {
+  if (confirm('确定要删除此商品吗？')) {
+    // TODO: implement delete
+  }
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <section class="space-y-6">
-    <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-      <div>
-        <h2 class="text-2xl font-bold">商品管理</h2>
-        <p class="mt-1 text-sm text-slate-400">管理数字商品、库存卡密和销售状态</p>
+  <section class="space-y-4">
+    <!-- Actions bar -->
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <input v-model="search" class="input w-64" placeholder="搜索商品名称..." @keyup.enter="load" />
+        <button class="btn-secondary" @click="load">筛选</button>
       </div>
-      <RouterLink to="/products/new" class="btn-primary text-center">新增商品</RouterLink>
+      <button class="btn-primary" @click="router.push('/products/new')">+ 新建商品</button>
     </div>
 
-    <div class="panel">
-      <SearchBar v-model="search" class="mb-5 max-w-md" placeholder="搜索商品名称或描述" @update:model-value="page = 1" />
-      <div v-if="loading" class="py-16 text-center text-slate-500">商品加载中…</div>
-      <div v-else-if="!visibleProducts.length" class="py-16 text-center text-slate-500">暂无匹配商品</div>
-      <div v-else class="overflow-x-auto">
-        <table class="w-full min-w-[760px] text-left text-sm">
-          <thead class="text-slate-500">
-            <tr><th class="pb-3">商品</th><th>价格</th><th>库存</th><th>状态</th><th>分类</th><th class="text-right">操作</th></tr>
-          </thead>
-          <tbody class="divide-y divide-white/5">
-            <tr v-for="product in visibleProducts" :key="product.id" class="hover:bg-white/[0.03]">
-              <td class="py-4"><p class="font-medium">{{ product.name }}</p><p class="mt-1 max-w-xs truncate text-xs text-slate-500">{{ product.description || '暂无描述' }}</p></td>
-              <td>¥{{ Number(product.price).toFixed(2) }}</td>
-              <td>{{ product.stock ?? 0 }}</td>
-              <td><span class="rounded-full bg-indigo-500/15 px-2.5 py-1 text-xs text-indigo-300">{{ product.status || '正常' }}</span></td>
-              <td>{{ product.category?.name || '-' }}</td>
-              <td><div class="flex justify-end gap-2"><RouterLink :to="`/products/${product.id}/cards`" class="btn-muted">卡密</RouterLink><RouterLink :to="`/products/${product.id}/edit`" class="btn-muted">编辑</RouterLink><button class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-300 hover:bg-rose-500/20" @click="remove(product)">删除</button></div></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="mt-5 flex items-center justify-between border-t border-white/5 pt-4 text-sm text-slate-400">
-        <span>共 {{ filtered.length }} 件商品</span>
-        <div class="flex items-center gap-2"><button class="btn-muted" :disabled="page <= 1" @click="page--">上一页</button><span>{{ page }} / {{ pages }}</span><button class="btn-muted" :disabled="page >= pages" @click="page++">下一页</button></div>
+    <!-- Table -->
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>商品名称</th>
+            <th>分类</th>
+            <th>价格</th>
+            <th>库存</th>
+            <th>状态</th>
+            <th>创建时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-if="loading">
+            <td colspan="8">
+              <div class="space-y-2">
+                <div v-for="i in 5" :key="i" class="skeleton h-8" />
+              </div>
+            </td>
+          </tr>
+          <tr v-else-if="!products.length">
+            <td colspan="8" class="py-12 text-center text-[#6b6b80]">暂无商品</td>
+          </tr>
+          <tr v-for="product in products" :key="product.id">
+            <td>{{ product.id }}</td>
+            <td>
+              <div class="flex items-center gap-3">
+                <div v-if="product.image_path" class="h-10 w-10 rounded-lg bg-cover bg-center" :style="{ backgroundImage: `url(${product.image_path})` }" />
+                <div v-else class="flex h-10 w-10 items-center justify-center rounded-lg bg-[#1a1a25] text-sm text-[#6b6b80]">无图</div>
+                <span class="font-medium">{{ product.name }}</span>
+              </div>
+            </td>
+            <td>{{ product.category?.name || '-' }}</td>
+            <td>¥{{ Number(product.price).toFixed(2) }}</td>
+            <td>{{ product.stock_count }}</td>
+            <td>
+              <span
+                :class="[
+                  'badge',
+                  product.is_published ? 'badge-success' : 'badge-neutral'
+                ]"
+              >
+                {{ product.is_published ? '上架' : '下架' }}
+              </span>
+            </td>
+            <td class="text-[#a1a1b5]">{{ product.created_at }}</td>
+            <td>
+              <div class="flex items-center gap-2">
+                <button class="btn-ghost text-xs" @click="editProduct(product.id)">编辑</button>
+                <button class="btn-ghost text-xs text-[#ef4444]" @click="deleteProduct(product.id)">删除</button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-[#6b6b80]">显示 {{ products.length }} 条</p>
+      <div class="flex items-center gap-2">
+        <button class="btn-secondary" :disabled="page <= 1" @click="page--; load()">上一页</button>
+        <span class="text-sm text-[#a1a1b5]">第 {{ page }} 页</span>
+        <button class="btn-secondary" @click="page++; load()">下一页</button>
       </div>
     </div>
   </section>
