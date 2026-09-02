@@ -30,3 +30,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Go build artifact
+server
