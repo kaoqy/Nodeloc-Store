@@ -1,19 +1,21 @@
-version: "3.9"
-
 services:
   store:
     build: .
+    image: kaoqy666/nodeloc-store:latest
+    container_name: nodeloc-store
     restart: unless-stopped
-    networks:
-      - default
-      - database
     ports:
       - "8080:8080"
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+    environment:
+      - TZ=Asia/Shanghai
+    # 如需连接 1Panel / 其他容器网络里的 MariaDB，取消下面两行注释并改成实际网络名：
+    # networks:
+    #   - dbnet
 
-networks:
-  database:
-    external: true
-    name: ${DB_NETWORK:-1panel-network}
+# networks:
+#   dbnet:
+#     external: true
+#     name: 1panel-network

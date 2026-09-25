@@ -19,7 +19,7 @@
 - 🎁 **用户运营** — 每日签到、积分、连续签到奖励、站点公告与客服信息
 - 📊 **Admin 后台** — 概览统计、商品/卡密/订单/用户管理、操作审计日志、退款
 - 🛠️ **OpenResty 反代** — 适合用 OpenResty 跑其他服务、复用现有 vhost 的部署场景
-- 🔒 **安全** — PBKDF2 密码哈希、CSRF 全部 POST、回调 HMAC 验签、操作审计日志
+- 🔒 **安全** — bcrypt 密码哈希、回调 HMAC 验签、Casbin RBAC、操作审计日志
 
 ## 📸 截图
 
@@ -42,12 +42,15 @@
 ### 前置要求
 
 - 一台 Linux 服务器（Ubuntu 22.04 / Debian 12）
-- Python 3.10+ + pip + venv
-- MySQL 5.7+ / MariaDB 10.3+（本机或远程均可）
+- Docker（推荐）；或使用外部 MySQL 5.7+ / MariaDB 10.3+（可选，默认内置 SQLite）
 - 已配好 OpenResty（含 SSL，Let's Encrypt 推荐）
 - NodeLoc 论坛账号：**白银会员 TL1**及以上才能创建支付应用；**OAuth 需 TL2 黄金会员**
 
-### Step 1 · 准备数据库
+### Step 1 · 准备数据库（可选）
+
+默认使用内置 **SQLite**（初始化时存放在 `./data` 卷里），零配置即可上线，单店中小流量完全够用。
+
+只有当你需要外部 MySQL/MariaDB 时才执行：
 
 ```bash
 # Ubuntu / Debian
@@ -64,11 +67,11 @@ sudo mysql -e "
 "
 ```
 
-如果是远程 DB，把 `'store_user'@'localhost'` 改为 `'store_user'@'%'`，并确保数据库服务器 `bind-address` 与防火墙允许应用服务器连接。
+如果是远程 DB，把 `'store_user'@'localhost'` 改为 `'store_user'@'%'`，并确保数据库服务器 `bind-address` 与防火墙允许应用服务器连接。数据库连接信息在初始化向导里填写，无需任何配置文件。
 
 ### Step 2 · 在 NodeLoc 创建应用
 
-> NodeLoc 创建应用时填的回调地址，**必须**是你 OpenResty 反代出来的 HTTPS 域名（不能是 `http://127.0.0.1:5000`）。
+> NodeLoc 创建应用时填的回调地址，**必须**是你 OpenResty 反代出来的 HTTPS 域名（不能是 `http://127.0.0.1:8080`）。
 
 #### 2.1 OAuth 应用
 
@@ -78,7 +81,7 @@ sudo mysql -e "
 |---|---|
 | 应用名称 | 你的商店名 |
 | 网站地址 | `https://你的域名` |
-| 回调地址 | `https://你的域名/auth/oauth/callback` |
+| 回调地址 | `https://你的域名/api/v1/auth/oauth/callback` |
 | 权限范围 | 勾选 `openid`（必选）、`profile`、`email`（需审核） |
 
 保存后记录 **Client ID** 和 **Client Secret**（只显示一次）。
@@ -91,52 +94,42 @@ sudo mysql -e "
 |---|---|
 | 应用名称 | 你的商店名 |
 | 网站地址 | `https://你的域名` |
-| 回调地址 | `https://你的域名/payment/callback` |
+| 回调地址 | `https://你的域名/api/v1/payment/callback` |
 
 保存后记录 **Payment ID** 和 **Secret Key**（只显示一次）。
 
 ### Step 3 · 启动商店（Docker）
 
-推荐直接使用 Docker Hub 已发布的多架构镜像一键部署：
+推荐直接使用 Docker Hub 已发布镜像一键部署（应用监听 **8080**，SQLite 数据落在当前目录 `./data`，商品图片落在 `./uploads`）：
 
 ```bash
 docker run -d --name nodeloc-store --restart unless-stopped \
-  --network 1panel-network \
-  -p 5000:5000 \
-  -v "$PWD/instance:/app/instance" \
-  -v "$PWD/uploads:/app/uploads" \
-  kaoqy666/nodeloc-store:latest
-```
-
-固定使用 `1.0.0` 版本：
-
-```bash
-docker run -d --name nodeloc-store --restart unless-stopped \
-  --network 1panel-network \
-  -p 5000:5000 \
-  -v "$PWD/instance:/app/instance" \
+  -p 8080:8080 \
+  -v "$PWD/data:/app/data" \
   -v "$PWD/uploads:/app/uploads" \
   kaoqy666/nodeloc-store:1.0.0
 ```
 
-> `1Panel-mariadb-oxyE` 这类容器名只有在同一个 Docker 网络中才能解析。上面的 `--network 1panel-network` 会让商店连接到 1Panel 数据库网络。如果实际网络名不同，先运行 `docker inspect 1Panel-mariadb-oxyE --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}'` 查询，然后替换命令中的网络名。命令同时会把配置文件持久化到当前目录的 `instance`，把商品图片持久化到当前目录的 `uploads`。
+跟随最新版：把上面的镜像名换成 `kaoqy666/nodeloc-store:latest` 即可。
+
+> 如果要在初始化向导里连接 1Panel 管理的 MariaDB（容器名如 `1Panel-mariadb-oxyE`），需要让商店加入数据库所在的 Docker 网络：加 `--network 1panel-network`（网络名用 `docker inspect 1Panel-mariadb-oxyE --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}'` 查询）。用默认 SQLite 则完全不需要任何网络配置。
 
 如果需要从源码构建，也可以使用 Docker Compose：
 
 ```bash
 git clone https://github.com/kaoqy/Nodeloc-Store.git
 cd Nodeloc-Store
-DB_NETWORK=1panel-network docker compose up -d
+docker compose up -d --build
 ```
 
-> Compose 只起一个 `store` 容器，并把它加入 `DB_NETWORK` 指定的外部网络。MariaDB 使用现有的 1Panel 实例，连接信息在安装向导中填写。若 1Panel 的数据库网络不是 `1panel-network`，请将 `DB_NETWORK` 改为通过 `docker inspect` 查到的名称。
+> Compose 默认只起一个 `store` 容器并使用内置 SQLite，无外部依赖。需要连 1Panel 数据库网络时，编辑 `docker-compose.yml` 末尾已注释好的 `networks` 段即可。
 
-查看日志：
+启动后访问 `http://IP:8080/admin/` 进入初始化向导。查看日志：
+
 ```bash
-docker logs -f nodeloc-store
+docker logs -f nodeloc-store          # docker run 部署
+docker compose logs -f store          # compose 部署
 ```
-
-使用 Docker Compose 部署时，查看日志的命令为 `docker compose logs -f store`。
 
 ### Step 4 · OpenResty 反代 + SSL
 
@@ -152,21 +145,9 @@ server {
 
     client_max_body_size 8M;
 
-    # 静态资源直接走 nginx
-    location /static/ {
-        alias /opt/Nodeloc-Store/app/static/;
-        expires 7d;
-        access_log off;
-    }
-    location /admin/uploads/ {
-        alias /opt/Nodeloc-Store/uploads/products/;
-        expires 7d;
-        access_log off;
-    }
-
-    # 反代到 Docker 容器里 gunicorn 监听的 5000
+    # 反代到 Docker 容器里 Go 服务监听的 8080（前端静态资源已内嵌在镜像中）
     location / {
-        proxy_pass http://127.0.0.1:5000;
+        proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -188,111 +169,99 @@ server {
 sudo openresty -t && sudo openresty -s reload
 ```
 
-> `alias` 路径要跟宿主机上 `/opt/Nodeloc-Store/` 实际路径一致。容器卷默认 `./instance:/app/instance` 和 `./uploads:/app/uploads`，所以 `uploads/products` 对应宿主机的 `./uploads/products`。
+> 商店无需在 nginx 里挂静态资源：页面、CSS/JS、图片都由容器内的服务直接吐出。数据卷 `./data:/app/data` 保存 SQLite 库与初始化配置，`./uploads:/app/uploads` 预留给人工交付附件等持久文件。
 
-### Step 5 · 完成快速开始向导
+### Step 5 · 应用内初始化向导
 
-浏览器访问 `https://你的域名` 进入 5 步安装向导：
+浏览器访问 `http://IP:8080`（配好域名后访问 `https://你的域名`），未初始化时会自动跳到管理后台的初始化向导 `/admin/setup`，三步完成：
 
-1. **数据库配置** — 填 Step 1 创建的连接信息
-   - 主机：`localhost`（或远程 IP）
-   - 端口：`3306`
-   - 库名/用户/密码：同 Step 1
-2. **商店信息** — 名称与标语
-3. **NodeLoc OAuth** — 填入 Step 2.1 的 Client ID / Secret / Redirect URI / Scope
-4. **NodeLoc 支付** — 填入 Step 2.2 的 Payment ID / Secret Key
-5. **管理员账号** — 创建首个管理员
+1. **站点与数据库** — 商店名称、访问域名、数据库驱动（默认 SQLite；选 MySQL 时填 Step 1 的连接信息）
+2. **NodeLoc 集成** — OAuth 的 Client ID / Secret（必填）+ 支付的 Payment ID / Secret Key（可稍后在设置中补填）
+3. **管理员账号** — 创建首个管理员，保存后直接进入后台登录
 
 > 提交时如果数据库连不通，会显示错误提示让你重填，**不会破坏配置**。
-> **保存即生效**，不用重启容器。
+> **保存即生效**，不用重启容器；无需编辑任何 yml / ini 配置文件。
+> 之后随时可在后台 **设置** 页修改，密钥以 `********` 掩码显示、保持掩码即不修改，还可一键测试 OAuth 与支付网关连通性。
 
 ### Step 6 · 验证支付
 
 1. 用 Admin 账号登录后台 → **商品** → 新建一个商品 + 导入几个测试卡密
 2. 退出登录，用另一个 NodeLoc 账号或邮箱注册普通用户
 3. 下单购买 → 跳转到 NodeLoc 支付页 → 用积分支付
-4. 支付完成后浏览器会跳转回你的 `/payment/callback`，自动发货，卡密会显示在订单详情
+4. 支付完成后浏览器会跳转回你的 `/api/v1/payment/callback`，自动发货，卡密会显示在订单详情
 
 ## 🛠️ 常用运维
 
 ```bash
 # 看容器日志
-docker compose logs -f store
+docker logs -f nodeloc-store          # docker run 部署
+docker compose logs -f store          # compose 部署
 
 # 重启容器
-docker compose restart store
+docker restart nodeloc-store
 
-# 升级到新版本
-cd /opt/Nodeloc-Store   # 或你的实际路径
-git pull
-docker compose up -d --build
+# 升级到新版本（版本号不变时直接重拉 tag 为 1.0.0 的镜像即可）
+docker pull kaoqy666/nodeloc-store:1.0.0
+docker restart nodeloc-store
 
-# 备份数据库（MariaDB 装在宿主机或远程时调整连接信息）
+# 源码构建部署时升级
+cd Nodeloc-Store && git pull && docker compose up -d --build
+
+# 备份（SQLite / 初始化配置 / JWT 密钥都在 ./data 目录）
+cp -r data backup_$(date +%F)
+# 备份外部 MariaDB 时改用：
 mysqldump -u store_user -p nodeloc_store > backup_$(date +%F).sql
 
-# 还原数据库
-mysql -u store_user -p nodeloc_store < backup.sql
-
 # 健康检查（OpenResty upstream 用）
-curl -I http://127.0.0.1:5000/api/health
-# {"status":"ok","installed":true,"db":"ok"}
+curl -s http://127.0.0.1:8080/api/health
+# {"status":"ok"}
 ```
 
 ## 🔒 安全建议
 
 - ✅ OpenResty 必须配置 SSL，NodeLoc 强制要求回调为 HTTPS
 - ✅ DB 用户只授予 `nodeloc_store` 库的权限，不要用 root
-- ✅ 修改 Admin 默认用户名
-- ✅ 定期备份数据库与 `instance/config.ini`
+- ✅ 初始化时设置强管理员密码（至少 8 位）
+- ✅ 定期备份 `./data` 目录（含 `bootstrap.json` 与 SQLite 库）与数据库
 - ✅ OAuth `email` scope 需在 NodeLoc 审核通过；未通过时用户的邮箱将为空
-- ✅ 不要把 `instance/config.ini` 提交到 Git（已在 `.gitignore` 中）
+- ✅ `data/bootstrap.json` 含 JWT 密钥，已在 `.gitignore` 中，不要提交到 Git
 
-## 🧪 自测（不依赖任何第三方包）
+## 🧪 自测
 
 ```bash
-python3 scripts/smoke_test.py
-# PASS: 23    FAIL: 0
+go build ./... && go vet ./... && go test ./...   # 后端 + 架构约束测试
+cd frontend/admin && npx vue-tsc --noEmit          # 前端类型检查
 ```
 
 ## 📁 项目结构
 
 ```
-nodeloc-store/
-├── app/                      # Flask 应用
-│   ├── __init__.py          # Flask factory + 每次请求重读 config
-│   ├── config.py            # 配置加载（instance/config.ini 实时）
-│   ├── extensions.py        # db / login_manager / csrf
-│   ├── models.py            # User / Product / Card / Order / AppSetting / AuditLog
-│   ├── nodeloc.py           # NodeLoc OAuth2 + Payment 客户端
-│   ├── utils.py             # PBKDF2 密码 / slug / audit
-│   ├── blueprints/          # 路由
-│   │   ├── install.py       # 首次安装向导
-│   │   ├── auth.py          # 邮箱 + NodeLoc OAuth 登录
-│   │   ├── store.py         # 公开商店
-│   │   ├── payment.py       # 支付 + 回调
-│   │   ├── user.py          # 用户中心 + 绑定 OAuth
-│   │   ├── admin.py         # 后台
-│   │   └── api.py           # JSON API + /health
-│   ├── static/css/app.css   # 自带 CSS（无 Tailwind CDN 依赖）
-│   └── templates/           # Jinja2 模板
-├── scripts/smoke_test.py    # 23 个 stdlib 单元测试
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-├── run.py                   # gunicorn 入口
-└── README.md
+Nodeloc-Store/
+├── cmd/server/            # Go 入口（swapHandler 热重建 + SPA 静态托管）
+├── internal/
+│   ├── config/            # 默认值 + data/bootstrap.json（驱动/DSN/端口/JWT）
+│   ├── app/container/     # 依赖装配
+│   ├── authz/             # Casbin RBAC
+│   ├── models/            # 共享 GORM 模型与迁移
+│   └── modules/           # identity / payment / catalog / notification / audit
+│       └── system/        # 应用内初始化：status / install / settings / 连通测试
+├── frontend/user/         # 商店 SPA（Vue3 + Tailwind，挂在 /）
+├── frontend/admin/        # 后台 SPA + 初始化向导（挂在 /admin）
+├── Dockerfile             # 多阶段：双 SPA + Go 二进制 → alpine
+└── docker-compose.yml
 ```
 
 ## 🐛 故障排查
 
 | 问题 | 解决 |
 |---|---|
-| 向导卡在数据库步骤 | MariaDB 启动了？端口开放？用户对库有权限？`mysql -u store_user -p nodeloc_store` 测一下 |
-| 回调签名验证失败 | 确认 `instance/config.ini` 中的 `payment.secret` 与 NodeLoc 一致 |
-| OAuth 登录失败 | 回调地址与 NodeLoc 应用配置完全一致（含 `https://`） |
+| 容器起不来 / 端口不通 | `docker logs nodeloc-store` 看报错；确认宿主端口映射是 `8080:8080`（旧文档的 5000 已废弃） |
+| 向导卡在数据库步骤 | SQLite 时确认 `./data` 卷可写；外部 MariaDB 时确认容器能解析 DB 主机名（同网络或远程 IP）、端口开放、用户对库有权限 |
+| 回调签名验证失败 | 后台 **设置** 里重新填 Payment ID / Secret Key（与 NodeLoc 控制台一致） |
+| OAuth 登录失败 | NodeLoc 应用里的回调地址必须是 `https://你的域名/api/v1/auth/oauth/callback`，与设置页显示的完全一致 |
 | 邮件没拿到 | NodeLoc OAuth `email` scope 需审核通过；未通过时 token 只有 `openid` |
 | 卡密一直没发货 | Admin → 日志 中 `payment.stock_warning` 条目，确认有可用卡密 |
-| 静态资源 404 | 检查 OpenResty 的 `location /static/` 路径是否对应 `app/static/` |
+| 重启后丢失初始化状态 | `./data` 没挂载持久卷，按 Step 3 补上 `-v "$PWD/data:/app/data"` 重新起 |
 | 上传图片 413 | OpenResty 的 `client_max_body_size` 与应用一致（默认 8M） |
 
 ## 📜 License
