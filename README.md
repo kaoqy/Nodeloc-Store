@@ -98,6 +98,17 @@ sudo mysql -e "
 
 保存后记录 **Payment ID** 和 **Secret Key**（只显示一次）。
 
+#### 2.3 回调接口一览（与代码路由一致）
+
+| 用途 | 方法 | 接口路径 | 谁来调用 | 之后发生什么 |
+|---|---|---|---|---|
+| OAuth2 登录回调 | `GET` | `/api/v1/auth/oauth/callback` | NodeLoc OAuth 授权后浏览器跳转 | 校验 `state` + 换 token → 302 回商店前端 `/oauth/callback`（token 放 URL fragment，不落日志）；AJAX 请求则直接返回 JSON |
+| 支付结果回调 | `GET` | `/api/v1/payment/callback` | NodeLoc 支付完成后浏览器跳转 | HMAC-SHA256 验签 → 幂等履约发卡 → 302 到 `/orders/{订单号}` |
+| 支付结果回调 | `POST` | `/api/v1/payment/callback` | 服务端推送式通知 | 同上验签与履约，返回 `{"success":true}` |
+
+> 两个地址都要**逐字**填进 NodeLoc 控制台（含 `/api/v1` 前缀），并与你商店初始化时填的域名完全一致；初始化向导和后台设置页的回调地址留空即自动生成，输入框占位符显示的就是完整地址，照抄到 NodeLoc 即可。
+> 前端还有 `/oauth/callback`、`/orders` 等路由属于商店自己的页面，**不要**填到 NodeLoc 的回调地址里。
+
 ### Step 3 · 启动商店（Docker）
 
 推荐直接使用 Docker Hub 已发布镜像一键部署（应用监听 **8080**，SQLite 数据落在当前目录 `./data`，商品图片落在 `./uploads`）：
