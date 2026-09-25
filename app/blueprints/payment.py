@@ -91,8 +91,8 @@ def create(product_id):
         return redirect(url_for("store.product_detail", slug=product.slug))
 
 
-@bp.route("/callback", methods=["POST"])
-@bp.route("/notify", methods=["POST"])
+@bp.route("/callback", methods=["GET", "POST"])
+@bp.route("/notify", methods=["GET", "POST"])
 def callback():
     params = request.values.to_dict(flat=True)
     if request.is_json:

@@ -10,6 +10,23 @@ const auth = useAuthStore()
 const error = ref('')
 
 onMounted(async () => {
+  // Browser navigation flow: server redirects back with #access_token=…
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const hashedToken = hash.get('access_token') || ''
+  if (hashedToken) {
+    localStorage.setItem('token', hashedToken)
+    auth.token = hashedToken
+    try {
+      await auth.fetchUser()
+      await router.replace('/')
+      return
+    } catch {
+      auth.logout()
+      error.value = 'NodeLoc 登录失败，请返回后重试'
+      return
+    }
+  }
+
   const code = typeof route.query.code === 'string' ? route.query.code : ''
   const state = typeof route.query.state === 'string' ? route.query.state : ''
   if (!code || !state) { error.value = 'OAuth 回调参数不完整'; return }

@@ -154,7 +154,7 @@ func (s *Service) HandleCallback(ctx context.Context, params map[string]string) 
 	if !s.gateway.VerifyCallback(params) {
 		return nil, ErrInvalidCallback
 	}
-	orderNo := first(params, "order_id", "order_no")
+	orderNo := first(params, "order_id", "order_no", "external_reference", "out_trade_no")
 	transactionID := first(params, "transaction_id", "trade_no", "id")
 	if orderNo == "" || transactionID == "" {
 		return nil, ErrInvalidInput

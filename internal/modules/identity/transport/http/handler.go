@@ -3,6 +3,7 @@ package http
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -114,7 +115,15 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 		return
 	}
 	c.SetCookie(oauthStateCookie, "", -1, "/api/v1/auth", "", h.secureCookie, true)
-	c.JSON(http.StatusOK, result)
+	// XHR clients (SPA) get JSON; browser navigations are bounced back to the
+	// SPA callback page with the token in the URL fragment (never logged).
+	if strings.Contains(c.GetHeader("Accept"), "application/json") {
+		c.JSON(http.StatusOK, result)
+		return
+	}
+	fragment := url.Values{}
+	fragment.Set("access_token", result.Tokens.AccessToken)
+	c.Redirect(http.StatusFound, "/oauth/callback#"+fragment.Encode())
 }
 
 // AuthMiddleware validates JWT and sets identity claims in context.

@@ -3,6 +3,7 @@ package http
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -45,7 +46,9 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	adminOrders.POST("/:order_no/deliver", h.AdminDeliverOrder)
 	adminOrders.POST("/:order_no/refund", h.AdminRefundOrder)
 
-	// Callback is CSRF-exempt and uses HMAC signature verification instead
+	// NodeLoc notifies via a browser GET redirect (signature-verified); POST is
+	// accepted as well for server-push style integrations.
+	router.GET("/api/v1/payment/callback", h.Callback)
 	router.POST("/api/v1/payment/callback", h.Callback)
 }
 
@@ -82,6 +85,15 @@ func (h *Handler) Callback(c *gin.Context) {
 	}
 
 	result, err := h.service.HandleCallback(c.Request.Context(), params)
+	if c.Request.Method == http.MethodGet {
+		// Browser redirect flow: land the user on the order page either way.
+		if err == nil && result != nil && result.OrderNo != "" {
+			c.Redirect(http.StatusFound, "/orders/"+url.PathEscape(result.OrderNo))
+			return
+		}
+		c.Redirect(http.StatusFound, "/orders")
+		return
+	}
 	if err != nil {
 		writeError(c, err)
 		return

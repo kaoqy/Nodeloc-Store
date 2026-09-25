@@ -18,7 +18,8 @@ import (
 
 const nodeLocProviderName = "nodeloc"
 
-// NodeLocOAuthConfig configures the NodeLoc OAuth2-compatible endpoints.
+// NodeLocOAuthConfig configures the NodeLoc OAuth2 provider.
+// See https://docs.nodeloc.com/api-reference/introduction
 type NodeLocOAuthConfig struct {
 	BaseURL      string
 	ClientID     string
@@ -27,7 +28,8 @@ type NodeLocOAuthConfig struct {
 	Scopes       string
 }
 
-// NodeLocOAuth implements contract.OAuthProvider.
+// NodeLocOAuth implements contract.OAuthProvider with the official
+// NodeLoc OAuth Provider endpoints under /oauth-provider.
 type NodeLocOAuth struct {
 	baseURL      string
 	clientID     string
@@ -63,87 +65,70 @@ func NewNodeLocOAuth(config NodeLocOAuthConfig, client *http.Client) (*NodeLocOA
 
 func (n *NodeLocOAuth) Name() string { return nodeLocProviderName }
 
+// AuthorizationURL builds the standard authorization-code request:
+// GET {base}/oauth-provider/authorize
 func (n *NodeLocOAuth) AuthorizationURL(state string) (string, error) {
 	state = strings.TrimSpace(state)
 	if state == "" {
 		return "", errors.New("oauth state is required")
 	}
-	params := map[string]string{
-		"client_id":     n.clientID,
-		"redirect_uri":  n.redirectURI,
-		"response_type": "code",
-		"state":         state,
-	}
+	params := url.Values{}
+	params.Set("client_id", n.clientID)
+	params.Set("redirect_uri", n.redirectURI)
+	params.Set("response_type", "code")
+	params.Set("state", state)
 	if n.scopes != "" {
-		params["scope"] = n.scopes
+		params.Set("scope", n.scopes)
 	}
-	params["signature"] = shared.SignWithHashedToken(cloneParams(params), n.clientSecret)
-
-	values := url.Values{}
-	for key, value := range params {
-		values.Set(key, value)
-	}
-	return n.baseURL + "/oauth/authorize?" + values.Encode(), nil
+	return n.baseURL + "/oauth-provider/authorize?" + params.Encode(), nil
 }
 
+// VerifyCallback validates the browser redirect back from NodeLoc.
+// The official callback carries only code + state (CSRF state is checked
+// against a server-set cookie by the HTTP handler); no signed parameters.
 func (n *NodeLocOAuth) VerifyCallback(params map[string]string) bool {
-	return shared.VerifyCallback(cloneParams(params), n.clientSecret)
+	if strings.TrimSpace(params["code"]) == "" || strings.TrimSpace(params["state"]) == "" {
+		return false
+	}
+	// If a signature is ever present (custom/signed deployments) enforce it.
+	if sig, ok := params["signature"]; ok && sig != "" {
+		return shared.VerifyCallback(cloneParams(params), n.clientSecret)
+	}
+	return true
 }
 
+// ExchangeCode redeems the authorization code at /oauth-provider/token
+// (client_secret_post) and then loads the profile from /oauth-provider/userinfo.
 func (n *NodeLocOAuth) ExchangeCode(ctx context.Context, code string) (*domain.OAuthProfile, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil, errors.New("authorization code is required")
 	}
 
-	// NodeLoc's flow first converts the callback code into an exchange code.
-	exchangeRequest := map[string]string{
-		"client_id":    n.clientID,
-		"code":         code,
-		"redirect_uri": n.redirectURI,
-	}
-	var exchangeResponse struct {
-		ExchangeCode string `json:"exchange_code"`
-		Code         string `json:"code"`
-	}
-	if err := n.postSignedForm(ctx, "/oauth/exchange_code", exchangeRequest, &exchangeResponse); err != nil {
-		return nil, fmt.Errorf("exchange nodeloc authorization code: %w", err)
-	}
-	exchangeCode := strings.TrimSpace(exchangeResponse.ExchangeCode)
-	if exchangeCode == "" {
-		exchangeCode = strings.TrimSpace(exchangeResponse.Code)
-	}
-	if exchangeCode == "" {
-		return nil, errors.New("nodeloc exchange response did not contain exchange_code")
-	}
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", n.redirectURI)
+	form.Set("client_id", n.clientID)
+	form.Set("client_secret", n.clientSecret)
 
-	// The exchange code is then redeemed for an access token.
-	tokenRequest := map[string]string{
-		"client_id":     n.clientID,
-		"exchange_code": exchangeCode,
-		"grant_type":    "authorization_code",
-		"redirect_uri":  n.redirectURI,
-	}
 	var tokenResponse struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		TokenType    string `json:"token_type"`
+		ExpiresIn    int    `json:"expires_in"`
 		Scope        string `json:"scope"`
 	}
-	if err := n.postSignedForm(ctx, "/oauth/token", tokenRequest, &tokenResponse); err != nil {
+	if err := n.postForm(ctx, "/oauth-provider/token", form, &tokenResponse); err != nil {
 		return nil, fmt.Errorf("obtain nodeloc access token: %w", err)
 	}
-	if strings.TrimSpace(tokenResponse.AccessToken) == "" {
+	accessToken := strings.TrimSpace(tokenResponse.AccessToken)
+	if accessToken == "" {
 		return nil, errors.New("nodeloc token response did not contain access_token")
 	}
 
-	// Finally the access token is used to retrieve the NodeLoc user profile.
-	userinfoRequest := map[string]string{
-		"access_token": tokenResponse.AccessToken,
-		"client_id":    n.clientID,
-	}
 	var userResponse nodeLocUserResponse
-	if err := n.getSigned(ctx, "/oauth/userinfo", userinfoRequest, &userResponse); err != nil {
+	if err := n.getBearing(ctx, "/oauth-provider/userinfo", accessToken, &userResponse); err != nil {
 		return nil, fmt.Errorf("retrieve nodeloc userinfo: %w", err)
 	}
 
@@ -159,12 +144,12 @@ func (n *NodeLocOAuth) ExchangeCode(ctx context.Context, code string) (*domain.O
 		Provider:     nodeLocProviderName,
 		ProviderUID:  uid,
 		Username:     firstNonEmpty(userResponse.Username, userResponse.Name, "nodeloc-"+uid),
-		DisplayName:  firstNonEmpty(userResponse.DisplayName, userResponse.Name, userResponse.Username),
+		DisplayName:  firstNonEmpty(userResponse.Name, userResponse.DisplayName, userResponse.Username),
 		Email:        email,
 		AvatarURL:    firstNonEmpty(userResponse.AvatarURL, userResponse.Avatar),
 		TrustLevel:   trustLevel,
 		Scope:        scope,
-		AccessToken:  tokenResponse.AccessToken,
+		AccessToken:  accessToken,
 		RefreshToken: tokenResponse.RefreshToken,
 	}, nil
 }
@@ -182,13 +167,7 @@ type nodeLocUserResponse struct {
 	TrustLevel  json.RawMessage `json:"trust_level"`
 }
 
-func (n *NodeLocOAuth) postSignedForm(ctx context.Context, path string, params map[string]string, target any) error {
-	params = cloneParams(params)
-	params["signature"] = shared.SignWithHashedToken(cloneParams(params), n.clientSecret)
-	form := url.Values{}
-	for key, value := range params {
-		form.Set(key, value)
-	}
+func (n *NodeLocOAuth) postForm(ctx context.Context, path string, form url.Values, target any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.baseURL+path, strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
@@ -198,17 +177,12 @@ func (n *NodeLocOAuth) postSignedForm(ctx context.Context, path string, params m
 	return n.execute(req, target)
 }
 
-func (n *NodeLocOAuth) getSigned(ctx context.Context, path string, params map[string]string, target any) error {
-	params = cloneParams(params)
-	params["signature"] = shared.SignWithHashedToken(cloneParams(params), n.clientSecret)
-	values := url.Values{}
-	for key, value := range params {
-		values.Set(key, value)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, n.baseURL+path+"?"+values.Encode(), nil)
+func (n *NodeLocOAuth) getBearing(ctx context.Context, path, accessToken string, target any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, n.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 	return n.execute(req, target)
 }
