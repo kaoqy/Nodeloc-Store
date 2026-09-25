@@ -53,63 +53,66 @@ onMounted(async () => {
 <template>
   <div class="mx-auto max-w-4xl px-4 py-10 sm:px-6">
     <!-- Loading -->
-    <div v-if="loading" class="py-24 text-center text-[#a1a1aa]">正在加载订单…</div>
+    <div v-if="loading" class="py-24 text-center text-[#b4b2c3]">
+      <div class="mx-auto mb-4 size-10 animate-spin rounded-full border-4 border-white/10 border-t-purple-400" />
+      正在加载订单…
+    </div>
 
     <!-- Content -->
     <div v-else-if="order" class="space-y-6 fade-in">
       <!-- Order Header -->
-      <div class="rounded-2xl border border-white/[0.08] bg-[#111114] p-7 sm:p-9">
+      <div class="glass p-7 sm:p-9">
         <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p class="text-sm text-[#71717a]">订单号</p>
+            <p class="text-xs tracking-widest text-[#7b7990] uppercase">订单号</p>
             <h1 class="mt-1 break-all text-xl font-bold">{{ order.order_no }}</h1>
-            <p class="mt-2 text-sm text-[#a1a1aa]">创建于 {{ date(order.created_at) }}</p>
+            <p class="mt-2 text-sm text-[#b4b2c3]">创建于 {{ date(order.created_at) }}</p>
           </div>
           <span :class="['badge', statusBadge(order.status)]">{{ statusText(order.status) }}</span>
         </div>
 
-        <div class="mt-6 h-px bg-white/[0.08]" />
+        <div class="mt-7 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
-        <div class="mt-6 grid gap-5 sm:grid-cols-3">
-          <div>
-            <p class="text-sm text-[#71717a]">商品</p>
-            <p class="mt-1 font-medium">{{ order.product?.name || order.product_name || '数字商品' }}</p>
+        <div class="mt-7 grid gap-5 sm:grid-cols-3">
+          <div class="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
+            <p class="text-xs text-[#7b7990]">商品</p>
+            <p class="mt-1.5 font-medium">{{ order.product?.name || order.product_name || '数字商品' }}</p>
           </div>
-          <div>
-            <p class="text-sm text-[#71717a]">金额</p>
-            <p class="mt-1 text-xl font-bold gradient-text">{{ money(order.amount) }}</p>
+          <div class="rounded-2xl border border-purple-400/20 bg-gradient-to-br from-purple-500/12 to-indigo-500/8 p-4">
+            <p class="text-xs text-[#7b7990]">金额</p>
+            <p class="mt-1.5 text-xl font-black gradient-text">{{ money(order.amount) }}</p>
           </div>
-          <div>
-            <p class="text-sm text-[#71717a]">交付状态</p>
-            <p class="mt-1 font-medium">{{ statusText(order.delivery_status) }}</p>
+          <div class="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
+            <p class="text-xs text-[#7b7990]">交付状态</p>
+            <p class="mt-1.5 font-medium">{{ statusText(order.delivery_status) }}</p>
           </div>
         </div>
 
-        <button v-if="order.status === 'pending'" class="btn-primary mt-6" :disabled="paying" @click="pay">
+        <button v-if="order.status === 'pending'" class="btn btn-primary mt-7 px-8" :disabled="paying" @click="pay">
           {{ paying ? '跳转支付中…' : '继续支付' }}
         </button>
-        <p v-if="error" class="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{{ error }}</p>
+        <p v-if="error" class="fade-in mt-4 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{{ error }}</p>
       </div>
 
       <!-- Delivery Content -->
-      <div class="rounded-2xl border border-white/[0.08] bg-[#111114] p-7 sm:p-9">
-        <h2 class="text-lg font-bold">交付内容</h2>
-        <p v-if="!order.cards?.length" class="mt-4 rounded-xl bg-white/[0.03] p-5 text-[#a1a1aa]">
+      <div class="glass p-7 sm:p-9">
+        <h2 class="text-lg font-bold tracking-tight">交付内容</h2>
+        <p v-if="!order.cards?.length" class="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.035] p-6 text-[#b4b2c3]">
           商品尚未交付。支付成功后，交付内容会显示在这里。
         </p>
-        <div v-else class="mt-4 space-y-3">
-          <div v-for="card in order.cards" :key="card.id" class="rounded-xl border border-white/[0.08] bg-[#09090b] p-4">
+        <div v-else class="mt-5 space-y-4">
+          <div v-for="card in order.cards" :key="card.id" class="rounded-2xl border border-white/[0.1] bg-[#0a0916]/60 p-5 backdrop-blur-md">
             <div class="flex items-center justify-between gap-3">
-              <span class="text-xs text-[#71717a]">卡密 / 数字内容</span>
-              <span class="badge-success">{{ card.status || '已交付' }}</span>
+              <span class="text-xs tracking-widest text-[#7b7990] uppercase">卡密 / 数字内容</span>
+              <span class="badge badge-success">{{ card.status || '已交付' }}</span>
             </div>
-            <code class="mt-3 block break-all whitespace-pre-wrap text-sm text-[#e4e4e7]">{{ card.code || card.content }}</code>
+            <code class="mt-3 block break-all whitespace-pre-wrap rounded-xl bg-black/30 p-3.5 text-sm text-[#e4e4e7]">{{ card.code || card.content }}</code>
           </div>
         </div>
       </div>
     </div>
 
     <!-- Error -->
-    <p v-else class="rounded-2xl border border-red-500/20 bg-red-500/10 p-8 text-center text-red-300">{{ error || '未找到订单' }}</p>
+    <p v-else class="glass p-10 text-center text-rose-300">{{ error || '未找到订单' }}</p>
   </div>
 </template>

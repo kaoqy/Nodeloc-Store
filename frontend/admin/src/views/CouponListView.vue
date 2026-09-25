@@ -44,7 +44,7 @@ onMounted(load)
 <template>
   <section class="space-y-4">
     <div class="flex items-center justify-between">
-      <p class="text-sm text-[#6b6b80]">管理优惠券</p>
+      <p class="text-sm text-[#7a7890]">管理优惠券</p>
       <button class="btn-primary" @click="editing = { id: 0, code: '', discount_type: 'fixed', discount_value: 0, min_order_amount: 0, max_uses: 0, used_count: 0, is_active: true }">+ 新建优惠券</button>
     </div>
 
@@ -55,7 +55,7 @@ onMounted(load)
         </thead>
         <tbody>
           <tr v-if="loading"><td colspan="7"><div class="skeleton h-8" /></td></tr>
-          <tr v-else-if="!coupons.length"><td colspan="7" class="py-8 text-center text-[#6b6b80]">暂无优惠券</td></tr>
+          <tr v-else-if="!coupons.length"><td colspan="7" class="py-8 text-center text-[#7a7890]">暂无优惠券</td></tr>
           <tr v-for="c in coupons" :key="c.id">
             <td>{{ c.id }}</td>
             <td><code class="rounded bg-white/10 px-2 py-0.5 font-mono text-sm">{{ c.code }}</code></td>
@@ -65,7 +65,7 @@ onMounted(load)
             <td><span :class="['badge', c.is_active ? 'badge-success' : 'badge-neutral']">{{ c.is_active ? '启用' : '禁用' }}</span></td>
             <td>
               <button class="btn-ghost text-xs" @click="startEdit(c)">编辑</button>
-              <button class="btn-ghost text-xs text-[#ef4444]" @click="deleteC(c.id)">删除</button>
+              <button class="btn-ghost text-xs text-[#fb7185]" @click="deleteC(c.id)">删除</button>
             </td>
           </tr>
         </tbody>
@@ -77,15 +77,15 @@ onMounted(load)
       <div class="card w-full max-w-md">
         <h3 class="mb-4 text-lg font-semibold">{{ editing.id ? '编辑优惠券' : '新建优惠券' }}</h3>
         <div class="space-y-3">
-          <div><label class="mb-1 block text-sm text-[#a1a1b5]">优惠码</label><input v-model="editing.code" class="input" /></div>
+          <div><label class="mb-1 block text-sm text-[#b3b1c4]">优惠码</label><input v-model="editing.code" class="input" /></div>
           <div class="grid grid-cols-2 gap-2">
-            <div><label class="mb-1 block text-sm text-[#a1a1b5]">折扣类型</label>
+            <div><label class="mb-1 block text-sm text-[#b3b1c4]">折扣类型</label>
               <select v-model="editing.discount_type" class="input"><option value="fixed">固定金额</option><option value="percentage">百分比</option></select>
             </div>
-            <div><label class="mb-1 block text-sm text-[#a1a1b5]">折扣值</label><input v-model.number="editing.discount_value" type="number" class="input" /></div>
+            <div><label class="mb-1 block text-sm text-[#b3b1c4]">折扣值</label><input v-model.number="editing.discount_value" type="number" class="input" /></div>
           </div>
-          <div><label class="mb-1 block text-sm text-[#a1a1b5]">最低消费</label><input v-model.number="editing.min_order_amount" type="number" class="input" /></div>
-          <div><label class="mb-1 block text-sm text-[#a1a1b5]">最大使用次数 (0=无限)</label><input v-model.number="editing.max_uses" type="number" class="input" /></div>
+          <div><label class="mb-1 block text-sm text-[#b3b1c4]">最低消费</label><input v-model.number="editing.min_order_amount" type="number" class="input" /></div>
+          <div><label class="mb-1 block text-sm text-[#b3b1c4]">最大使用次数 (0=无限)</label><input v-model.number="editing.max_uses" type="number" class="input" /></div>
           <label class="flex items-center gap-2 text-sm"><input v-model="editing.is_active" type="checkbox" /> 启用</label>
         </div>
         <div class="mt-4 flex gap-2">

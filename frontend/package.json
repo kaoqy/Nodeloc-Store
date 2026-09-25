@@ -1,6 +1,6 @@
 {
   "name": "nodeloc-store-frontend",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev:user": "pnpm --filter user dev",

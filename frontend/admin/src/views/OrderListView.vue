@@ -70,7 +70,7 @@ onMounted(load)
             </td>
           </tr>
           <tr v-else-if="!orders.length">
-            <td colspan="7" class="py-12 text-center text-[#6b6b80]">暂无订单</td>
+            <td colspan="7" class="py-12 text-center text-[#7a7890]">暂无订单</td>
           </tr>
           <tr v-for="order in orders" :key="order.order_no">
             <td>
@@ -95,7 +95,7 @@ onMounted(load)
                 {{ statusText[order.status] || order.status }}
               </span>
             </td>
-            <td class="text-[#a1a1b5]">{{ order.paid_at || '-' }}</td>
+            <td class="text-[#b3b1c4]">{{ order.paid_at || '-' }}</td>
             <td>
               <div class="flex items-center gap-2">
                 <RouterLink :to="`/orders/${order.order_no}`" class="btn-ghost text-xs">详情</RouterLink>
@@ -107,10 +107,10 @@ onMounted(load)
     </div>
 
     <div class="flex items-center justify-between">
-      <p class="text-sm text-[#6b6b80]">显示 {{ orders.length }} 条</p>
+      <p class="text-sm text-[#7a7890]">显示 {{ orders.length }} 条</p>
       <div class="flex items-center gap-2">
         <button class="btn-secondary" :disabled="page <= 1" @click="page--; load()">上一页</button>
-        <span class="text-sm text-[#a1a1b5]">第 {{ page }} 页</span>
+        <span class="text-sm text-[#b3b1c4]">第 {{ page }} 页</span>
         <button class="btn-secondary" @click="page++; load()">下一页</button>
       </div>
     </div>

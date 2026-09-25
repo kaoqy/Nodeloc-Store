@@ -72,7 +72,7 @@ onMounted(load)
   <section v-else class="space-y-6">
     <div class="flex items-center justify-between">
       <div>
-        <RouterLink to="/products" class="text-sm text-[#6b6b80] hover:text-white">← 返回商品列表</RouterLink>
+        <RouterLink to="/products" class="text-sm text-[#7a7890] hover:text-white">← 返回商品列表</RouterLink>
         <h2 class="mt-2 text-xl font-bold">{{ isEdit ? '编辑商品' : '新建商品' }}</h2>
       </div>
       <div class="flex items-center gap-2">
@@ -89,26 +89,26 @@ onMounted(load)
           <h3 class="mb-4 font-semibold">基本信息</h3>
           <div class="grid gap-4 sm:grid-cols-2">
             <div class="sm:col-span-2">
-              <label class="mb-1 block text-sm text-[#a1a1b5]">商品名称</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">商品名称</label>
               <input v-model="form.name" class="input" placeholder="输入商品名称" />
             </div>
             <div>
-              <label class="mb-1 block text-sm text-[#a1a1b5]">商品别名 (slug)</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">商品别名 (slug)</label>
               <input v-model="form.slug" class="input" placeholder="product-slug" />
             </div>
             <div>
-              <label class="mb-1 block text-sm text-[#a1a1b5]">商品类型</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">商品类型</label>
               <select v-model="form.product_type" class="input">
                 <option value="card">卡密</option>
                 <option value="manual">人工交付</option>
               </select>
             </div>
             <div class="sm:col-span-2">
-              <label class="mb-1 block text-sm text-[#a1a1b5]">商品简介</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">商品简介</label>
               <input v-model="form.summary" class="input" placeholder="简短描述" />
             </div>
             <div class="sm:col-span-2">
-              <label class="mb-1 block text-sm text-[#a1a1b5]">详细描述</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">详细描述</label>
               <textarea v-model="form.description" class="input min-h-32 resize-none" placeholder="商品详细说明..." />
             </div>
           </div>
@@ -118,15 +118,15 @@ onMounted(load)
           <h3 class="mb-4 font-semibold">价格与库存</h3>
           <div class="grid gap-4 sm:grid-cols-2">
             <div>
-              <label class="mb-1 block text-sm text-[#a1a1b5]">售价</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">售价</label>
               <input v-model.number="form.price" type="number" class="input" />
             </div>
             <div>
-              <label class="mb-1 block text-sm text-[#a1a1b5]">原价（可选）</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">原价（可选）</label>
               <input v-model.number="form.original_price" type="number" class="input" />
             </div>
             <div>
-              <label class="mb-1 block text-sm text-[#a1a1b5]">库存数量</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">库存数量</label>
               <input v-model.number="form.stock_count" type="number" class="input" />
             </div>
             <div class="flex items-center gap-4 pt-6">

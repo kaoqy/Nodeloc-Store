@@ -74,7 +74,7 @@ onMounted(() => {
         </thead>
         <tbody>
           <tr v-if="loading"><td colspan="7"><div class="skeleton h-8" /></td></tr>
-          <tr v-else-if="!cards.length"><td colspan="7" class="py-8 text-center text-[#6b6b80]">暂无卡密</td></tr>
+          <tr v-else-if="!cards.length"><td colspan="7" class="py-8 text-center text-[#7a7890]">暂无卡密</td></tr>
           <tr v-for="card in cards" :key="card.id">
             <td>{{ card.id }}</td>
             <td>{{ card.product?.name || '-' }}</td>
@@ -91,9 +91,9 @@ onMounted(() => {
               </span>
             </td>
             <td>{{ card.order_id || '-' }}</td>
-            <td class="text-[#a1a1b5]">{{ card.created_at }}</td>
+            <td class="text-[#b3b1c4]">{{ card.created_at }}</td>
             <td>
-              <button class="btn-ghost text-xs text-[#ef4444]" @click="deleteC(card.id)">删除</button>
+              <button class="btn-ghost text-xs text-[#fb7185]" @click="deleteC(card.id)">删除</button>
             </td>
           </tr>
         </tbody>
@@ -101,10 +101,10 @@ onMounted(() => {
     </div>
 
     <div class="flex items-center justify-between">
-      <p class="text-sm text-[#6b6b80]">显示 {{ cards.length }} 条</p>
+      <p class="text-sm text-[#7a7890]">显示 {{ cards.length }} 条</p>
       <div class="flex items-center gap-2">
         <button class="btn-secondary" :disabled="page <= 1" @click="page--; load()">上一页</button>
-        <span class="text-sm text-[#a1a1b5]">第 {{ page }} 页</span>
+        <span class="text-sm text-[#b3b1c4]">第 {{ page }} 页</span>
         <button class="btn-secondary" @click="page++; load()">下一页</button>
       </div>
     </div>

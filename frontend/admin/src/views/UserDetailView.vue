@@ -79,14 +79,14 @@ onMounted(load)
   </section>
 
   <section v-else-if="error" class="py-20 text-center">
-    <p class="text-[#ef4444]">{{ error }}</p>
+    <p class="text-[#fb7185]">{{ error }}</p>
     <button class="btn-secondary mt-4" @click="router.push('/users')">返回用户列表</button>
   </section>
 
   <section v-else-if="user" class="space-y-6">
     <div class="flex items-center justify-between">
       <div>
-        <RouterLink to="/users" class="text-sm text-[#6b6b80] hover:text-white">← 返回用户列表</RouterLink>
+        <RouterLink to="/users" class="text-sm text-[#7a7890] hover:text-white">← 返回用户列表</RouterLink>
         <h2 class="mt-2 text-xl font-bold">用户详情</h2>
       </div>
       <button
@@ -104,7 +104,7 @@ onMounted(load)
           {{ user.username?.[0]?.toUpperCase() || 'U' }}
         </div>
         <h3 class="text-lg font-semibold">{{ user.username }}</h3>
-        <p class="mt-1 text-sm text-[#6b6b80]">{{ user.email || '未设置邮箱' }}</p>
+        <p class="mt-1 text-sm text-[#7a7890]">{{ user.email || '未设置邮箱' }}</p>
         <div class="mt-3">
           <span
             :class="[
@@ -125,27 +125,27 @@ onMounted(load)
           <h3 class="mb-4 font-semibold">基本信息</h3>
           <div class="grid gap-4 sm:grid-cols-2">
             <div>
-              <p class="text-xs text-[#6b6b80]">用户 ID</p>
+              <p class="text-xs text-[#7a7890]">用户 ID</p>
               <p class="mt-1 text-sm font-medium">{{ user.id }}</p>
             </div>
             <div>
-              <p class="text-xs text-[#6b6b80]">积分余额</p>
-              <p class="mt-1 text-sm font-medium text-[#f59e0b]">{{ user.points }}</p>
+              <p class="text-xs text-[#7a7890]">积分余额</p>
+              <p class="mt-1 text-sm font-medium text-[#fbbf24]">{{ user.points }}</p>
             </div>
             <div>
-              <p class="text-xs text-[#6b6b80]">注册时间</p>
+              <p class="text-xs text-[#7a7890]">注册时间</p>
               <p class="mt-1 text-sm font-medium">{{ user.created_at || '-' }}</p>
             </div>
             <div>
-              <p class="text-xs text-[#6b6b80]">最后登录</p>
+              <p class="text-xs text-[#7a7890]">最后登录</p>
               <p class="mt-1 text-sm font-medium">{{ user.last_login_at || '-' }}</p>
             </div>
             <div>
-              <p class="text-xs text-[#6b6b80]">连续签到</p>
+              <p class="text-xs text-[#7a7890]">连续签到</p>
               <p class="mt-1 text-sm font-medium">{{ user.consecutive_days || 0 }} 天</p>
             </div>
             <div>
-              <p class="text-xs text-[#6b6b80]">累计签到</p>
+              <p class="text-xs text-[#7a7890]">累计签到</p>
               <p class="mt-1 text-sm font-medium">{{ user.total_checkins || 0 }} 次</p>
             </div>
           </div>
@@ -182,18 +182,18 @@ onMounted(load)
       <h3 class="mb-4 font-semibold">积分调账</h3>
       <div class="flex flex-wrap items-end gap-4">
         <div>
-          <label class="mb-1 block text-sm text-[#a1a1b5]">调整数量</label>
+          <label class="mb-1 block text-sm text-[#b3b1c4]">调整数量</label>
           <input v-model.number="pointsForm.delta" type="number" class="input w-32" placeholder="正数加 / 负数扣" />
         </div>
         <div class="flex-1">
-          <label class="mb-1 block text-sm text-[#a1a1b5]">原因</label>
+          <label class="mb-1 block text-sm text-[#b3b1c4]">原因</label>
           <input v-model="pointsForm.reason" class="input" placeholder="调账原因..." />
         </div>
         <button class="btn-primary" :disabled="pointsLoading || !pointsForm.delta" @click="submitPoints">
           {{ pointsLoading ? '处理中...' : '确认调账' }}
         </button>
       </div>
-      <p v-if="pointsMessage" class="mt-3 text-sm" :class="pointsMessage.includes('成功') ? 'text-[#22c55e]' : 'text-[#ef4444]'">
+      <p v-if="pointsMessage" class="mt-3 text-sm" :class="pointsMessage.includes('成功') ? 'text-[#34d399]' : 'text-[#fb7185]'">
         {{ pointsMessage }}
       </p>
     </div>

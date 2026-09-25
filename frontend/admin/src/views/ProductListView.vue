@@ -69,14 +69,14 @@ onMounted(load)
             </td>
           </tr>
           <tr v-else-if="!products.length">
-            <td colspan="8" class="py-12 text-center text-[#6b6b80]">暂无商品</td>
+            <td colspan="8" class="py-12 text-center text-[#7a7890]">暂无商品</td>
           </tr>
           <tr v-for="product in products" :key="product.id">
             <td>{{ product.id }}</td>
             <td>
               <div class="flex items-center gap-3">
                 <div v-if="product.image_path" class="h-10 w-10 rounded-lg bg-cover bg-center" :style="{ backgroundImage: `url(${product.image_path})` }" />
-                <div v-else class="flex h-10 w-10 items-center justify-center rounded-lg bg-[#1a1a25] text-sm text-[#6b6b80]">无图</div>
+                <div v-else class="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10 text-sm text-[#7a7890]">无图</div>
                 <span class="font-medium">{{ product.name }}</span>
               </div>
             </td>
@@ -93,11 +93,11 @@ onMounted(load)
                 {{ product.is_published ? '上架' : '下架' }}
               </span>
             </td>
-            <td class="text-[#a1a1b5]">{{ product.created_at }}</td>
+            <td class="text-[#b3b1c4]">{{ product.created_at }}</td>
             <td>
               <div class="flex items-center gap-2">
                 <button class="btn-ghost text-xs" @click="editProduct(product.id)">编辑</button>
-                <button class="btn-ghost text-xs text-[#ef4444]" @click="deleteProduct(product.id)">删除</button>
+                <button class="btn-ghost text-xs text-[#fb7185]" @click="deleteProduct(product.id)">删除</button>
               </div>
             </td>
           </tr>
@@ -107,10 +107,10 @@ onMounted(load)
 
     <!-- Pagination -->
     <div class="flex items-center justify-between">
-      <p class="text-sm text-[#6b6b80]">显示 {{ products.length }} 条</p>
+      <p class="text-sm text-[#7a7890]">显示 {{ products.length }} 条</p>
       <div class="flex items-center gap-2">
         <button class="btn-secondary" :disabled="page <= 1" @click="page--; load()">上一页</button>
-        <span class="text-sm text-[#a1a1b5]">第 {{ page }} 页</span>
+        <span class="text-sm text-[#b3b1c4]">第 {{ page }} 页</span>
         <button class="btn-secondary" @click="page++; load()">下一页</button>
       </div>
     </div>

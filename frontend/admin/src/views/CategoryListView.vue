@@ -44,7 +44,7 @@ onMounted(load)
 <template>
   <section class="space-y-4">
     <div class="flex items-center justify-between">
-      <p class="text-sm text-[#6b6b80]">管理商品分类</p>
+      <p class="text-sm text-[#7a7890]">管理商品分类</p>
       <button class="btn-primary" @click="editing = { id: 0, name: '', slug: '', icon: '', sort_order: 0, is_visible: true }">+ 新建分类</button>
     </div>
 
@@ -55,7 +55,7 @@ onMounted(load)
         </thead>
         <tbody>
           <tr v-if="loading"><td colspan="6"><div class="skeleton h-8" /></td></tr>
-          <tr v-else-if="!categories.length"><td colspan="6" class="py-8 text-center text-[#6b6b80]">暂无分类</td></tr>
+          <tr v-else-if="!categories.length"><td colspan="6" class="py-8 text-center text-[#7a7890]">暂无分类</td></tr>
           <tr v-for="cat in categories" :key="cat.id">
             <td>{{ cat.id }}</td>
             <td>{{ cat.name }}</td>
@@ -64,7 +64,7 @@ onMounted(load)
             <td><span :class="['badge', cat.is_visible ? 'badge-success' : 'badge-neutral']">{{ cat.is_visible ? '显示' : '隐藏' }}</span></td>
             <td>
               <button class="btn-ghost text-xs" @click="startEdit(cat)">编辑</button>
-              <button class="btn-ghost text-xs text-[#ef4444]" @click="deleteCat(cat.id)">删除</button>
+              <button class="btn-ghost text-xs text-[#fb7185]" @click="deleteCat(cat.id)">删除</button>
             </td>
           </tr>
         </tbody>
@@ -76,10 +76,10 @@ onMounted(load)
       <div class="card w-full max-w-md">
         <h3 class="mb-4 text-lg font-semibold">{{ editing.id ? '编辑分类' : '新建分类' }}</h3>
         <div class="space-y-3">
-          <div><label class="mb-1 block text-sm text-[#a1a1b5]">名称</label><input v-model="editing.name" class="input" /></div>
-          <div><label class="mb-1 block text-sm text-[#a1a1b5]">别名</label><input v-model="editing.slug" class="input" /></div>
-          <div><label class="mb-1 block text-sm text-[#a1a1b5]">图标</label><input v-model="editing.icon" class="input" /></div>
-          <div><label class="mb-1 block text-sm text-[#a1a1b5]">排序</label><input v-model.number="editing.sort_order" type="number" class="input" /></div>
+          <div><label class="mb-1 block text-sm text-[#b3b1c4]">名称</label><input v-model="editing.name" class="input" /></div>
+          <div><label class="mb-1 block text-sm text-[#b3b1c4]">别名</label><input v-model="editing.slug" class="input" /></div>
+          <div><label class="mb-1 block text-sm text-[#b3b1c4]">图标</label><input v-model="editing.icon" class="input" /></div>
+          <div><label class="mb-1 block text-sm text-[#b3b1c4]">排序</label><input v-model.number="editing.sort_order" type="number" class="input" /></div>
           <label class="flex items-center gap-2 text-sm"><input v-model="editing.is_visible" type="checkbox" /> 可见</label>
         </div>
         <div class="mt-4 flex gap-2">

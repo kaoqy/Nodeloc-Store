@@ -68,7 +68,7 @@ onMounted(async () => {
             :style="{ height: h + '%' }"
           />
         </div>
-        <div class="mt-4 flex justify-between text-xs text-[#6b6b80]">
+        <div class="mt-4 flex justify-between text-xs text-[#7a7890]">
           <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
         </div>
       </div>
@@ -89,9 +89,9 @@ onMounted(async () => {
             </div>
             <div class="min-w-0 flex-1">
               <p class="truncate text-sm">示例商品 {{ i }}</p>
-              <p class="text-xs text-[#6b6b80]">¥{{ (i * 10).toFixed(2) }}</p>
+              <p class="text-xs text-[#7a7890]">¥{{ (i * 10).toFixed(2) }}</p>
             </div>
-            <span class="text-xs text-[#22c55e]">+{{ i * 5 }}%</span>
+            <span class="text-xs text-[#34d399]">+{{ i * 5 }}%</span>
           </div>
         </div>
       </div>
@@ -108,7 +108,7 @@ onMounted(async () => {
         <div v-if="loading" class="space-y-3">
           <div v-for="i in 4" :key="i" class="skeleton h-12" />
         </div>
-        <div v-else-if="!orders.length" class="py-10 text-center text-[#6b6b80]">暂无订单</div>
+        <div v-else-if="!orders.length" class="py-10 text-center text-[#7a7890]">暂无订单</div>
         <div v-else class="table-container">
           <table>
             <thead>
@@ -143,7 +143,7 @@ onMounted(async () => {
                     {{ statusText[order.status] || order.status }}
                   </span>
                 </td>
-                <td class="text-[#a1a1b5]">{{ order.created_at || '-' }}</td>
+                <td class="text-[#b3b1c4]">{{ order.created_at || '-' }}</td>
               </tr>
             </tbody>
           </table>
@@ -156,11 +156,11 @@ onMounted(async () => {
           <h3 class="font-semibold">近期操作</h3>
           <RouterLink to="/logs" class="text-sm text-indigo-300 hover:text-indigo-200">审计日志</RouterLink>
         </div>
-        <div v-if="!logs.length" class="py-10 text-center text-[#6b6b80]">暂无日志</div>
+        <div v-if="!logs.length" class="py-10 text-center text-[#7a7890]">暂无日志</div>
         <div v-else class="space-y-4">
           <div v-for="log in logs.slice(0, 6)" :key="log.id" class="border-l-2 border-indigo-500/40 pl-3">
             <p class="text-sm">{{ log.action }}</p>
-            <p class="mt-1 text-xs text-[#6b6b80]">{{ log.user?.name || log.user?.email || '系统' }} · {{ log.created_at }}</p>
+            <p class="mt-1 text-xs text-[#7a7890]">{{ log.user?.name || log.user?.email || '系统' }} · {{ log.created_at }}</p>
           </div>
         </div>
       </div>

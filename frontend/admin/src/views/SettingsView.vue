@@ -46,7 +46,7 @@ onMounted(load)
     <div class="flex items-center justify-between">
       <div>
         <h2 class="text-xl font-bold">系统设置</h2>
-        <p class="text-sm text-[#6b6b80]">配置平台的基本参数</p>
+        <p class="text-sm text-[#7a7890]">配置平台的基本参数</p>
       </div>
       <button class="btn-primary" :disabled="saving" @click="save">
         {{ saving ? '保存中...' : '保存设置' }}
@@ -59,15 +59,15 @@ onMounted(load)
           <h3 class="mb-4 font-semibold">基本信息</h3>
           <div class="space-y-3">
             <div>
-              <label class="mb-1 block text-sm text-[#a1a1b5]">网站名称</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">网站名称</label>
               <input v-model="settings.site_name" class="input" />
             </div>
             <div>
-              <label class="mb-1 block text-sm text-[#a1a1b5]">Logo URL</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">Logo URL</label>
               <input v-model="settings.site_logo" class="input" />
             </div>
             <div>
-              <label class="mb-1 block text-sm text-[#a1a1b5]">网站描述</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">网站描述</label>
               <textarea v-model="settings.site_description" class="input min-h-20 resize-none" />
             </div>
           </div>
@@ -77,11 +77,11 @@ onMounted(load)
           <h3 class="mb-4 font-semibold">外观</h3>
           <div class="space-y-3">
             <div>
-              <label class="mb-1 block text-sm text-[#a1a1b5]">主题色</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">主题色</label>
               <input v-model="settings.theme_primary" type="color" class="h-10 w-20 cursor-pointer rounded-lg border-0 bg-transparent" />
             </div>
             <div>
-              <label class="mb-1 block text-sm text-[#a1a1b5]">默认语言</label>
+              <label class="mb-1 block text-sm text-[#b3b1c4]">默认语言</label>
               <select v-model="settings.default_locale" class="input">
                 <option value="zh-CN">简体中文</option>
                 <option value="zh-TW">繁體中文</option>
@@ -121,15 +121,15 @@ onMounted(load)
           <h3 class="mb-4 font-semibold">系统信息</h3>
           <div class="space-y-2 text-sm">
             <div class="flex justify-between">
-              <span class="text-[#6b6b80]">版本</span>
+              <span class="text-[#7a7890]">版本</span>
               <span>v1.0.0</span>
             </div>
             <div class="flex justify-between">
-              <span class="text-[#6b6b80]">运行环境</span>
+              <span class="text-[#7a7890]">运行环境</span>
               <span>Docker</span>
             </div>
             <div class="flex justify-between">
-              <span class="text-[#6b6b80]">数据库</span>
+              <span class="text-[#7a7890]">数据库</span>
               <span>SQLite</span>
             </div>
           </div>

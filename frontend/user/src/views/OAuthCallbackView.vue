@@ -27,16 +27,20 @@ onMounted(async () => {
 
 <template>
   <div class="mx-auto grid min-h-[65vh] max-w-md place-items-center px-4">
-    <div class="w-full rounded-2xl border border-white/[0.08] bg-[#111114] p-8 text-center">
+    <div class="glass rise-in w-full p-10 text-center">
       <template v-if="!error">
-        <div class="mx-auto size-12 animate-spin rounded-full border-4 border-white/10 border-t-purple-500" />
-        <h1 class="mt-6 text-xl font-semibold">正在完成 NodeLoc 登录</h1>
-        <p class="mt-2 text-sm text-[#a1a1aa]">请稍候，不要关闭页面…</p>
+        <div class="relative mx-auto size-14">
+          <div class="absolute inset-0 animate-spin rounded-full border-4 border-white/[0.07] border-t-purple-400" />
+          <div class="absolute inset-2 animate-spin rounded-full border-4 border-white/[0.05] border-b-indigo-400 [animation-direction:reverse]" />
+        </div>
+        <h1 class="mt-7 text-xl font-semibold">正在完成 NodeLoc 登录</h1>
+        <p class="mt-2 text-sm text-[#b4b2c3]">请稍候，不要关闭页面…</p>
       </template>
       <template v-else>
-        <h1 class="text-xl font-semibold text-red-300">登录未完成</h1>
-        <p class="mt-3 text-sm text-[#a1a1aa]">{{ error }}</p>
-        <RouterLink to="/login" class="btn-primary mt-6 inline-block">返回登录</RouterLink>
+        <div class="mx-auto mb-5 grid size-14 place-items-center rounded-full border border-rose-400/30 bg-rose-500/12 text-2xl backdrop-blur-md">⚠️</div>
+        <h1 class="text-xl font-semibold text-rose-300">登录未完成</h1>
+        <p class="mt-3 text-sm text-[#b4b2c3]">{{ error }}</p>
+        <RouterLink to="/login" class="btn btn-primary mt-7 inline-flex px-8">返回登录</RouterLink>
       </template>
     </div>
   </div>

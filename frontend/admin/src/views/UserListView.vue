@@ -64,7 +64,7 @@ onMounted(load)
             </td>
           </tr>
           <tr v-else-if="!users.length">
-            <td colspan="7" class="py-12 text-center text-[#6b6b80]">暂无用户</td>
+            <td colspan="7" class="py-12 text-center text-[#7a7890]">暂无用户</td>
           </tr>
           <tr v-for="user in users" :key="user.id">
             <td>{{ user.id }}</td>
@@ -76,7 +76,7 @@ onMounted(load)
                 <span class="font-medium">{{ user.username }}</span>
               </div>
             </td>
-            <td class="text-[#a1a1b5]">{{ user.email || '-' }}</td>
+            <td class="text-[#b3b1c4]">{{ user.email || '-' }}</td>
             <td>
               <span
                 :class="[
@@ -99,7 +99,7 @@ onMounted(load)
                 {{ user.is_active ? '正常' : '禁用' }}
               </span>
             </td>
-            <td class="text-[#a1a1b5]">{{ user.created_at }}</td>
+            <td class="text-[#b3b1c4]">{{ user.created_at }}</td>
             <td>
               <div class="flex items-center gap-2">
                 <RouterLink :to="`/users/${user.id}`" class="btn-ghost text-xs">详情</RouterLink>
@@ -112,10 +112,10 @@ onMounted(load)
     </div>
 
     <div class="flex items-center justify-between">
-      <p class="text-sm text-[#6b6b80]">显示 {{ users.length }} 条</p>
+      <p class="text-sm text-[#7a7890]">显示 {{ users.length }} 条</p>
       <div class="flex items-center gap-2">
         <button class="btn-secondary" :disabled="page <= 1" @click="page--; load()">上一页</button>
-        <span class="text-sm text-[#a1a1b5]">第 {{ page }} 页</span>
+        <span class="text-sm text-[#b3b1c4]">第 {{ page }} 页</span>
         <button class="btn-secondary" @click="page++; load()">下一页</button>
       </div>
     </div>

@@ -33,7 +33,7 @@ onMounted(async () => {
   <section v-else-if="order" class="space-y-6">
     <div class="flex items-center justify-between">
       <div>
-        <RouterLink to="/orders" class="text-sm text-[#6b6b80] hover:text-white">← 返回订单列表</RouterLink>
+        <RouterLink to="/orders" class="text-sm text-[#7a7890] hover:text-white">← 返回订单列表</RouterLink>
         <h2 class="mt-2 text-xl font-bold">订单详情</h2>
       </div>
       <div class="flex items-center gap-2">
@@ -44,15 +44,15 @@ onMounted(async () => {
 
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <div class="card">
-        <p class="text-xs text-[#6b6b80]">订单号</p>
+        <p class="text-xs text-[#7a7890]">订单号</p>
         <p class="mt-1 text-sm font-medium">{{ order.order_no }}</p>
       </div>
       <div class="card">
-        <p class="text-xs text-[#6b6b80]">总金额</p>
-        <p class="mt-1 text-lg font-bold text-[#22c55e]">¥{{ Number(order.total_amount).toFixed(2) }}</p>
+        <p class="text-xs text-[#7a7890]">总金额</p>
+        <p class="mt-1 text-lg font-bold text-[#34d399]">¥{{ Number(order.total_amount).toFixed(2) }}</p>
       </div>
       <div class="card">
-        <p class="text-xs text-[#6b6b80]">状态</p>
+        <p class="text-xs text-[#7a7890]">状态</p>
         <p class="mt-1">
           <span
             :class="[
@@ -69,7 +69,7 @@ onMounted(async () => {
         </p>
       </div>
       <div class="card">
-        <p class="text-xs text-[#6b6b80]">创建时间</p>
+        <p class="text-xs text-[#7a7890]">创建时间</p>
         <p class="mt-1 text-sm font-medium">{{ order.created_at }}</p>
       </div>
     </div>
@@ -79,15 +79,15 @@ onMounted(async () => {
         <h3 class="mb-4 font-semibold">商品信息</h3>
         <div class="space-y-3">
           <div class="flex justify-between">
-            <span class="text-sm text-[#6b6b80]">商品名称</span>
+            <span class="text-sm text-[#7a7890]">商品名称</span>
             <span class="text-sm font-medium">{{ order.product?.name || order.product_name || '-' }}</span>
           </div>
           <div class="flex justify-between">
-            <span class="text-sm text-[#6b6b80]">数量</span>
+            <span class="text-sm text-[#7a7890]">数量</span>
             <span class="text-sm font-medium">{{ order.quantity || 1 }}</span>
           </div>
           <div class="flex justify-between">
-            <span class="text-sm text-[#6b6b80]">单价</span>
+            <span class="text-sm text-[#7a7890]">单价</span>
             <span class="text-sm font-medium">¥{{ Number(order.unit_price || order.total_amount).toFixed(2) }}</span>
           </div>
         </div>
@@ -97,15 +97,15 @@ onMounted(async () => {
         <h3 class="mb-4 font-semibold">用户信息</h3>
         <div class="space-y-3">
           <div class="flex justify-between">
-            <span class="text-sm text-[#6b6b80]">用户名</span>
+            <span class="text-sm text-[#7a7890]">用户名</span>
             <span class="text-sm font-medium">{{ order.user?.username || '-' }}</span>
           </div>
           <div class="flex justify-between">
-            <span class="text-sm text-[#6b6b80]">邮箱</span>
+            <span class="text-sm text-[#7a7890]">邮箱</span>
             <span class="text-sm font-medium">{{ order.user?.email || '-' }}</span>
           </div>
           <div class="flex justify-between">
-            <span class="text-sm text-[#6b6b80]">联系方式</span>
+            <span class="text-sm text-[#7a7890]">联系方式</span>
             <span class="text-sm font-medium">{{ order.customer_contact || '-' }}</span>
           </div>
         </div>
@@ -114,13 +114,13 @@ onMounted(async () => {
 
     <div v-if="order.delivery_content" class="card">
       <h3 class="mb-4 font-semibold">交付内容</h3>
-      <div class="rounded-lg bg-[#0a0a0f] p-4">
-        <pre class="whitespace-pre-wrap text-sm text-[#a1a1b5]">{{ order.delivery_content }}</pre>
+      <div class="rounded-lg bg-black/25 p-4">
+        <pre class="whitespace-pre-wrap text-sm text-[#b3b1c4]">{{ order.delivery_content }}</pre>
       </div>
     </div>
   </section>
 
-  <section v-else class="py-20 text-center text-[#6b6b80]">
+  <section v-else class="py-20 text-center text-[#7a7890]">
     订单不存在
   </section>
 </template>

@@ -23,7 +23,7 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <p class="text-sm text-[#6b6b80]">系统操作日志</p>
+    <p class="text-sm text-[#7a7890]">系统操作日志</p>
 
     <div class="table-container">
       <table>
@@ -32,24 +32,24 @@ onMounted(load)
         </thead>
         <tbody>
           <tr v-if="loading"><td colspan="6"><div class="skeleton h-8" /></td></tr>
-          <tr v-else-if="!logs.length"><td colspan="6" class="py-8 text-center text-[#6b6b80]">暂无日志</td></tr>
+          <tr v-else-if="!logs.length"><td colspan="6" class="py-8 text-center text-[#7a7890]">暂无日志</td></tr>
           <tr v-for="log in logs" :key="log.id">
             <td>{{ log.id }}</td>
             <td><span class="badge badge-neutral">{{ log.action }}</span></td>
-            <td class="max-w-xs truncate text-[#a1a1b5]">{{ log.detail || '-' }}</td>
+            <td class="max-w-xs truncate text-[#b3b1c4]">{{ log.detail || '-' }}</td>
             <td>{{ log.user?.name || log.user?.email || '系统' }}</td>
-            <td class="text-[#a1a1b5]">{{ log.ip || '-' }}</td>
-            <td class="text-[#a1a1b5]">{{ log.created_at }}</td>
+            <td class="text-[#b3b1c4]">{{ log.ip || '-' }}</td>
+            <td class="text-[#b3b1c4]">{{ log.created_at }}</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <div class="flex items-center justify-between">
-      <p class="text-sm text-[#6b6b80]">显示 {{ logs.length }} 条</p>
+      <p class="text-sm text-[#7a7890]">显示 {{ logs.length }} 条</p>
       <div class="flex items-center gap-2">
         <button class="btn-secondary" :disabled="page <= 1" @click="page--; load()">上一页</button>
-        <span class="text-sm text-[#a1a1b5]">第 {{ page }} 页</span>
+        <span class="text-sm text-[#b3b1c4]">第 {{ page }} 页</span>
         <button class="btn-secondary" @click="page++; load()">下一页</button>
       </div>
     </div>
