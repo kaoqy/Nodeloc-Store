@@ -1,11 +1,21 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import NavBar from './components/NavBar.vue'
 import { useAuthStore } from './stores/auth'
 
 const auth = useAuthStore()
+const uninitialized = ref(false)
 
 onMounted(async () => {
+  try {
+    const res = await fetch('/api/v1/system/status', { headers: { Accept: 'application/json' } })
+    if (res.ok) {
+      const status = await res.json()
+      uninitialized.value = status.initialized === false
+    }
+  } catch {
+    // 状态接口不可用时按已初始化处理
+  }
   if (auth.token && !auth.user) {
     try {
       await auth.fetchUser()
@@ -19,12 +29,23 @@ onMounted(async () => {
 <template>
   <div class="relative flex min-h-screen flex-col text-zinc-100">
     <NavBar />
-    <main class="flex-1">
-      <router-view v-slot="{ Component }">
-        <transition name="page" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </router-view>
+    <main class="flex flex-1 items-center justify-center px-4">
+      <div v-if="uninitialized" class="card rise-in w-full max-w-md p-8 text-center">
+        <div class="mx-auto mb-6 grid size-16 place-items-center rounded-[20px] bg-gradient-to-br from-purple-400 to-fuchsia-600 text-3xl">🛠️</div>
+        <h1 class="text-xl font-bold">商店尚未初始化</h1>
+        <p class="mt-3 text-sm text-[#b3b1c4]">
+          管理员需要先到
+          <a class="text-[#a855f7] underline underline-offset-4" href="/admin/">后台初始化向导</a>
+          完成配置，初始化后这里将展示商品与下单入口。
+        </p>
+      </div>
+      <div v-else class="w-full flex-1">
+        <router-view v-slot="{ Component }">
+          <transition name="page" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
+      </div>
     </main>
     <footer class="mx-auto mt-16 w-full max-w-7xl px-4 pb-8 sm:px-6">
       <div class="glass flex flex-col items-center gap-2 rounded-full px-6 py-4 text-center">

@@ -29,16 +29,20 @@ type User struct {
 	TotalCheckins   int            `gorm:"default:0;not null" json:"total_checkins"`
 	LastCheckinDate *time.Time     `json:"last_checkin_date,omitempty"`
 	LastLoginAt     *time.Time     `json:"last_login_at,omitempty"`
+	Nickname        string         `gorm:"size:64" json:"nickname"`
+	AvatarURL       string         `gorm:"size:255" json:"avatar_url"`
+	Bio             string         `gorm:"type:text" json:"bio"`
+	LastLoginIP     string         `gorm:"size:45" json:"-"`
 
 	// OAuth binding (denormalized for quick lookups)
-	OAuthProvider   *string `gorm:"size:32" json:"oauth_provider,omitempty"`
-	OAuthUID        *string `gorm:"size:64;index" json:"oauth_uid,omitempty"`
+	OAuthProvider   *string `gorm:"size:32;index" json:"oauth_provider,omitempty"`
+	OAuthUID        *string `gorm:"size:190;index" json:"oauth_uid,omitempty"`
 	OAuthUsername   *string `gorm:"size:64" json:"oauth_username,omitempty"`
 	OAuthName       *string `gorm:"size:64" json:"oauth_name,omitempty"`
-	OAuthAvatar     *string `gorm:"size:500" json:"oauth_avatar,omitempty"`
+	OAuthAvatar     *string `gorm:"size:255" json:"oauth_avatar,omitempty"`
 	OAuthTrustLevel *int    `json:"oauth_trust_level,omitempty"`
 	OAuthScope      *string `gorm:"size:255" json:"oauth_scope,omitempty"`
-	OAuthHasEmail   bool    `gorm:"default:false;not null" json:"oauth_has_email"`
+	OAuthHasEmail   bool    `gorm:"default:false" json:"oauth_has_email"`
 
 	// Relations
 	OAuthIdentities []OAuthIdentity `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;" json:"-"`
@@ -50,12 +54,12 @@ type User struct {
 
 type OAuthIdentity struct {
 	Base
-	UserID       uint   `gorm:"not null;index" json:"user_id"`
-	Provider     string `gorm:"size:32;not null;index:idx_provider_uid,unique" json:"provider"`
-	ProviderUID  string `gorm:"size:128;not null;index:idx_provider_uid,unique" json:"provider_uid"`
-	Username     *string `gorm:"size:128" json:"username,omitempty"`
-	DisplayName  *string `gorm:"size:128" json:"display_name,omitempty"`
-	AvatarURL    *string `gorm:"size:500" json:"avatar_url,omitempty"`
+	UserID       uint    `gorm:"uniqueIndex:idx_user_provider;not null" json:"user_id"`
+	Provider     string  `gorm:"size:32;uniqueIndex:idx_provider_uid;not null" json:"provider"`
+	ProviderUID  string  `gorm:"size:190;uniqueIndex:idx_provider_uid;not null" json:"provider_uid"`
+	Username     *string `gorm:"size:64" json:"username,omitempty"`
+	DisplayName  *string `gorm:"size:64" json:"display_name,omitempty"`
+	AvatarURL    *string `gorm:"size:255" json:"avatar_url,omitempty"`
 	Scope        *string `gorm:"size:255" json:"scope,omitempty"`
 	AccessToken  *string `gorm:"type:text" json:"-"`
 	RefreshToken *string `gorm:"type:text" json:"-"`

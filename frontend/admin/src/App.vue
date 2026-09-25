@@ -32,7 +32,7 @@ const pageTitle = computed(() => {
 </script>
 
 <template>
-  <div v-if="route.path === '/login'" class="min-h-screen">
+  <div v-if="route.path === '/login' || route.path === '/setup'" class="min-h-screen">
     <RouterView />
   </div>
 

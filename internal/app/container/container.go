@@ -14,6 +14,7 @@ import (
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/system"
 	"github.com/kaoqy/Nodeloc-Store/internal/platform/database/gormdb"
 )
 
@@ -28,8 +29,10 @@ type Container struct {
 	Audit        *audit.Module
 }
 
-// New builds the container from config
-func New(cfg *config.Config) (*Container, error) {
+// New builds the container from config. Runtime settings stored by the
+// in-app wizard are overlaid onto cfg before the modules are wired. sys may
+// be nil (tests); when present it is re-attached to the fresh dependencies.
+func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 	// Database
 	db, err := gormdb.New(&cfg.Database)
 	if err != nil {
@@ -47,6 +50,15 @@ func New(cfg *config.Config) (*Container, error) {
 	}
 	if err := authz.SeedDefaults(); err != nil {
 		log.Printf("[warn] RBAC seed failed: %v", err)
+	}
+
+	// Wizard-stored settings win over process defaults.
+	rt, err := system.LoadRuntime(db)
+	if err != nil {
+		return nil, err
+	}
+	if rt != nil {
+		rt.ApplyTo(cfg)
 	}
 
 	// Wiring — each module exposes a Wire() function
@@ -69,6 +81,19 @@ func New(cfg *config.Config) (*Container, error) {
 	catalogMod := catalog.Wire(db)
 	notificationMod := notification.Wire(db)
 	auditMod := audit.Wire(db)
+
+	if sys != nil {
+		sys.Attach(db,
+			func() (string, error) {
+				url, _, err := identityMod.Service.InitiateOAuth("settings-test")
+				return url, err
+			},
+			func(ctx context.Context) error {
+				_, err := paymentMod.Gateway.QueryPayment(ctx, "nodeloc-store-connectivity-probe")
+				return err
+			},
+		)
+	}
 
 	return &Container{
 		DB:           db,

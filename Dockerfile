@@ -32,7 +32,8 @@ RUN apk add --no-cache ca-certificates tzdata curl
 
 WORKDIR /app
 COPY --from=builder /nodeloc-store .
-COPY config.yml.example ./config.yml
+# No config file needed — the app is configured through the in-app setup wizard.
+RUN mkdir -p /app/data
 
 # Copy built frontends
 COPY --from=admin-builder /build/dist ./web/admin

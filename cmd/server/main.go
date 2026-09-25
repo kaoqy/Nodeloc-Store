@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -16,49 +17,97 @@ import (
 
 	"github.com/kaoqy/Nodeloc-Store/internal/app/container"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/system"
 )
 
 func main() {
-	cfg, err := config.Load("")
+	// Process-level defaults (legacy config.yml is still honoured when a
+	// bootstrap file has not been written yet; new installs never need one).
+	baseCfg, err := config.Load("")
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
-
-	if cfg.Server.Mode == "release" {
+	if baseCfg.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	ctn, err := container.New(cfg)
+	dataDir := config.DefaultDataDir()
+	bootPath := config.BootstrapPathIn(dataDir)
+	boot, found, err := config.ReadBootstrap(bootPath)
 	if err != nil {
-		log.Fatalf("Failed to build container: %v", err)
+		log.Fatalf("Failed to read bootstrap config: %v", err)
+	}
+	if !found && baseCfg.Database.DSN != "" {
+		// One-time, automatic migration from a hand-written config.yml.
+		boot = config.Bootstrap{
+			DBDriver:  baseCfg.Database.Driver,
+			DBDSN:     baseCfg.Database.DSN,
+			Port:      baseCfg.Server.Port,
+			JWTSecret: baseCfg.JWT.Secret,
+		}
+		if boot.DBDriver == "" {
+			boot.DBDriver = "sqlite"
+		}
+		if err := boot.WriteTo(bootPath); err != nil {
+			log.Printf("[warn] could not persist migrated bootstrap: %v", err)
+		}
+		found = true
 	}
 
-	router := gin.Default()
-	router.Use(gin.Recovery())
+	sw := &swapHandler{}
+	sysSvc := system.NewService(bootPath, baseCfg.Server.Port)
 
-	// Health check
-	router.GET("/api/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	var live *container.Container
+	var liveMu sync.Mutex
 
-	// Register module routes
-	ctn.Identity.Handler.RegisterRoutes(router, &cfg.JWT)
-	ctn.Payment.Handler.RegisterRoutes(router, &cfg.JWT)
-	ctn.Catalog.Handler.RegisterRoutes(router, &cfg.JWT)
-	ctn.Notification.Handler.RegisterRoutes(router, &cfg.JWT)
-	ctn.Audit.Handler.RegisterRoutes(router, &cfg.JWT)
+	rebuild := func() error {
+		cfg, err := config.Load("")
+		if err != nil {
+			return err
+		}
+		current, _, err := config.ReadBootstrap(bootPath)
+		if err != nil {
+			return err
+		}
+		if current.JWTSecret == "" {
+			current.JWTSecret = cfg.JWT.Secret
+		}
+		current.ApplyTo(cfg)
+		if cfg.JWT.Secret == "" {
+			return fmt.Errorf("缺少 JWT 密钥，请重新初始化")
+		}
+		ctn, err := container.New(cfg, sysSvc)
+		if err != nil {
+			return err
+		}
+		router := buildFullRouter(ctn, sysSvc, dataDir)
 
-	// Static files — user storefront
-	setupStatic(router, "/web/user", "/")
+		liveMu.Lock()
+		old := live
+		live = ctn
+		liveMu.Unlock()
+		if old != nil {
+			closeDB(old)
+		}
+		sw.set(router)
+		log.Printf("Application ready (db=%s, port=%d)", cfg.Database.Driver, cfg.Server.Port)
+		return nil
+	}
+	sysSvc.SetRebuild(rebuild)
 
-	// Static files — admin panel
-	setupStatic(router, "/web/admin", "/admin")
+	if found {
+		if err := rebuild(); err != nil {
+			log.Fatalf("Failed to start application: %v", err)
+		}
+	} else {
+		sw.set(buildBootstrapRouter(sysSvc, dataDir))
+		log.Printf("No bootstrap config found — serving setup wizard at /admin (data dir: %s)", dataDir)
+	}
 
-	// Start server
-	addr := fmt.Sprintf(":%d", cfg.Server.Port)
+	addr := fmt.Sprintf(":%d", currentPort(bootPath, baseCfg.Server.Port))
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: router,
+		Handler: sw,
 	}
 
 	go func() {
@@ -68,7 +117,6 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
@@ -82,38 +130,136 @@ func main() {
 	log.Println("Server exited")
 }
 
-// setupStatic serves static files from a directory and provides SPA fallback.
-func setupStatic(router *gin.Engine, dir string, basePath string) {
-	absDir, err := filepath.Abs(dir)
-	if err != nil {
-		log.Printf("Failed to resolve static dir %s: %v", dir, err)
+func currentPort(bootPath string, fallback int) int {
+	if boot, found, err := config.ReadBootstrap(bootPath); err == nil && found && boot.Port > 0 {
+		return boot.Port
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 8080
+}
+
+func closeDB(ctn *container.Container) {
+	if sqlDB, err := ctn.DB.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+}
+
+// swapHandler allows the whole application router to be replaced at runtime
+// after the setup wizard or a settings change.
+type swapHandler struct {
+	mu sync.RWMutex
+	h  http.Handler
+}
+
+func (s *swapHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	h := s.h
+	s.mu.RUnlock()
+	if h == nil {
+		http.Error(w, "starting", http.StatusServiceUnavailable)
 		return
 	}
+	h.ServeHTTP(w, r)
+}
 
-	// Check if directory exists
-	if _, err := os.Stat(absDir); os.IsNotExist(err) {
-		log.Printf("Static dir %s does not exist, skipping", absDir)
-		return
+func (s *swapHandler) set(h http.Handler) {
+	s.mu.Lock()
+	s.h = h
+	s.mu.Unlock()
+}
+
+// buildBootstrapRouter serves the SPAs plus only the setup endpoints.
+func buildBootstrapRouter(sysSvc *system.Service, dataDir string) *gin.Engine {
+	router := gin.New()
+	router.Use(gin.Logger(), gin.Recovery())
+	router.GET("/api/health", healthHandler)
+	sysSvc.Handler().RegisterPublicRoutes(router)
+	registerSPA(router, filepath.Dir(dataDir))
+	return router
+}
+
+func buildFullRouter(ctn *container.Container, sysSvc *system.Service, dataDir string) *gin.Engine {
+	router := gin.New()
+	router.Use(gin.Logger(), gin.Recovery())
+	router.GET("/api/health", healthHandler)
+
+	cfg := ctn.Config
+	ctn.Identity.Handler.RegisterRoutes(router, &cfg.JWT)
+	ctn.Payment.Handler.RegisterRoutes(router, &cfg.JWT)
+	ctn.Catalog.Handler.RegisterRoutes(router, &cfg.JWT)
+	ctn.Notification.Handler.RegisterRoutes(router, &cfg.JWT)
+	ctn.Audit.Handler.RegisterRoutes(router, &cfg.JWT)
+	sysSvc.Handler().RegisterRoutes(router, &cfg.JWT, ctn.Identity.Handler.AuthMiddleware())
+
+	registerSPA(router, filepath.Dir(dataDir))
+	return router
+}
+
+func healthHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// registerSPA serves the built storefront at / and the admin panel at /admin,
+// with history-mode fallbacks.
+func registerSPA(router *gin.Engine, rootDir string) {
+	userDir := resolveDir(rootDir, "web/user")
+	adminDir := resolveDir(rootDir, "web/admin")
+	if userDir != "" {
+		router.Static("/web/user", userDir)
 	}
-
-	// Serve static files
-	router.Static(basePath, absDir)
-
-	// SPA fallback — serve index.html for unknown routes
+	if adminDir != "" {
+		router.Static("/web/admin", adminDir)
+		router.Static("/admin", adminDir)
+	}
 	router.NoRoute(func(c *gin.Context) {
-		// Don't interfere with API routes
-		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/api/") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
-
-		indexPath := filepath.Join(absDir, "index.html")
-		if _, err := os.Stat(indexPath); err == nil {
-			c.File(indexPath)
-		} else {
-			c.String(http.StatusNotFound, "Frontend not built")
+		dir := userDir
+		if strings.HasPrefix(path, "/admin") {
+			dir = adminDir
 		}
+		if dir == "" {
+			c.String(http.StatusNotFound, "Frontend not built")
+			return
+		}
+		// Serve real static assets directly, fall back to index.html.
+		rel := strings.TrimPrefix(strings.TrimPrefix(path, "/admin"), "/")
+		if rel == "" {
+			rel = "index.html"
+		}
+		candidate := filepath.Join(dir, filepath.FromSlash(rel))
+		if !strings.HasPrefix(candidate, filepath.Clean(dir)+string(os.PathSeparator)) && candidate != filepath.Clean(dir) {
+			candidate = ""
+		}
+		if candidate != "" {
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				c.File(candidate)
+				return
+			}
+		}
+		index := filepath.Join(dir, "index.html")
+		if _, err := os.Stat(index); err == nil {
+			c.File(index)
+			return
+		}
+		c.String(http.StatusNotFound, "Frontend not built")
 	})
+}
 
-	log.Printf("Static files served from %s at %s", absDir, basePath)
+func resolveDir(root, rel string) string {
+	for _, base := range []string{rel, filepath.Join(".", rel)} {
+		abs, err := filepath.Abs(filepath.Join(root, base))
+		if err != nil {
+			continue
+		}
+		if info, err := os.Stat(abs); err == nil && info.IsDir() {
+			return abs
+		}
+	}
+	return ""
 }

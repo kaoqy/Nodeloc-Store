@@ -1,1 +1,11 @@
-<script setup lang="ts">const model=defineModel<string>({default:''});defineProps<{placeholder?:string}>()</script><template><div class="relative"><span class="absolute left-4 top-1/2 -translate-y-1/2 text-[#7a7890]">⌕</span><input v-model="model" class="field pl-10" :placeholder="placeholder||'搜索…'"/></div></template>
+<script setup lang="ts">
+const model = defineModel<string>({ default: '' })
+defineProps<{ placeholder?: string }>()
+</script>
+
+<template>
+  <div class="relative">
+    <span class="absolute left-4 top-1/2 -translate-y-1/2 text-[#7a7890]">⌕</span>
+    <input v-model="model" class="field pl-10" :placeholder="placeholder || '搜索…'" />
+  </div>
+</template>

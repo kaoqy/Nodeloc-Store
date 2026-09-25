@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/glebarez/sqlite" // pure-Go sqlite, works with CGO_ENABLED=0
 	"gorm.io/driver/mysql"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 

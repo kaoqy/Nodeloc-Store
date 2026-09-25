@@ -16,6 +16,7 @@ import (
 type Module struct {
 	Service *application.Service
 	Handler *http.Handler
+	Gateway contract.PaymentGateway
 }
 
 // userLookup adapts identity.Me to the payment contract's UserLookup.
@@ -53,5 +54,5 @@ func Wire(db *gorm.DB, cfg *config.Config, identityFind func(ctx context.Context
 
 	svc := application.NewService(store, gateway, fulfillment, lookup, cfg.NodeLoc.PaymentID)
 	handler := http.NewHandler(svc)
-	return &Module{Service: svc, Handler: handler}
+	return &Module{Service: svc, Handler: handler, Gateway: gateway}
 }

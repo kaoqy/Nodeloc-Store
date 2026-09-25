@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/casbin/casbin/v2"
+	"github.com/casbin/casbin/v3"
+	"github.com/casbin/casbin/v3/model"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"gorm.io/gorm"
 )
@@ -35,7 +36,12 @@ func Init(db *gorm.DB) error {
 		return err
 	}
 
-	enforcer, err := casbin.NewEnforcer(modelConf, adapter)
+	m, err := model.NewModelFromString(modelConf)
+	if err != nil {
+		return err
+	}
+
+	enforcer, err := casbin.NewEnforcer(m, adapter)
 	if err != nil {
 		return err
 	}

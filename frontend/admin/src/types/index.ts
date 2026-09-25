@@ -137,3 +137,29 @@ export interface PaginationParams {
 }
 
 export type SettingsMap = Record<string, string | number | boolean | null>
+
+export interface RuntimeSettings {
+  app: {
+    site_name: string
+    site_slogan: string
+    site_description: string
+    site_logo: string
+    scheme: string
+    domain: string
+  }
+  oauth: {
+    enabled: boolean
+    base_url: string
+    client_id: string
+    client_secret: string
+    redirect_uri: string
+    scopes: string
+  }
+  payment: {
+    enabled: boolean
+    payment_id: string
+    secret_key: string
+  }
+  features: { enabled_registration: boolean }
+  theme: { theme_primary: string; default_locale: string }
+}

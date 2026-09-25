@@ -1,0 +1,90 @@
+import client from './client'
+import type { RuntimeSettings } from '../types'
+
+export interface SystemStatus {
+  initialized: boolean
+  version: string
+  app?: { name: string }
+}
+
+// Raw axios-free fetch: setup endpoints must not be intercepted (no token
+// exists yet and 401/redirect logic would loop).
+export async function fetchStatus(): Promise<SystemStatus> {
+  const res = await fetch('/api/v1/system/status', { headers: { Accept: 'application/json' } })
+  if (!res.ok) throw new Error(`status ${res.status}`)
+  return res.json()
+}
+
+let cachedUninitialized: boolean | null = null
+
+// isUninitialized caches the bootstrap check for the router guard.
+export async function isUninitialized(): Promise<boolean> {
+  if (cachedUninitialized === null) {
+    try {
+      const status = await fetchStatus()
+      cachedUninitialized = !status.initialized
+    } catch {
+      cachedUninitialized = false
+    }
+  }
+  return cachedUninitialized
+}
+
+export function markInitialized() {
+  cachedUninitialized = false
+}
+
+export interface InstallPayload {
+  app: {
+    site_name: string
+    site_slogan?: string
+    site_description?: string
+    site_logo?: string
+    scheme: string
+    domain: string
+  }
+  database: { driver: string; dsn?: string }
+  oauth: {
+    enabled: boolean
+    base_url: string
+    client_id: string
+    client_secret: string
+    redirect_uri?: string
+    scopes?: string
+  }
+  payment: { enabled: boolean; payment_id: string; secret_key: string }
+  admin: { username: string; email?: string; password: string }
+  features: { enabled_registration: boolean }
+  theme: { theme_primary: string; default_locale: string }
+}
+
+export async function install(payload: InstallPayload): Promise<void> {
+  const res = await fetch('/api/v1/system/install', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    let message = `初始化失败（HTTP ${res.status}）`
+    try {
+      const data = await res.json()
+      if (data?.error) message = data.error
+    } catch {
+      /* keep default */
+    }
+    throw new Error(message)
+  }
+  markInitialized()
+}
+
+export const getRuntimeSettings = () =>
+  client.get<{ settings: RuntimeSettings }>('/admin/settings').then((r) => r.data.settings)
+
+export const saveRuntimeSettings = (settings: RuntimeSettings) =>
+  client.put<{ ok: boolean }>('/admin/settings', { settings }).then((r) => r.data)
+
+export const testOAuth = () =>
+  client.post<{ ok: boolean; authorize_url?: string; msg?: string }>('/admin/settings/oauth-test').then((r) => r.data)
+
+export const testPayment = () =>
+  client.post<{ ok: boolean; msg: string }>('/admin/settings/payment-test').then((r) => r.data)
