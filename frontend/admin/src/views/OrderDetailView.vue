@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { cancelOrder, deliverOrder, fulfillOrder, getOrder, refundOrder } from '../api/orders'
-import { errorMessage, fulfillmentStatus, money, orderStatus, when } from '../utils/format'
+import { cancelOrder, deliverOrder, fulfillOrder, getOrder, reconcileOrder, refundOrder } from '../api/orders'
+import { errorMessage, fulfillmentStatus, money, orderStatus, reconcileMessage, when } from '../utils/format'
 import type { Order } from '../types'
 
 const route = useRoute()
@@ -47,7 +47,11 @@ async function load() {
   }
 }
 
-async function run(action: () => Promise<Order>, success: string) {
+async function run(
+  action: () => Promise<Order>,
+  success: string,
+  failure: (error: unknown) => string = (err) => errorMessage(err, '操作失败'),
+) {
   busy.value = true
   error.value = ''
   notice.value = ''
@@ -55,7 +59,7 @@ async function run(action: () => Promise<Order>, success: string) {
     order.value = await action()
     notice.value = success
   } catch (err) {
-    error.value = errorMessage(err, '操作失败')
+    error.value = failure(err)
   } finally {
     busy.value = false
   }
@@ -111,6 +115,14 @@ onMounted(load)
       <div class="flex flex-wrap items-center gap-2">
         <button
           v-if="order.status === 'pending'"
+          class="btn btn-primary btn-sm"
+          :disabled="busy"
+          @click="run(() => reconcileOrder(orderNo), '已查单：NodeLoc 确认到账并完成交付', reconcileMessage)"
+        >
+          查单对账
+        </button>
+        <button
+          v-if="order.status === 'pending'"
           class="btn btn-secondary btn-sm"
           :disabled="busy"
           @click="run(() => cancelOrder(orderNo), '订单已取消')"
@@ -151,8 +163,9 @@ onMounted(load)
       <div class="card !p-4">
         <p class="eyebrow">买家</p>
         <p class="mt-2 truncate text-sm font-semibold">{{ order.user?.username || `用户 #${order.user_id}` }}</p>
-        <RouterLink v-if="order.user_id" :to="`/users/${order.user_id}`" class="quiet text-xs hover:text-[var(--text)]">
-          查看用户 →
+        <p v-if="order.user?.email" class="quiet mt-1 truncate text-xs mono">{{ order.user.email }}</p>
+        <RouterLink v-if="order.user_id" :to="`/orders?user=${order.user_id}`" class="quiet text-xs hover:text-[var(--text)]">
+          只看他的订单 →
         </RouterLink>
       </div>
       <div class="card !p-4">

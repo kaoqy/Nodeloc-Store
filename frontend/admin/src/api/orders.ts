@@ -24,3 +24,7 @@ export const deliverOrder = (orderNo: string, deliveryContent: string) =>
 // parked in waiting_stock.
 export const fulfillOrder = (orderNo: string) =>
   client.post<{ data: Order }>(`/admin/orders/${orderNo}/fulfill`).then((r) => r.data.data)
+
+// 查单：让服务端拿这单去问 NodeLoc，已付就直接置为已支付并走发货流程。
+export const reconcileOrder = (orderNo: string) =>
+  client.post<{ data: Order }>(`/admin/orders/${orderNo}/reconcile`).then((r) => r.data.data)

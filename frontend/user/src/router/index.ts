@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { beginNavigation, endNavigation } from '../utils/progress'
 import HomeView from '../views/HomeView.vue'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
@@ -24,6 +25,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
+  beginNavigation()
   const authenticated = Boolean(localStorage.getItem('token'))
   if (to.meta.requiresAuth && !authenticated) {
     return { name: 'login', query: { redirect: to.fullPath } }
@@ -32,5 +34,7 @@ router.beforeEach((to) => {
     return { name: 'home' }
   }
 })
+
+router.afterEach(() => endNavigation())
 
 export default router

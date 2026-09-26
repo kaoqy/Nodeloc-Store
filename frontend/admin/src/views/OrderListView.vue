@@ -14,6 +14,8 @@ const total = ref(0)
 const offset = ref(0)
 const search = ref('')
 const statusFilter = ref('')
+const buyerId = ref(0)
+const buyerName = ref('')
 const error = ref('')
 
 const page = computed(() => Math.floor(offset.value / PageSize) + 1)
@@ -29,7 +31,9 @@ const statuses = [
   { value: 'refunded', label: '已退款' },
 ]
 
-const filtered = computed(() => Boolean(search.value.trim() || statusFilter.value))
+const filtered = computed(
+  () => Boolean(search.value.trim() || statusFilter.value || buyerId.value),
+)
 
 async function load() {
   loading.value = true
@@ -40,6 +44,7 @@ async function load() {
       offset: offset.value,
       status: statusFilter.value || undefined,
       q: search.value.trim() || undefined,
+      user_id: buyerId.value || undefined,
     })
     orders.value = result.data
     total.value = result.total
@@ -55,6 +60,21 @@ function applyFilters() {
   load()
 }
 
+/** Focus the list on one buyer; the order rows link here by user id. */
+function pickBuyer(id: number, name: string) {
+  if (!id) return
+  buyerId.value = id
+  buyerName.value = name
+  search.value = ''
+  applyFilters()
+}
+
+function clearBuyer() {
+  buyerId.value = 0
+  buyerName.value = ''
+  applyFilters()
+}
+
 function goTo(target: number) {
   offset.value = Math.min(pages.value - 1, Math.max(0, target - 1)) * PageSize
   load()
@@ -65,6 +85,8 @@ const route = useRoute()
 onMounted(() => {
   const status = route.query.status
   if (typeof status === 'string') statusFilter.value = status
+  const user = route.query.user
+  if (typeof user === 'string' && /^\d+$/.test(user)) buyerId.value = Number(user)
   load()
 })
 </script>
@@ -91,6 +113,16 @@ onMounted(() => {
     </div>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+
+    <div v-if="buyerId" class="flex flex-wrap items-center gap-2">
+      <span class="chip chip-active">
+        只看用户
+        <RouterLink :to="`/users/${buyerId}`" class="underline-offset-2 hover:underline">
+          {{ buyerName || `#${buyerId}` }}
+        </RouterLink>
+      </span>
+      <button class="btn btn-quiet btn-sm" @click="clearBuyer">取消筛选</button>
+    </div>
 
     <div class="table-container">
       <table>
@@ -129,7 +161,27 @@ onMounted(() => {
                 {{ order.order_no }}
               </RouterLink>
             </td>
-            <td class="text-sm">{{ order.user?.username || `#${order.user_id}` }}</td>
+            <td class="text-sm">
+              <div class="flex items-center gap-2">
+                <RouterLink
+                  v-if="order.user_id"
+                  :to="`/users/${order.user_id}`"
+                  class="accent-text underline-offset-2 hover:underline"
+                >
+                  {{ order.user?.username || `#${order.user_id}` }}
+                </RouterLink>
+                <span v-else class="quiet">已删除用户</span>
+                <button
+                  v-if="order.user_id"
+                  class="quiet text-xs transition-colors hover:accent-text"
+                  :title="`只看 ${order.user?.username || '#' + order.user_id} 的订单`"
+                  @click="pickBuyer(order.user_id, order.user?.username || '')"
+                >
+                  筛选
+                </button>
+              </div>
+              <p v-if="order.user?.email" class="hint mono mt-0.5 truncate">{{ order.user.email }}</p>
+            </td>
             <td class="max-w-[220px] truncate text-sm">{{ order.product?.name || `#${order.product_id}` }}</td>
             <td class="nums text-sm">{{ money(order.total_amount) }} <span class="quiet">×{{ order.quantity }}</span></td>
             <td>

@@ -57,15 +57,15 @@ export function fulfillmentStatus(status: string, paymentStatus?: string): Statu
 const PAYMENT_NOTICE: Record<string, StatusMeta> = {
   ok: { label: '支付已确认，正在为你交付。', badge: 'alert-success' },
   signature: {
-    label: '支付结果校验失败：回调签名与商户密钥不一致，本单暂未入账。请稍后重新支付，或联系店家核对后台设置。',
-    badge: 'alert-danger',
+    label: '回调校验没通过，商店正在向 NodeLoc 核实这单的支付结果；确认已付会自动入账并发卡，无需重复付款。',
+    badge: 'alert-warning',
   },
   amount: {
     label: '支付金额与订单不一致，本单暂未入账。请重新支付，或联系店家核实。',
     badge: 'alert-danger',
   },
   pending: {
-    label: '支付渠道回报本单尚未完成。若已扣款请稍候刷新，仍未到账请联系店家处理。',
+    label: '支付渠道回报本单尚未完成。若已扣款请稍候，商店会自动查单确认，仍未到账请联系店家处理。',
     badge: 'alert-warning',
   },
   unknown_order: {

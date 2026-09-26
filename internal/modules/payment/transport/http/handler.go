@@ -46,6 +46,7 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	payment.POST("/create", h.CreatePayment)
 	payment.GET("/return", h.Return)
 	payment.GET("/orders/:order_no", h.GetOrder)
+	payment.POST("/orders/:order_no/reconcile", h.ReconcileOrder)
 	payment.GET("/orders", h.ListOrders)
 
 	// Admin order management
@@ -57,6 +58,7 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	adminOrders.POST("/:order_no/deliver", h.AdminDeliverOrder)
 	adminOrders.POST("/:order_no/refund", h.AdminRefundOrder)
 	adminOrders.POST("/:order_no/fulfill", h.AdminFulfillOrder)
+	adminOrders.POST("/:order_no/reconcile", h.AdminReconcileOrder)
 
 	// NodeLoc notifies via a browser GET redirect (signature-verified); POST is
 	// accepted as well for server-push style integrations.
@@ -124,13 +126,7 @@ func (h *Handler) Callback(c *gin.Context) {
 		return
 	}
 
-	var result *application.CallbackResult
-	for _, params := range sets {
-		result, err = h.service.HandleCallback(c.Request.Context(), params)
-		if err == nil || !errors.Is(err, application.ErrInvalidCallback) {
-			break
-		}
-	}
+	result, err := h.service.HandleCallbackSets(c.Request.Context(), sets)
 	orderNo := ""
 	if result != nil {
 		orderNo = result.OrderNo
@@ -242,12 +238,29 @@ func (h *Handler) ListOrders(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.ListOrders(c.Request.Context(), userID, limit, offset, c.Query("status"))
+	result, err := h.service.ListOrders(c.Request.Context(), userID, limit, offset, c.Query("status"), c.Query("q"))
 	if err != nil {
 		writeError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// ReconcileOrder asks NodeLoc what it recorded for the order's payment and
+// settles it here when the provider says it went through. Buyers use it after a
+// redirect that never reached the store.
+func (h *Handler) ReconcileOrder(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	order, err := h.service.ReconcileOrder(c.Request.Context(), c.Param("order_no"), userID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"order": order})
 }
 
 // callbackParamSets returns the payload variants to verify. ParseForm rewrites
@@ -388,7 +401,8 @@ func writeError(c *gin.Context, err error) {
 		errors.Is(err, domain.ErrOrderNotFound),
 		errors.Is(err, domain.ErrPaymentOrderNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, domain.ErrInsufficientStock), errors.Is(err, domain.ErrNotPayable):
+	case errors.Is(err, domain.ErrInsufficientStock), errors.Is(err, domain.ErrNotPayable),
+		errors.Is(err, application.ErrPaymentUnsettled):
 		status = http.StatusConflict
 	case errors.Is(err, domain.ErrPaymentNotConfigured):
 		status = http.StatusServiceUnavailable
@@ -415,8 +429,13 @@ func (h *Handler) AdminListOrders(c *gin.Context) {
 		return
 	}
 	status := c.DefaultQuery("status", "")
+	buyerID, err := parseNonNegativeInt(c.DefaultQuery("user_id", "0"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id must be a non-negative integer"})
+		return
+	}
 
-	result, err := h.service.AdminListOrders(c.Request.Context(), limit, offset, status, c.Query("q"))
+	result, err := h.service.AdminListOrders(c.Request.Context(), limit, offset, status, c.Query("q"), uint(buyerID))
 	if err != nil {
 		writeError(c, err)
 		return
@@ -498,6 +517,17 @@ func (h *Handler) AdminFulfillOrder(c *gin.Context) {
 		return
 	}
 	order, err := h.service.FulfillOrder(c.Request.Context(), orderNo)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": order})
+}
+
+// AdminReconcileOrder is the back-office 查单 button: settle an order the
+// provider already marks as paid without waiting for the buyer's browser.
+func (h *Handler) AdminReconcileOrder(c *gin.Context) {
+	order, err := h.service.ReconcileOrder(c.Request.Context(), c.Param("order_no"), 0)
 	if err != nil {
 		writeError(c, err)
 		return

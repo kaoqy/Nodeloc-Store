@@ -21,8 +21,8 @@ type OrderRepo interface {
 	CountAvailableCards(ctx context.Context, productID uint) (int64, error)
 	CreateOrder(ctx context.Context, order *models.Order) error
 	GetOrderByNo(ctx context.Context, orderNo string) (*models.Order, error)
-	ListOrdersByUser(ctx context.Context, userID uint, limit, offset int, status string) ([]models.Order, int64, error)
-	ListAllOrders(ctx context.Context, limit, offset int, status, search string) ([]models.Order, int64, error)
+	ListOrdersByUser(ctx context.Context, userID uint, limit, offset int, status, search string) ([]models.Order, int64, error)
+	ListAllOrders(ctx context.Context, limit, offset int, status, search string, buyerID uint) ([]models.Order, int64, error)
 	MarkOrderPaid(ctx context.Context, orderNo, transactionID string, platformFee, merchantPoints *int) (*models.Order, error)
 	MarkOrderRefunded(ctx context.Context, orderNo string) error
 	UpdateOrderStatus(ctx context.Context, orderNo string, status string) (*models.Order, error)

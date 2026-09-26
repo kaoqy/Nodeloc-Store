@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { listOrders } from '../api/payment'
+import { listOrders, reconcileMessage, reconcileOrder } from '../api/payment'
 import { errorMessage } from '../api/client'
 import { fulfillmentStatus, money, orderStatus, paymentNotice, when } from '../utils/format'
 import type { Order } from '../types'
@@ -25,8 +25,12 @@ const total = ref(0)
 const loading = ref(true)
 const loadingMore = ref(false)
 const error = ref('')
+const query = ref(typeof route.query.q === 'string' ? route.query.q : '')
+const reconciling = ref(false)
+const reconcileNote = ref('')
 const status = ref(FILTERS.some((item) => item.key === route.query.status) ? String(route.query.status) : '')
 const notice = computed(() => paymentNotice(typeof route.query.pay === 'string' ? route.query.pay : ''))
+const pending = computed(() => orders.value.filter((item) => item.status === 'pending'))
 
 async function load(offset: number) {
   if (offset === 0) {
@@ -36,7 +40,7 @@ async function load(offset: number) {
     loadingMore.value = true
   }
   try {
-    const page = await listOrders(PageSize, offset, status.value)
+    const page = await listOrders(PageSize, offset, status.value, query.value)
     orders.value = offset === 0 ? page.orders : [...orders.value, ...page.orders]
     total.value = page.total ?? orders.value.length
   } catch (e) {
@@ -48,11 +52,43 @@ async function load(offset: number) {
   }
 }
 
+function search() {
+  load(0)
+}
+
+/**
+ * 查单：把列表里仍显示待支付的订单交给服务端逐个核实，NodeLoc 已记为已付的
+ * 当场入账。回跳丢失时这是唯一的自救入口，不需要用户重新付款。
+ */
+async function reconcilePending() {
+  if (reconciling.value || !pending.value.length) return
+  reconciling.value = true
+  reconcileNote.value = '正在向 NodeLoc 核实…'
+  let settled = 0
+  let failure = ''
+  for (const item of pending.value) {
+    try {
+      const fresh = await reconcileOrder(item.order_no)
+      if (fresh.status !== 'pending') settled += 1
+    } catch (e) {
+      failure = reconcileMessage(e)
+    }
+  }
+  reconcileNote.value = settled
+    ? `已确认 ${settled} 笔订单到账。`
+    : failure || 'NodeLoc 暂无这些订单的到账记录，稍后会自动重试。'
+  reconciling.value = false
+  await load(0)
+}
+
 function choose(next: string) {
   if (next === status.value) return
   status.value = next
   // Keep the filter in the URL so a refresh or a shared link lands on the same list.
-  router.replace({ path: '/orders', query: next ? { status: next } : {} })
+  const query_: Record<string, string> = {}
+  if (next) query_.status = next
+  if (query.value.trim()) query_.q = query.value.trim()
+  router.replace({ path: '/orders', query: query_ })
   load(0)
 }
 
@@ -69,7 +105,31 @@ onMounted(() => load(0))
       <p v-if="!loading && orders.length" class="hint nums whitespace-nowrap">共 {{ total }} 笔</p>
     </header>
 
-    <p v-if="notice" class="alert mb-6" :class="notice.badge" role="status">{{ notice.label }}</p>
+    <p v-if="notice" class="alert mb-4" :class="notice.badge" role="status">{{ notice.label }}</p>
+
+    <div v-if="pending.length" class="alert alert-warning mb-6 flex flex-wrap items-center gap-3" role="status">
+      <span class="flex-1">
+        {{ notice ? '列表里有' : '有' }} {{ pending.length }} 笔仍显示待支付，可以让商店向 NodeLoc 查一次单。
+      </span>
+      <button class="btn btn-secondary btn-sm shrink-0" :disabled="reconciling" @click="reconcilePending">
+        <span v-if="reconciling" class="spinner" />
+        {{ reconciling ? '核实中…' : '核实支付结果' }}
+      </button>
+    </div>
+    <p v-if="reconcileNote" class="hint -mt-4 mb-5" role="status">{{ reconcileNote }}</p>
+
+    <div class="mb-4 flex flex-wrap items-center gap-2">
+      <input
+        v-model="query"
+        class="input w-full max-w-xs"
+        type="search"
+        placeholder="按订单号 / 交易号 / 商品名搜索"
+        aria-label="搜索我的订单"
+        @keyup.enter="search"
+      />
+      <button class="btn btn-secondary btn-sm" :disabled="loading" @click="search">搜索</button>
+      <button v-if="query" class="btn btn-quiet btn-sm" @click="query = ''; search()">清除</button>
+    </div>
 
     <div class="mb-6 flex flex-wrap gap-2" role="group" aria-label="按订单状态筛选">
       <button
@@ -99,7 +159,7 @@ onMounted(() => load(0))
     <p v-else-if="error && !orders.length" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <template v-else>
-      <ul class="space-y-3">
+      <ul class="stagger space-y-3">
         <li v-for="order in orders" :key="order.id">
           <RouterLink
             :to="`/orders/${order.order_no}`"

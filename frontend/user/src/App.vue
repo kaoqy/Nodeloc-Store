@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import NavBar from './components/NavBar.vue'
+import RouteProgress from './components/RouteProgress.vue'
 import { useAuthStore } from './stores/auth'
 import { useSiteStore } from './stores/site'
 
@@ -17,6 +18,7 @@ onMounted(async () => {
 
 <template>
   <div class="flex min-h-screen flex-col">
+    <RouteProgress />
     <NavBar />
 
     <main class="flex flex-1 flex-col">

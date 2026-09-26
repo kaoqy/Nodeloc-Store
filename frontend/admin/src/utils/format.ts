@@ -80,3 +80,20 @@ export function errorMessage(error: unknown, fallback = '请求失败，请稍�
   if (error instanceof Error && !response) return error.message
   return fallback
 }
+
+/**
+ * 查单失败时服务端返回的是给运维看的英文原因，管理员需要的是下一步做什么。
+ */
+export function reconcileMessage(error: unknown): string {
+  switch ((error as { response?: { status?: number } })?.response?.status) {
+    case 404:
+    case 409:
+      return 'NodeLoc 还没有这单的到账记录（未付款、已超时或查询失败）。确认买家已付款后再查一次。'
+    case 400:
+      return 'NodeLoc 记录的金额与本单不一致，商店已拒绝自动入账，请人工核对。'
+    case 401:
+      return 'NodeLoc 把这笔交易归属到了其他订单，商店已拒绝自动入账，请人工核对。'
+    default:
+      return '无法向 NodeLoc 查询这单，请稍后重试，或到 设置 核对 Payment ID / Secret Key。'
+  }
+}

@@ -106,14 +106,52 @@ func SignWithHashedToken(params map[string]string, secret string) string {
 }
 
 // VerifyCallback verifies a NodeLoc callback signature.
+//
+// NodeLoc releases differ in two ways that both read as "signature mismatch" if
+// only one form is accepted: the HMAC key is either the secret as issued or its
+// SHA-256 hex, and empty-valued parameters are sometimes left out of the signed
+// string. Every combination is tried, so a genuinely signed redirect settles.
 func VerifyCallback(params map[string]string, secret string) bool {
-	sig, ok := params["signature"]
-	if !ok || sig == "" {
+	provided := strings.TrimSpace(params["signature"])
+	if provided == "" {
 		return false
 	}
-	delete(params, "signature")
-	expected := Sign(params, secret)
-	return hmac.Equal([]byte(sig), []byte(expected))
+	unsigned := make(map[string]string, len(params))
+	for key, value := range params {
+		if key != "signature" {
+			unsigned[key] = value
+		}
+	}
+
+	tokenHash := sha256.Sum256([]byte(secret))
+	keys := []string{secret, hex.EncodeToString(tokenHash[:])}
+	for _, key := range keys {
+		if matches(Sign(unsigned, key), provided) {
+			return true
+		}
+	}
+
+	compact := make(map[string]string, len(unsigned))
+	for key, value := range unsigned {
+		if strings.TrimSpace(value) != "" {
+			compact[key] = value
+		}
+	}
+	if len(compact) == len(unsigned) {
+		return false
+	}
+	for _, key := range keys {
+		if matches(Sign(compact, key), provided) {
+			return true
+		}
+	}
+	return false
+}
+
+// matches compares two hex signatures without leaking the expected value.
+func matches(expected, provided string) bool {
+	return hmac.Equal([]byte(strings.ToLower(strings.TrimSpace(expected))),
+		[]byte(strings.ToLower(strings.TrimSpace(provided))))
 }
 
 // Truncate truncates a string to max runes, appending "..." if cut.

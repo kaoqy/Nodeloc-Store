@@ -431,7 +431,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+    <div class="stagger grid gap-5 md:grid-cols-2 xl:grid-cols-4">
       <div class="card">
         <div class="mb-4 flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold">热销商品</h2>

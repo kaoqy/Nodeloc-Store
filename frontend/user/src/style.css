@@ -435,6 +435,17 @@ html[data-theme='light'] {
     to { opacity: 1; transform: none; }
   }
 
+  /* Reveals a freshly rendered list one row at a time. `backwards` holds each
+     item hidden during its delay but never keeps the final keyframe, so hover
+     transforms on the children still apply. */
+  .stagger > * { animation: fadeIn 320ms var(--ease) backwards; }
+  .stagger > :nth-child(2) { animation-delay: 40ms; }
+  .stagger > :nth-child(3) { animation-delay: 80ms; }
+  .stagger > :nth-child(4) { animation-delay: 120ms; }
+  .stagger > :nth-child(5) { animation-delay: 160ms; }
+  .stagger > :nth-child(6) { animation-delay: 200ms; }
+  .stagger > :nth-child(n+7) { animation-delay: 240ms; }
+
   /* ── Stepper (quantity) ── */
   .stepper {
     display: inline-flex;
@@ -493,6 +504,7 @@ html[data-theme='light'] {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }

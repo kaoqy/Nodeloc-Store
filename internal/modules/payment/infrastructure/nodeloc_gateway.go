@@ -93,13 +93,11 @@ func (g *NodeLocGateway) Transfer(ctx context.Context, request contract.Transfer
 	}, nil
 }
 
-// VerifyCallback uses the raw secret key, as required by NodeLoc callbacks.
+// VerifyCallback checks the redirect against the merchant secret. Outbound
+// requests sign with SHA-256hex(secret); the callback may arrive signed either
+// way, so shared.VerifyCallback tries both key forms.
 func (g *NodeLocGateway) VerifyCallback(params map[string]string) bool {
-	copyParams := make(map[string]string, len(params))
-	for key, value := range params {
-		copyParams[key] = value
-	}
-	return shared.VerifyCallback(copyParams, g.secretKey)
+	return shared.VerifyCallback(params, g.secretKey)
 }
 
 func (g *NodeLocGateway) post(ctx context.Context, path string, params map[string]string) (map[string]any, []byte, error) {

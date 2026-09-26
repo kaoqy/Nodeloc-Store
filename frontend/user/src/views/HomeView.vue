@@ -134,7 +134,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-else-if="visible.length" class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+    <div v-else-if="visible.length" class="stagger mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
       <ProductCard v-for="product in visible" :key="product.id" :product="product" />
     </div>
 

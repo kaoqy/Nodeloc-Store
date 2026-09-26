@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import SideBar from './components/SideBar.vue'
+import RouteProgress from './components/RouteProgress.vue'
 import { useThemeStore } from './stores/theme'
 
 const route = useRoute()
@@ -36,6 +37,8 @@ const breadcrumb = computed(() => {
 </script>
 
 <template>
+  <RouteProgress />
+
   <div v-if="route.path === '/login' || route.path === '/setup'" class="min-h-screen">
     <RouterView />
   </div>
@@ -82,15 +85,24 @@ const breadcrumb = computed(() => {
       </header>
 
       <main class="px-5 pb-12 pt-7 sm:px-7">
-        <div class="fade-in">
-          <!-- Keyed by fullPath: without it, moving between two records of the same
-               view (order → order, user → user) reuses the component and shows the
-               previous record's data. -->
-          <RouterView v-slot="{ Component, route: view }">
+        <!-- Keyed by fullPath: without it, moving between two records of the same
+             view (order → order, user → user) reuses the component and shows the
+             previous record's data. -->
+        <RouterView v-slot="{ Component, route: view }">
+          <Transition name="page" mode="out-in">
             <component :is="Component" :key="view.fullPath" />
-          </RouterView>
-        </div>
+          </Transition>
+        </RouterView>
       </main>
     </div>
   </div>
 </template>
+
+<style scoped>
+.page-enter-active {
+  transition: opacity 220ms var(--ease), transform 220ms var(--spring);
+}
+.page-leave-active { transition: opacity 110ms var(--ease); }
+.page-enter-from { opacity: 0; transform: translateY(8px); }
+.page-leave-to { opacity: 0; }
+</style>

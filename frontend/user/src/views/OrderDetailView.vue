@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { createPayment, getOrder } from '../api/payment'
+import { useRoute, useRouter } from 'vue-router'
+import { createPayment, getOrder, reconcileMessage, reconcileOrder } from '../api/payment'
 import { errorMessage } from '../api/client'
 import { fulfillmentStatus, money, orderStatus, paymentNotice, when } from '../utils/format'
 import type { Order } from '../types'
 
 const route = useRoute()
+const router = useRouter()
 const order = ref<Order | null>(null)
 const loading = ref(true)
 const paying = ref(false)
@@ -14,6 +15,8 @@ const error = ref('')
 const payError = ref('')
 const copied = ref(false)
 const copiedNo = ref(false)
+const confirming = ref(false)
+const confirmNote = ref('')
 const notice = computed(() => paymentNotice(typeof route.query.pay === 'string' ? route.query.pay : ''))
 let settleTimer: number | undefined
 
@@ -37,6 +40,34 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 查单：请服务端向 NodeLoc 核实这单，已付就当场入账发卡。silent 用于轮询，
+ * 只在确实改变状态时才提示，否则每 8 秒闪一次提示很吵。
+ */
+async function confirmPayment(silent = false): Promise<boolean> {
+  const current = order.value
+  if (!current || confirming.value) return false
+  confirming.value = true
+  if (!silent) confirmNote.value = '正在向 NodeLoc 确认支付结果…'
+  let settled = false
+  try {
+    const fresh = await reconcileOrder(current.order_no)
+    settled = fresh.status !== 'pending'
+    order.value = fresh
+    if (settled) {
+      confirmNote.value = '支付已确认，交付结果见下方。'
+      void router.replace({ query: { ...route.query, pay: 'ok' } })
+    } else if (!silent) {
+      confirmNote.value = 'NodeLoc 还没有这单的到账记录。若已扣款请稍候再试，或联系店家。'
+    }
+  } catch (e) {
+    if (!silent) confirmNote.value = reconcileMessage(e)
+  } finally {
+    confirming.value = false
+  }
+  return settled
 }
 
 async function pay() {
@@ -80,6 +111,11 @@ async function copyOrderNo() {
 
 onMounted(async () => {
   await load()
+  // 回跳带着失败原因、或订单仍显示待支付时，先主动查一次单：NodeLoc 已经记为
+  // 已付的当场入账，用户不必自己琢磨要不要再付一遍。
+  if (order.value?.status === 'pending' && notice.value) {
+    if (await confirmPayment()) return
+  }
   watchSettlement()
 })
 
@@ -94,12 +130,12 @@ function watchSettlement() {
   let waited = 0
   settleTimer = window.setInterval(async () => {
     waited += 8
-    try {
-      order.value = await getOrder(String(route.params.orderNo))
-    } catch {
-      // keep showing the last known state and retry on the next tick
+    if (await confirmPayment(true)) {
+      if (settleTimer) window.clearInterval(settleTimer)
+      settleTimer = undefined
+      return
     }
-    if (order.value?.status !== 'pending' || waited >= 120) {
+    if (waited >= 120) {
       if (settleTimer) window.clearInterval(settleTimer)
       settleTimer = undefined
     }
@@ -182,6 +218,10 @@ function watchSettlement() {
             <span v-if="paying" class="spinner spinner-light" />
             {{ paying ? '跳转支付中…' : '继续支付' }}
           </button>
+          <button class="btn btn-secondary" :disabled="confirming" @click="confirmPayment()">
+            <span v-if="confirming" class="spinner" />
+            {{ confirming ? '确认中…' : '我已支付，去确认' }}
+          </button>
           <RouterLink to="/" class="btn btn-quiet btn-sm">返回挑选</RouterLink>
         </div>
         <div
@@ -193,6 +233,7 @@ function watchSettlement() {
           </p>
           <button class="btn btn-quiet btn-sm" @click="load">刷新状态</button>
         </div>
+        <p v-if="confirmNote" class="hint mt-4" role="status">{{ confirmNote }}</p>
       </section>
 
       <!-- Delivery -->

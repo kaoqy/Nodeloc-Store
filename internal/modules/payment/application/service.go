@@ -22,6 +22,7 @@ var (
 	ErrInvalidCallback    = errors.New("invalid callback signature")
 	ErrAmountMismatch     = errors.New("payment amount does not match order")
 	ErrPaymentNotComplete = errors.New("payment is not complete")
+	ErrPaymentUnsettled   = errors.New("provider has no completed payment for this order")
 )
 
 // maxOrderQuantity bounds a single storefront order so one buyer cannot drain
@@ -268,15 +269,21 @@ func (s *Service) savePaymentOrder(ctx context.Context, paymentOrder *domain.Pay
 // is authoritative: status, amount and fees are read from it and the query API
 // is only a cross-check. Losing the query call (no egress, timeout, provider
 // outage) must not strand a paid order.
+//
+// A redirect that does not verify is the other case: none of its fields may be
+// trusted, so the order is settled only if the provider's own query API names
+// it as paid. That fallback is what stops a buyer who really paid from being
+// told to pay again over one differently-encoded parameter.
 func (s *Service) HandleCallback(ctx context.Context, params map[string]string) (*CallbackResult, error) {
+	orderNo := first(params, "external_reference", "order_id", "order_no", "out_trade_no")
+	transactionID := first(params, "transaction_id", "trade_no", "id")
+
 	if !s.gateway.VerifyCallback(params) {
 		return nil, ErrInvalidCallback
 	}
-	orderNo := first(params, "external_reference", "order_id", "order_no", "out_trade_no")
 	if orderNo == "" {
 		return nil, ErrInvalidInput
 	}
-	transactionID := first(params, "transaction_id", "trade_no", "id")
 
 	// Restarting checkout leaves several payment rows on one order, so the row
 	// the callback names is the one to settle; the old "transaction id must
@@ -323,6 +330,44 @@ func (s *Service) HandleCallback(ctx context.Context, params map[string]string) 
 		}
 	}
 
+	order, err := s.settle(ctx, orderNo, paymentOrder, transactionID, platformFee, merchantPoints)
+	if err != nil {
+		return nil, err
+	}
+	return newCallbackResult(order), nil
+}
+
+// HandleCallbackSets settles one callback from every encoding of its payload.
+// A value as plain as '+' inside paid_at survives NodeLoc's signing but not
+// query-string decoding, so the same callback arrives as two candidate sets:
+// 查单 is the last resort, tried only once none of them verifies.
+func (s *Service) HandleCallbackSets(ctx context.Context, sets []map[string]string) (*CallbackResult, error) {
+	for _, params := range sets {
+		result, err := s.HandleCallback(ctx, params)
+		if err == nil || !errors.Is(err, ErrInvalidCallback) {
+			return result, err
+		}
+	}
+	if len(sets) == 0 {
+		return nil, ErrInvalidInput
+	}
+
+	orderNo := first(sets[0], "external_reference", "order_id", "order_no", "out_trade_no")
+	transactionID := first(sets[0], "transaction_id", "trade_no", "id")
+	order, err := s.reconcile(ctx, orderNo, transactionID, 0)
+	if err != nil {
+		log.Printf("payment callback %s: no signature candidate verified and the provider query did not settle it: %v", orderNo, err)
+		return nil, ErrInvalidCallback
+	}
+	log.Printf("payment callback %s: settled from provider query after every signature candidate failed", orderNo)
+	return newCallbackResult(order), nil
+}
+
+// settle writes the provider's confirmation onto the payment rows, marks the
+// order paid and runs delivery, then hands back the order as it now reads —
+// including any card content delivery just wrote. Re-running it for the same
+// order is safe: MarkOrderPaid leaves settled orders alone.
+func (s *Service) settle(ctx context.Context, orderNo string, paymentOrder *domain.PaymentOrder, transactionID string, platformFee, merchantPoints *int) (*models.Order, error) {
 	now := time.Now().UTC()
 	paymentOrder.Status = domain.StatusPaid
 	paymentOrder.ProviderTransactionID = stringPointer(transactionID)
@@ -351,12 +396,112 @@ func (s *Service) HandleCallback(ctx context.Context, params map[string]string) 
 	if err := s.fulfillment.Fulfill(ctx, order); err != nil {
 		return nil, fmt.Errorf("fulfill paid order: %w", err)
 	}
+	fresh, err := s.orders.GetOrderByNo(ctx, orderNo)
+	if err != nil {
+		log.Printf("payment settle %s: reload after fulfillment failed: %v", orderNo, err)
+		return order, nil
+	}
+	return fresh, nil
+}
+
+// ReconcileOrder is the 查单 path: the buyer or the back office asks what the
+// provider recorded for a local order, and a completed payment is settled and
+// delivered on the spot. userID 0 means an operator, who may reconcile any
+// order.
+func (s *Service) ReconcileOrder(ctx context.Context, orderNo string, userID uint) (*models.Order, error) {
+	return s.reconcile(ctx, orderNo, "", userID)
+}
+
+func (s *Service) reconcile(ctx context.Context, orderNo, hintedTransactionID string, userID uint) (*models.Order, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	if orderNo == "" {
+		return nil, ErrInvalidInput
+	}
+	order, err := s.orders.GetOrderByNo(ctx, orderNo)
+	if err != nil {
+		return nil, err
+	}
+	if userID != 0 && order.UserID != userID {
+		return nil, ErrForbidden
+	}
+	switch order.Status {
+	case "pending":
+	case "paid", "completed":
+		return order, nil
+	default:
+		return nil, fmt.Errorf("%w: order status is %s", ErrPaymentUnsettled, order.Status)
+	}
+
+	paymentOrder, err := s.orders.GetPaymentOrderByOrderNo(ctx, orderNo)
+	if err != nil {
+		return nil, err
+	}
+
+	// Our own payment row is the primary candidate; an id that only appears in
+	// the request is accepted solely when the provider echoes this order back,
+	// so a guessed transaction id can never settle someone else's order.
+	candidates := []queryCandidate{{transaction: derefString(paymentOrder.ProviderTransactionID), owned: true}}
+	if hinted := strings.TrimSpace(hintedTransactionID); hinted != "" && hinted != candidates[0].transaction {
+		candidates = append(candidates, queryCandidate{transaction: hinted})
+	}
+
+	var lastErr error = ErrPaymentUnsettled
+	for _, candidate := range candidates {
+		if candidate.transaction == "" {
+			continue
+		}
+		query, queryErr := s.gateway.QueryPayment(ctx, candidate.transaction)
+		if queryErr != nil {
+			lastErr = queryErr
+			continue
+		}
+		if query == nil || (!candidate.owned && query.OrderID != orderNo) {
+			continue
+		}
+		if query.OrderID != "" && query.OrderID != orderNo {
+			return nil, ErrInvalidCallback
+		}
+		if !providerCompleted(query.Status) {
+			lastErr = fmt.Errorf("%w: provider query reports %s", ErrPaymentUnsettled, query.Status)
+			continue
+		}
+		if query.Amount != 0 && query.Amount != paymentOrder.Amount {
+			return nil, ErrAmountMismatch
+		}
+		log.Printf("payment reconcile %s: provider confirmed %s as paid", orderNo, candidate.transaction)
+		return s.settle(ctx, orderNo, paymentOrder, candidate.transaction, query.PlatformFee, query.MerchantPoints)
+	}
+	return nil, lastErr
+}
+
+type queryCandidate struct {
+	transaction string
+	owned       bool
+}
+
+// providerCompleted reads back the gateway's normalised query status.
+func providerCompleted(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case domain.StatusSucceeded, domain.StatusPaid:
+		return true
+	}
+	return false
+}
+
+func newCallbackResult(order *models.Order) *CallbackResult {
 	return &CallbackResult{
-		OrderNo:       orderNo,
-		TransactionID: transactionID,
-		Status:        domain.StatusPaid,
+		OrderNo:       order.OrderNo,
+		TransactionID: derefString(order.TransactionID),
+		Status:        order.Status,
 		Fulfillment:   order.FulfillmentStatus,
-	}, nil
+	}
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (s *Service) paymentForCallback(ctx context.Context, orderNo, transactionID string) (*domain.PaymentOrder, error) {
@@ -471,8 +616,8 @@ func (s *Service) AdminGetOrder(ctx context.Context, orderNo string) (*models.Or
 	return order, nil
 }
 
-func (s *Service) AdminListOrders(ctx context.Context, limit, offset int, status, search string) (*OrderList, error) {
-	orders, total, err := s.orders.ListAllOrders(ctx, limit, offset, status, search)
+func (s *Service) AdminListOrders(ctx context.Context, limit, offset int, status, search string, buyerID uint) (*OrderList, error) {
+	orders, total, err := s.orders.ListAllOrders(ctx, limit, offset, status, search, buyerID)
 	if err != nil {
 		return nil, err
 	}
@@ -498,7 +643,7 @@ var orderListStatuses = map[string]bool{
 	"cancelled": true, "refunded": true, "failed": true,
 }
 
-func (s *Service) ListOrders(ctx context.Context, userID uint, limit, offset int, status string) (*OrderList, error) {
+func (s *Service) ListOrders(ctx context.Context, userID uint, limit, offset int, status, search string) (*OrderList, error) {
 	if userID == 0 {
 		return nil, ErrForbidden
 	}
@@ -506,7 +651,7 @@ func (s *Service) ListOrders(ctx context.Context, userID uint, limit, offset int
 	if status != "" && !orderListStatuses[status] {
 		status = ""
 	}
-	orders, total, err := s.orders.ListOrdersByUser(ctx, userID, limit, offset, status)
+	orders, total, err := s.orders.ListOrdersByUser(ctx, userID, limit, offset, status, strings.TrimSpace(search))
 	if err != nil {
 		return nil, err
 	}

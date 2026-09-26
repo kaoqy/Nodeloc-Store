@@ -144,6 +144,7 @@ export interface PageParams {
   offset?: number
   status?: string
   q?: string
+  user_id?: number
 }
 
 export interface Page<T> {
