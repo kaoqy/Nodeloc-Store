@@ -56,7 +56,14 @@ export function orderStatus(status: string): StatusMeta {
   return ORDER_STATUS[status] || { label: status || '未知', badge: 'badge-neutral' }
 }
 
-export function fulfillmentStatus(status?: string | null): StatusMeta {
+export function fulfillmentStatus(status?: string | null, paymentStatus?: string): StatusMeta {
+  // Cancelling, payment failure and refunding leave fulfillment_status at a
+  // waiting state, which would read as delivery work still outstanding. Orders
+  // that already shipped keep showing what happened to them.
+  const shipped = status === 'delivered' || status === 'completed'
+  if (paymentStatus === 'cancelled' || paymentStatus === 'failed' || (paymentStatus === 'refunded' && !shipped)) {
+    return { label: '无需发货', badge: 'badge-neutral' }
+  }
   if (!status) return { label: '—', badge: 'badge-neutral' }
   return FULFILLMENT_STATUS[status] || { label: status, badge: 'badge-neutral' }
 }
@@ -67,6 +74,9 @@ export function cardStatus(status?: string | null): StatusMeta {
 }
 
 export function errorMessage(error: unknown, fallback = '请求失败，请稍后重试'): string {
-  const response = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
-  return response || fallback
+  const response = (error as { response?: { data?: { error?: string } } })?.response
+  if (response?.data?.error) return response.data.error
+  // Locally raised errors (form and permission checks) carry their own text.
+  if (error instanceof Error && !response) return error.message
+  return fallback
 }

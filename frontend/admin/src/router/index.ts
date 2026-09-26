@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { isUninitialized } from '../api/system'
+import { useAuthStore } from '../stores/auth'
 
 const routes = [
   { path: '/setup', component: () => import('../views/SetupView.vue'), meta: { public: true } },
@@ -23,13 +24,34 @@ const routes = [
 
 const router = createRouter({ history: createWebHistory(import.meta.env.BASE_URL), routes })
 
+// After an upgrade the hashed chunks an open tab has already loaded are gone, so
+// a lazy route import fails and the view never renders. Reload once for that
+// target to pick up the new index.html instead of showing a blank panel.
+router.onError((error, to) => {
+  const message = String((error as Error)?.message || '')
+  const staleChunk = /dynamically imported module|Importing a module script failed|Failed to fetch/.test(message)
+  if (!staleChunk || sessionStorage.getItem('chunk-reload') === to.fullPath) return
+  sessionStorage.setItem('chunk-reload', to.fullPath)
+  window.location.assign(to.fullPath)
+})
+
+router.afterEach(() => sessionStorage.removeItem('chunk-reload'))
+
 router.beforeEach(async (to) => {
   if (await isUninitialized()) {
     return to.path === '/setup' ? true : { path: '/setup' }
   }
   if (to.path === '/setup') return '/login'
-  if (!to.meta.public && !localStorage.getItem('admin_token')) return '/login'
-  if (to.path === '/login' && localStorage.getItem('admin_token')) return '/'
+
+  const auth = useAuthStore()
+  const admin = await auth.bootstrap()
+  if (to.meta.public) {
+    return to.path === '/login' && admin ? '/' : true
+  }
+  if (admin) return true
+  // A storefront visitor who is not an admin is told why, instead of being
+  // bounced into a login form they cannot satisfy.
+  return auth.token ? { path: '/login', query: { reason: 'not_admin' } } : '/login'
 })
 
 export default router

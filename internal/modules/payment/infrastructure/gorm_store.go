@@ -272,6 +272,9 @@ func (s *GormStore) SetOrderDeliveryContent(ctx context.Context, orderNo string,
 			"fulfillment_status": "delivered",
 			"delivered_at":       now,
 			"status":             "completed",
+			// The queued-for-manual-handling note would otherwise keep showing
+			// next to the delivered content.
+			"delivery_note": nil,
 		})
 	if result.Error != nil {
 		return nil, result.Error
@@ -312,7 +315,7 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 		// payment is never dropped on the floor.
 		if current.Product == nil || !current.Product.AutoDeliver || current.Product.ProductType != "card" {
 			now := time.Now().UTC()
-			note := "Order requires manual delivery"
+			note := "本单需要商家人工发货，处理结果会同步到订单中。"
 			record := models.DeliveryRecord{
 				OrderID:      current.ID,
 				Sequence:     1,
@@ -341,7 +344,7 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 			return err
 		}
 		if len(cards) < current.Quantity {
-			note := "Payment received; waiting for card stock"
+			note := "支付已完成，卡密库存不足，补货后会自动交付。"
 			record := models.DeliveryRecord{
 				OrderID:      current.ID,
 				Sequence:     1,
@@ -403,6 +406,8 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 			"fulfillment_status": "delivered",
 			"delivery_content":   deliveryContent,
 			"delivered_at":       now,
+			// Drop the "waiting for stock" note so the buyer only sees the cards.
+			"delivery_note": nil,
 		}).Error; err != nil {
 			return err
 		}

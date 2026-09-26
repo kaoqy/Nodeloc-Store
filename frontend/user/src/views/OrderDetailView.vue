@@ -132,7 +132,10 @@ onMounted(load)
           </button>
           <RouterLink to="/" class="btn btn-quiet btn-sm">返回挑选</RouterLink>
         </div>
-        <div v-else-if="!delivered" class="mt-5 flex flex-wrap items-center gap-3">
+        <div
+          v-else-if="!delivered && (order.status === 'paid' || order.status === 'completed')"
+          class="mt-5 flex flex-wrap items-center gap-3"
+        >
           <p class="flex-1 text-sm text-[var(--text-dim)]">
             支付已完成，交付通常几秒内到达；人工交付会进入商家队列。
           </p>
@@ -144,8 +147,8 @@ onMounted(load)
       <section class="card">
         <div class="flex items-center justify-between gap-3">
           <h2 class="text-[15px] font-bold">交付内容</h2>
-          <span class="badge" :class="fulfillmentStatus(order.fulfillment_status).badge">
-            {{ fulfillmentStatus(order.fulfillment_status).label }}
+          <span class="badge" :class="fulfillmentStatus(order.fulfillment_status, order.status).badge">
+            {{ fulfillmentStatus(order.fulfillment_status, order.status).label }}
           </span>
         </div>
 
@@ -169,6 +172,10 @@ onMounted(load)
           </template>
           <template v-else-if="order.fulfillment_status === 'manual_pending'">
             商家正在人工交付，完成后这里会显示结果与说明。
+          </template>
+          <template v-else-if="order.status === 'refunded'">款项已退回，本单不再交付。</template>
+          <template v-else-if="order.status === 'cancelled' || order.status === 'failed'">
+            订单已关闭，不会发货。
           </template>
           <template v-else>暂无交付内容，可稍后刷新或联系管理员。</template>
         </div>
@@ -204,7 +211,7 @@ onMounted(load)
           </div>
           <div>
             <dt class="text-[var(--text-quiet)]">交付状态</dt>
-            <dd class="mt-0.5">{{ fulfillmentStatus(order.fulfillment_status).label }}</dd>
+            <dd class="mt-0.5">{{ fulfillmentStatus(order.fulfillment_status, order.status).label }}</dd>
           </div>
           <div v-if="order.customer_contact">
             <dt class="text-[var(--text-quiet)]">联系方式</dt>

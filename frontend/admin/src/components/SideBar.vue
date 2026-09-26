@@ -9,6 +9,13 @@ defineEmits(['close'])
 const auth = useAuthStore()
 const route = useRoute()
 
+const roleLabel = computed(() => {
+  const role = auth.user?.role
+  if (role === 'super_admin') return '超级管理员'
+  if (role === 'admin') return '管理员'
+  return auth.user?.email || '管理员'
+})
+
 const groups = [
   { label: '概览', items: [{ path: '/', label: '仪表盘' }] },
   {
@@ -88,9 +95,10 @@ const numbered = computed(() => {
         </span>
         <span class="min-w-0">
           <span class="block truncate text-[13px] font-semibold">{{ auth.user?.username || '管理员' }}</span>
-          <span class="hint block truncate">{{ auth.user?.email || '超级管理员' }}</span>
+          <span class="hint block truncate">{{ roleLabel }}</span>
         </span>
       </div>
+      <a href="/" class="btn btn-quiet btn-sm mb-2 w-full">前往商店前台</a>
       <button class="btn btn-quiet btn-sm w-full" @click="auth.logout(); $router.push('/login')">退出登录</button>
     </div>
   </aside>

@@ -37,7 +37,7 @@ func NewHandler(service *application.Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig) {
+func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
 	payment := router.Group("/api/v1/payment")
 	payment.Use(middleware.JWTMiddleware(jwtConfig))
 	payment.POST("/orders", h.CreateOrder)
@@ -48,7 +48,7 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 
 	// Admin order management
 	adminOrders := router.Group("/api/v1/admin/orders")
-	adminOrders.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin())
+	adminOrders.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin(accounts))
 	adminOrders.GET("", h.AdminListOrders)
 	adminOrders.GET("/:order_no", h.AdminGetOrder)
 	adminOrders.POST("/:order_no/cancel", h.AdminCancelOrder)

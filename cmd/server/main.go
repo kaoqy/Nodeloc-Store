@@ -189,12 +189,13 @@ func buildFullRouter(ctn *container.Container, sysSvc *system.Service, dataDir s
 	router.GET("/api/health", healthHandler)
 
 	cfg := ctn.Config
+	accounts := ctn.Identity.Handler.AccountReader()
 	ctn.Identity.Handler.RegisterRoutes(router, &cfg.JWT)
-	ctn.Payment.Handler.RegisterRoutes(router, &cfg.JWT)
-	ctn.Catalog.Handler.RegisterRoutes(router, &cfg.JWT)
-	ctn.Notification.Handler.RegisterRoutes(router, &cfg.JWT)
-	ctn.Audit.Handler.RegisterRoutes(router, &cfg.JWT)
-	sysSvc.Handler().RegisterRoutes(router, &cfg.JWT, ctn.Identity.Handler.AuthMiddleware())
+	ctn.Payment.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
+	ctn.Catalog.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
+	ctn.Notification.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
+	ctn.Audit.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
+	sysSvc.Handler().RegisterRoutes(router, &cfg.JWT, accounts)
 
 	registerSPA(router, filepath.Dir(dataDir))
 	return router
@@ -205,33 +206,41 @@ func healthHandler(c *gin.Context) {
 }
 
 // registerSPA serves the built storefront at / and the admin panel at /admin,
-// with history-mode fallbacks.
+// with history-mode fallbacks. Every SPA path goes through one handler so the
+// HTML can be marked non-cacheable: it names hashed bundles, and a cached copy
+// would 404 all of them after an upgrade.
 func registerSPA(router *gin.Engine, rootDir string) {
 	userDir := resolveDir(rootDir, "web/user")
 	adminDir := resolveDir(rootDir, "web/admin")
-	if userDir != "" {
-		router.Static("/web/user", userDir)
-	}
-	if adminDir != "" {
-		router.Static("/web/admin", adminDir)
-		router.Static("/admin", adminDir)
-	}
+
 	router.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		if strings.HasPrefix(path, "/api/") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
-		dir := userDir
-		if strings.HasPrefix(path, "/admin") {
-			dir = adminDir
+		// Product images live outside both bundles: files dropped into ./uploads
+		// (a mounted volume) are referenced as /uploads/<name>. A miss must 404
+		// rather than fall through to index.html, which would render as a broken
+		// image with no clue why.
+		if rel, ok := strings.CutPrefix(path, "/uploads/"); ok {
+			dir := filepath.Join(rootDir, "uploads")
+			candidate := filepath.Join(dir, filepath.FromSlash(rel))
+			if strings.HasPrefix(candidate, filepath.Clean(dir)+string(os.PathSeparator)) {
+				if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+					c.Header("Cache-Control", "public, max-age=86400")
+					c.File(candidate)
+					return
+				}
+			}
+			c.Status(http.StatusNotFound)
+			return
 		}
+		dir, rel := spaTarget(path, userDir, adminDir)
 		if dir == "" {
 			c.String(http.StatusNotFound, "Frontend not built")
 			return
 		}
-		// Serve real static assets directly, fall back to index.html.
-		rel := strings.TrimPrefix(strings.TrimPrefix(path, "/admin"), "/")
 		if rel == "" {
 			rel = "index.html"
 		}
@@ -241,17 +250,37 @@ func registerSPA(router *gin.Engine, rootDir string) {
 		}
 		if candidate != "" {
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				if strings.Contains(filepath.ToSlash(candidate), "/assets/") {
+					c.Header("Cache-Control", "public, max-age=31536000, immutable")
+				} else {
+					c.Header("Cache-Control", "no-cache")
+				}
 				c.File(candidate)
 				return
 			}
 		}
 		index := filepath.Join(dir, "index.html")
 		if _, err := os.Stat(index); err == nil {
+			c.Header("Cache-Control", "no-cache")
 			c.File(index)
 			return
 		}
 		c.String(http.StatusNotFound, "Frontend not built")
 	})
+}
+
+// spaTarget maps a request path to the SPA that owns it and the file below that
+// SPA's root. Unknown paths resolve to their SPA's index.html upstream.
+func spaTarget(path, userDir, adminDir string) (dir, rel string) {
+	for _, prefix := range []string{"/admin", "/web/admin"} {
+		if path == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(path, prefix+"/") {
+			return adminDir, strings.Trim(strings.TrimPrefix(path, prefix), "/")
+		}
+	}
+	if strings.HasPrefix(path, "/web/user/") {
+		return userDir, strings.TrimPrefix(path, "/web/user/")
+	}
+	return userDir, strings.Trim(path, "/")
 }
 
 func resolveDir(root, rel string) string {

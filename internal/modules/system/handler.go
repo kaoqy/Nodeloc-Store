@@ -7,8 +7,8 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
-	"github.com/kaoqy/Nodeloc-Store/internal/models"
 )
 type Handler struct {
 	service *Service
@@ -26,12 +26,9 @@ func (h *Handler) RegisterPublicRoutes(router gin.IRouter) {
 }
 
 // RegisterRoutes adds the admin settings endpoints to a booted router.
-func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig, auth gin.HandlerFunc) {
+func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
 	h.RegisterPublicRoutes(router)
-	admin := router.Group("/api/v1/admin")
-	if auth != nil {
-		admin = admin.Group("", auth, h.requireAdmin())
-	}
+	admin := router.Group("/api/v1/admin", middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin(accounts))
 	admin.GET("/settings", h.GetSettings)
 	admin.PUT("/settings", h.SaveSettings)
 	admin.POST("/settings", h.SaveSettings)
@@ -115,33 +112,6 @@ func (h *Handler) Stats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
-// requireAdmin rejects non-admin authenticated users.
-func (h *Handler) requireAdmin() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, ok := userIDFromContext(c)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-			c.Abort()
-			return
-		}
-		h.service.mu.Lock()
-		db := h.service.db
-		h.service.mu.Unlock()
-		if db == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "not initialized"})
-			c.Abort()
-			return
-		}
-		var user models.User
-		if err := db.First(&user, id).Error; err != nil || !user.IsAdmin {
-			c.JSON(http.StatusForbidden, gin.H{"error": "需要管理员权限"})
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
-}
-
 func (h *Handler) writeError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	switch {
@@ -157,24 +127,4 @@ func (h *Handler) writeError(c *gin.Context, err error) {
 		log.Printf("[system] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
 	}
 	c.JSON(status, gin.H{"error": message})
-}
-
-func userIDFromContext(c *gin.Context) (uint, bool) {
-	v, ok := c.Get("user_id")
-	if !ok {
-		return 0, false
-	}
-	switch id := v.(type) {
-	case uint:
-		return id, id != 0
-	case int:
-		return uint(id), id > 0
-	case float64:
-		return uint(id), id > 0
-	case string:
-		parsed, err := strconv.ParseUint(id, 10, 64)
-		return uint(parsed), err == nil && parsed != 0
-	default:
-		return 0, false
-	}
 }

@@ -18,7 +18,7 @@ const copied = ref(false)
 
 const orderNo = computed(() => String(route.params.orderNo || ''))
 const status = computed(() => orderStatus(order.value?.status || ''))
-const fulfilment = computed(() => fulfillmentStatus(order.value?.fulfillment_status))
+const fulfilment = computed(() => fulfillmentStatus(order.value?.fulfillment_status, order.value?.status))
 
 const isPaid = computed(() => ['paid', 'completed'].includes(order.value?.status || ''))
 const delivered = computed(() => ['delivered', 'completed'].includes(order.value?.fulfillment_status || ''))

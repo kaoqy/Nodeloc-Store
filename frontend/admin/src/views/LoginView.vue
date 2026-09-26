@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { errorMessage } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -13,6 +14,12 @@ const identifier = ref('')
 const password = ref('')
 const loading = ref(false)
 const error = ref('')
+
+onMounted(() => {
+  if (route.query.reason === 'not_admin') {
+    error.value = '当前登录的账号不是管理员。可用管理员账号在此登录，或返回商店前台。'
+  }
+})
 
 async function submit() {
   loading.value = true
@@ -42,7 +49,7 @@ async function submit() {
       <div class="brand-mark mb-6">N</div>
       <p class="eyebrow">Nodeloc Store</p>
       <h1 class="mt-2 text-2xl font-bold">管理后台登录</h1>
-      <p class="mt-2 text-sm muted">仅管理员账号可进入，普通用户请前往 storefront 前台。</p>
+      <p class="mt-2 text-sm muted">仅管理员账号可进入，普通用户请在商店前台浏览下单。</p>
 
       <form class="card mt-8 space-y-4" @submit.prevent="submit">
         <div>

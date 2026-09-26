@@ -180,7 +180,7 @@ server {
 sudo openresty -t && sudo openresty -s reload
 ```
 
-> 商店无需在 nginx 里挂静态资源：页面、CSS/JS、图片都由容器内的服务直接吐出。数据卷 `./data:/app/data` 保存 SQLite 库与初始化配置，`./uploads:/app/uploads` 预留给人工交付附件等持久文件。
+> 商店无需在 nginx 里挂静态资源：页面、CSS/JS、图片都由容器内的服务直接吐出。数据卷 `./data:/app/data` 保存 SQLite 库与初始化配置，`./uploads:/app/uploads` 存放商品图片等持久文件——把图片放进宿主机的 `./uploads/`，在后台商品表单的「图片路径」里填 `/uploads/文件名` 即可（应用本身不提供上传接口）。
 
 ### Step 5 · 应用内初始化向导
 

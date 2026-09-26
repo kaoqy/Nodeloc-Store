@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { clearSession, TOKEN_KEY } from '../utils/session'
 
 const client = axios.create({
   baseURL: '/api/v1',
@@ -6,7 +7,7 @@ const client = axios.create({
 })
 
 client.interceptors.request.use((config) => {
-  const token = localStorage.getItem('admin_token')
+  const token = localStorage.getItem(TOKEN_KEY)
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
@@ -15,8 +16,7 @@ client.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('admin_token')
-      localStorage.removeItem('admin_user')
+      clearSession()
       if (window.location.pathname !== '/admin/login') window.location.href = '/admin/login'
     }
     return Promise.reject(error)

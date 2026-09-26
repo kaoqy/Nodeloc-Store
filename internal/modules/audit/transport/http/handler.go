@@ -25,9 +25,9 @@ func NewHandler(service *application.Service) *Handler {
 }
 
 // RegisterRoutes registers GET /api/v1/admin/audit-logs with JWT + admin middleware.
-func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig) {
+func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
 	admin := router.Group("/api/v1/admin")
-	admin.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin())
+	admin.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin(accounts))
 	admin.GET("/audit-logs", h.ListAuditLogs)
 }
 

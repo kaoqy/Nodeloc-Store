@@ -91,8 +91,8 @@ onMounted(() => load(0))
                 <span v-if="order.status === 'pending' || order.fulfillment_status === 'waiting_stock'" class="badge" :class="orderStatus(order.status).badge">
                   {{ orderStatus(order.status).label }}
                 </span>
-                <span v-else class="badge" :class="fulfillmentStatus(order.fulfillment_status).badge">
-                  {{ fulfillmentStatus(order.fulfillment_status).label }}
+                <span v-else class="badge" :class="fulfillmentStatus(order.fulfillment_status, order.status).badge">
+                  {{ fulfillmentStatus(order.fulfillment_status, order.status).label }}
                 </span>
               </p>
             </div>

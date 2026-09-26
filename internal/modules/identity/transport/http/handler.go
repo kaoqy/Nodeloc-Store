@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -43,13 +44,25 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	auth.GET("/me", h.AuthMiddleware(), h.Me)
 
 	admin := router.Group("/api/v1/admin/users")
-	admin.Use(h.AuthMiddleware(), middleware.RequireAdmin())
+	admin.Use(h.AuthMiddleware(), middleware.RequireAdmin(h.AccountReader()))
 	admin.GET("", h.AdminListUsers)
 	admin.GET("/:id", h.AdminGetUser)
 	admin.POST("/:id/role", h.AdminSetRole)
 	admin.POST("/:id/toggle-admin", h.AdminToggleAdmin)
 	admin.POST("/:id/toggle-active", h.AdminToggleActive)
 	admin.POST("/:id/points", h.AdminAdjustPoints)
+}
+
+// AccountReader lets the admin guard re-check the role behind the current
+// token, so granting or revoking admin access applies immediately.
+func (h *Handler) AccountReader() middleware.AccountReader {
+	return func(ctx context.Context, userID uint) (middleware.AccountState, bool) {
+		user, err := h.service.AdminGetUser(ctx, userID)
+		if err != nil || user == nil {
+			return middleware.AccountState{}, false
+		}
+		return middleware.AccountState{Role: user.Role, IsAdmin: user.IsAdmin, IsActive: user.IsActive}, true
+	}
 }
 
 func (h *Handler) AdminListUsers(c *gin.Context) {

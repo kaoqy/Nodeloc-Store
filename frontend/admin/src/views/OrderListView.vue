@@ -120,8 +120,8 @@ onMounted(() => {
               <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
             </td>
             <td>
-              <span class="badge" :class="fulfillmentStatus(order.fulfillment_status).badge">
-                {{ fulfillmentStatus(order.fulfillment_status).label }}
+              <span class="badge" :class="fulfillmentStatus(order.fulfillment_status, order.status).badge">
+                {{ fulfillmentStatus(order.fulfillment_status, order.status).label }}
               </span>
             </td>
             <td class="text-sm quiet">{{ when(order.created_at) }}</td>

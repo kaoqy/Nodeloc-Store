@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -104,9 +105,40 @@ func RequirePermission(resource, action string) gin.HandlerFunc {
 	}
 }
 
+// AccountState is an account's current authorization data, read from the store.
+type AccountState struct {
+	Role     string
+	IsAdmin  bool
+	IsActive bool
+}
+
+// AccountReader reports an account's current state; found is false when the
+// account no longer exists.
+type AccountReader func(ctx context.Context, userID uint) (state AccountState, found bool)
+
 // RequireAdmin checks if user is an admin.
-func RequireAdmin() gin.HandlerFunc {
+//
+// reader is mandatory in the booted application: a JWT only carries the role
+// the account had when it was signed, so without a fresh read a newly promoted
+// admin is locked out of every admin route (403) until the token expires, and a
+// demoted one keeps full access.
+func RequireAdmin(reader AccountReader) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		userID := contextUserID(c)
+		if reader != nil && userID != 0 {
+			state, found := reader(c.Request.Context(), userID)
+			switch {
+			case !found:
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "账号已不存在，请重新登录"})
+				return
+			case !state.IsActive:
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "账号已被禁用"})
+				return
+			}
+			c.Set(UserRoleKey, state.Role)
+			c.Set(IsAdminKey, state.IsAdmin)
+		}
+
 		role, exists := c.Get(UserRoleKey)
 		if !exists {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
@@ -121,6 +153,22 @@ func RequireAdmin() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func contextUserID(c *gin.Context) uint {
+	v, exists := c.Get(UserIDKey)
+	if !exists {
+		return 0
+	}
+	switch id := v.(type) {
+	case uint:
+		return id
+	case int:
+		if id > 0 {
+			return uint(id)
+		}
+	}
+	return 0
 }
 
 // AuditWriter appends one admin action to the audit trail.

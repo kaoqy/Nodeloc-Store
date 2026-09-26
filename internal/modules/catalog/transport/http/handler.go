@@ -24,14 +24,14 @@ func NewHandler(service *application.Service) *Handler {
 }
 
 // RegisterRoutes installs the public store routes and JWT-protected admin routes.
-func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig) {
+func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
 	store := router.Group("/api/v1/store")
 	store.GET("/products", h.listPublicProducts)
 	store.GET("/products/:slug", h.getPublicProduct)
 	store.GET("/categories", h.listPublicCategories)
 
 	admin := router.Group("/api/v1/admin")
-	admin.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin())
+	admin.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin(accounts))
 
 	admin.GET("/products", h.listProducts)
 	admin.GET("/products/:id", h.getProduct)

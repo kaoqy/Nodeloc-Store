@@ -49,6 +49,8 @@ async function logout() {
           <RouterLink to="/profile" class="btn btn-quiet btn-sm max-w-[10rem] truncate">
             {{ auth.user?.username || '我的账户' }}
           </RouterLink>
+          <!-- Plain anchor: /admin is a separate SPA, so it needs a full load. -->
+          <a v-if="auth.isAdmin" href="/admin/" class="btn btn-quiet btn-sm">进入后台</a>
           <button class="btn btn-ghost btn-sm hidden sm:inline-flex" @click="logout">退出</button>
         </template>
         <template v-else>
@@ -71,6 +73,7 @@ async function logout() {
       <template v-if="auth.isAuthenticated">
         <RouterLink to="/orders" class="nav-item w-full">我的订单</RouterLink>
         <RouterLink to="/profile" class="nav-item w-full">个人中心</RouterLink>
+        <a v-if="auth.isAdmin" href="/admin/" class="nav-item w-full">进入后台</a>
         <button class="btn btn-quiet btn-sm mt-1 self-start" @click="logout">退出登录</button>
       </template>
       <template v-else>

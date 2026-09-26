@@ -7,6 +7,11 @@ export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('token') || '')
   const user = ref<User | null>(null)
   const isAuthenticated = computed(() => Boolean(token.value))
+  const isAdmin = computed(() => {
+    const current = user.value
+    if (!current) return false
+    return current.is_admin === true || current.role === 'admin' || current.role === 'super_admin'
+  })
 
   function saveSession(accessToken: string, currentUser?: User | null) {
     token.value = accessToken
@@ -44,5 +49,5 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  return { user, token, isAuthenticated, saveSession, login, logout, register, fetchUser }
+  return { user, token, isAuthenticated, isAdmin, saveSession, login, logout, register, fetchUser }
 })

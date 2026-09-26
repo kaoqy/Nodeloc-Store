@@ -43,6 +43,13 @@ export function orderStatus(status: string): StatusMeta {
   return ORDER_STATUS[status] || { label: status || '未知', badge: 'badge-neutral' }
 }
 
-export function fulfillmentStatus(status: string): StatusMeta {
+export function fulfillmentStatus(status: string, paymentStatus?: string): StatusMeta {
+  // Cancelling, payment failure and refunding leave fulfillment_status at a
+  // waiting state, which would read as delivery still coming. Orders that
+  // already shipped keep showing what happened to them.
+  const shipped = status === 'delivered' || status === 'completed'
+  if (paymentStatus === 'cancelled' || paymentStatus === 'failed' || (paymentStatus === 'refunded' && !shipped)) {
+    return { label: '无需发货', badge: 'badge-neutral' }
+  }
   return FULFILLMENT_STATUS[status] || { label: status || '未知', badge: 'badge-neutral' }
 }

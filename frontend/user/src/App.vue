@@ -26,7 +26,7 @@ onMounted(async () => {
           <h1 class="text-lg font-bold">商店尚未初始化</h1>
           <p class="mt-3 text-sm text-[var(--text-dim)]">
             管理员需要先打开
-            <RouterLink to="/admin/" class="accent-text underline underline-offset-4">后台初始化向导</RouterLink>
+            <a href="/admin/" class="accent-text underline underline-offset-4">后台初始化向导</a>
             完成站点、数据库与 NodeLoc 集成配置。
           </p>
         </div>

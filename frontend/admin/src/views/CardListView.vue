@@ -74,6 +74,11 @@ async function loadCards() {
   }
 }
 
+// Card endpoints recompute stock_count, so the product row must be reloaded with the list.
+async function reload() {
+  await Promise.all([loadCards(), loadProducts()])
+}
+
 function open(id: number) {
   router.push(`/cards/${id}`)
 }
@@ -83,15 +88,15 @@ async function submitImport() {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-  if (!lines.length || !product.value) return
+  if (!lines.length || !productId.value) return
   importing.value = true
   error.value = ''
   try {
-    const result = await batchAddCards(product.value.id, lines)
+    const result = await batchAddCards(productId.value, lines)
     notice.value = `已导入 ${result.count ?? lines.length} 条卡密`
     importText.value = ''
     showImport.value = false
-    await loadCards()
+    await reload()
   } catch (err) {
     error.value = errorMessage(err, '导入卡密失败')
   } finally {
@@ -100,12 +105,12 @@ async function submitImport() {
 }
 
 async function toggleStatus(card: Card, status: string) {
-  if (!product.value) return
+  if (!productId.value) return
   busy.value = true
   error.value = ''
   try {
-    await updateCard(product.value.id, card.id, { content: card.content, status })
-    await loadCards()
+    await updateCard(productId.value, card.id, { content: card.content, status })
+    await reload()
   } catch (err) {
     error.value = errorMessage(err, '更新卡密状态失败')
   } finally {
@@ -114,12 +119,12 @@ async function toggleStatus(card: Card, status: string) {
 }
 
 async function removeCard(card: Card) {
-  if (!product.value) return
+  if (!productId.value) return
   if (!confirm(`删除卡密 #${card.id}？此操作不可撤销。`)) return
   busy.value = true
   try {
-    await deleteCard(product.value.id, card.id)
-    await loadCards()
+    await deleteCard(productId.value, card.id)
+    await reload()
   } catch (err) {
     error.value = errorMessage(err, '删除卡密失败')
   } finally {

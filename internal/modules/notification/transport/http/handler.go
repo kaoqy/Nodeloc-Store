@@ -17,13 +17,15 @@ type Handler struct{ service *application.Service }
 
 func NewHandler(service *application.Service) *Handler { return &Handler{service: service} }
 
-func (h *Handler) RegisterRoutes(engine gin.IRouter, jwtConfig *config.JWTConfig) {
+func (h *Handler) RegisterRoutes(engine gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
 	api := engine.Group("/api/v1")
 	api.Use(middleware.JWTMiddleware(jwtConfig))
 	api.GET("/notifications", h.List)
-	api.POST("/notifications", h.Send)
+	// Send takes an explicit recipient, so it must stay admin-only: any
+	// authenticated buyer could otherwise inject messages into someone's inbox.
+	api.POST("/notifications", middleware.RequireAdmin(accounts), h.Send)
 	api.POST("/notifications/:id/read", h.MarkAsRead)
-	api.POST("/admin/notifications/broadcast", middleware.RequireAdmin(), h.Broadcast)
+	api.POST("/admin/notifications/broadcast", middleware.RequireAdmin(accounts), h.Broadcast)
 }
 
 type sendRequest struct {

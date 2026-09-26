@@ -83,7 +83,12 @@ const breadcrumb = computed(() => {
 
       <main class="px-5 pb-12 pt-7 sm:px-7">
         <div class="fade-in">
-          <RouterView />
+          <!-- Keyed by fullPath: without it, moving between two records of the same
+               view (order → order, user → user) reuses the component and shows the
+               previous record's data. -->
+          <RouterView v-slot="{ Component, route: view }">
+            <component :is="Component" :key="view.fullPath" />
+          </RouterView>
         </div>
       </main>
     </div>

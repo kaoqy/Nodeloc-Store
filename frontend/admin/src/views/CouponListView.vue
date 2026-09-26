@@ -44,10 +44,15 @@ function startCreate() {
   }
 }
 
+// Dates are calendar days chosen in the admin's timezone: convert with local
+// parts, never with toISOString(), whose UTC rendering shifts the day by the
+// timezone offset.
 function toDateInput(value?: string | null): string {
   if (!value) return ''
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
 function fromDateInput(value: string): string | null {
@@ -68,8 +73,8 @@ async function save() {
       max_uses: Number(item.max_uses) || 0,
       used_count: item.used_count ?? 0,
       is_active: item.is_active ?? true,
-      valid_from: fromDateInput(toDateInput(item.valid_from)),
-      valid_until: fromDateInput(toDateInput(item.valid_until)),
+      valid_from: item.valid_from || null,
+      valid_until: item.valid_until || null,
     }
     if (item.id) {
       await updateCoupon(item.id, payload)
