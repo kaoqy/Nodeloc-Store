@@ -54,9 +54,9 @@ type User struct {
 
 type OAuthIdentity struct {
 	Base
-	UserID       uint    `gorm:"uniqueIndex:idx_user_provider;not null" json:"user_id"`
-	Provider     string  `gorm:"size:32;uniqueIndex:idx_provider_uid;not null" json:"provider"`
-	ProviderUID  string  `gorm:"size:190;uniqueIndex:idx_provider_uid;not null" json:"provider_uid"`
+	UserID       uint    `gorm:"uniqueIndex:uniq_oauth_identities_user;not null" json:"user_id"`
+	Provider     string  `gorm:"size:32;uniqueIndex:uniq_oauth_identities_provider_uid;not null" json:"provider"`
+	ProviderUID  string  `gorm:"size:190;uniqueIndex:uniq_oauth_identities_provider_uid;not null" json:"provider_uid"`
 	Username     *string `gorm:"size:64" json:"username,omitempty"`
 	DisplayName  *string `gorm:"size:64" json:"display_name,omitempty"`
 	AvatarURL    *string `gorm:"size:255" json:"avatar_url,omitempty"`
@@ -71,6 +71,9 @@ type OAuthIdentity struct {
 // "o_auth_identities" from the OAuth acronym and miss the table the identity
 // module queries.
 func (OAuthIdentity) TableName() string { return "oauth_identities" }
+
+// legacyOAuthTable is what GORM named this table before TableName pinned it.
+const legacyOAuthTable = "o_auth_identities"
 
 // ── Points & Checkin ─────────────────────────────────────────────────
 
@@ -244,6 +247,9 @@ type AppSetting struct {
 // ── Migrate auto-migrates all models ─────────────────────────────────
 
 func Migrate(db *gorm.DB) error {
+	if err := migrateLegacyOAuthIdentities(db); err != nil {
+		return err
+	}
 	return db.AutoMigrate(
 		&User{},
 		&OAuthIdentity{},
@@ -259,4 +265,33 @@ func Migrate(db *gorm.DB) error {
 		&AuditLog{},
 		&AppSetting{},
 	)
+}
+
+// migrateLegacyOAuthIdentities copies identity rows out of the table GORM
+// derived before OAuthIdentity was pinned to oauth_identities. SQLite index
+// names are database-wide, so that legacy table's indexes block AutoMigrate
+// from creating this model's, which fatal-loops any container upgraded from an
+// older image. It runs before AutoMigrate and only while the new table is
+// still empty. The legacy table is kept: rolling the image back expects it.
+func migrateLegacyOAuthIdentities(db *gorm.DB) error {
+	m := db.Migrator()
+	if !m.HasTable(legacyOAuthTable) {
+		return nil
+	}
+	if !m.HasTable(&OAuthIdentity{}) {
+		return m.CreateTable(&OAuthIdentity{})
+	}
+	var rows int64
+	if err := db.Table("oauth_identities").Count(&rows).Error; err != nil || rows > 0 {
+		return err
+	}
+	// Rows whose user was deleted can never authenticate anyone, and copying
+	// them trips the foreign key, so they stay behind.
+	return db.Exec(`INSERT INTO oauth_identities
+		(id, created_at, updated_at, deleted_at, user_id, provider, provider_uid,
+		 username, display_name, avatar_url, scope, access_token, refresh_token)
+		SELECT id, created_at, updated_at, deleted_at, user_id, provider, provider_uid,
+		 username, display_name, avatar_url, scope, access_token, refresh_token
+		FROM ` + legacyOAuthTable + `
+		WHERE user_id IN (SELECT id FROM users)`).Error
 }

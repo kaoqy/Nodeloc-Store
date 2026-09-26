@@ -55,9 +55,9 @@ type OAuthIdentity struct {
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
-	UserID       uint           `gorm:"uniqueIndex:idx_user_provider;not null" json:"user_id"`
-	Provider     string         `gorm:"size:32;uniqueIndex:idx_provider_uid;not null" json:"provider"`
-	ProviderUID  string         `gorm:"size:190;uniqueIndex:idx_provider_uid;not null" json:"provider_uid"`
+	UserID       uint           `gorm:"uniqueIndex:uniq_oauth_identities_user;not null" json:"user_id"`
+	Provider     string         `gorm:"size:32;uniqueIndex:uniq_oauth_identities_provider_uid;not null" json:"provider"`
+	ProviderUID  string         `gorm:"size:190;uniqueIndex:uniq_oauth_identities_provider_uid;not null" json:"provider_uid"`
 	Username     *string        `gorm:"size:64" json:"username,omitempty"`
 	DisplayName  *string        `gorm:"size:64" json:"display_name,omitempty"`
 	AvatarURL    *string        `gorm:"size:255" json:"avatar_url,omitempty"`
