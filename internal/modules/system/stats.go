@@ -48,6 +48,14 @@ type FunnelCount struct {
 	Count int64  `json:"count"`
 }
 
+// BuyerStat is one row of the top spenders panel.
+type BuyerStat struct {
+	UserID  uint   `json:"user_id"`
+	Name    string `json:"name"`
+	Orders  int64  `json:"orders"`
+	Revenue int64  `json:"revenue"`
+}
+
 // RecentOrder is a compact row for the live activity panel.
 type RecentOrder struct {
 	OrderNo           string     `json:"order_no"`
@@ -75,6 +83,11 @@ type DashboardStats struct {
 
 	RevenuePrev     int64   `json:"revenue_prev"`
 	RevenueDelta    float64 `json:"revenue_delta"`
+	PaidPrev        int64   `json:"paid_prev"`
+	PaidDelta       float64 `json:"paid_delta"`
+	OrdersPrev      int64   `json:"orders_prev"`
+	NewUsersPrev    int64   `json:"new_users_prev"`
+	NewUsersDelta   float64 `json:"new_users_delta"`
 	OrdersPeriod    int64   `json:"orders_period"`
 	PaidPeriod      int64   `json:"paid_period"`
 	Conversion      float64 `json:"conversion"`
@@ -87,6 +100,7 @@ type DashboardStats struct {
 	RepeatBuyers    int64   `json:"repeat_buyers_period"`
 
 	TopProducts  []ProductStat `json:"top_products"`
+	TopBuyers    []BuyerStat   `json:"top_buyers"`
 	StockAlerts  []StockAlert  `json:"stock_alerts"`
 	Funnel       []FunnelCount `json:"funnel"`
 	RecentOrders []RecentOrder `json:"recent_orders"`
@@ -146,7 +160,7 @@ func (s *Service) Stats(ctx context.Context, days int) (*DashboardStats, error) 
 	cutoff := latest.AddDate(0, 0, -(days - 1))
 
 	for _, step := range []func(context.Context, *gorm.DB, *DashboardStats, time.Time) error{
-		statTrend, statPreviousRevenue, statBestSellers, statStockAlerts, statFunnel, statRecentOrders,
+		statTrend, statPreviousRevenue, statBestSellers, statTopBuyers, statStockAlerts, statFunnel, statRecentOrders,
 	} {
 		if err := step(ctx, db, stats, cutoff); err != nil {
 			return nil, err
@@ -228,25 +242,80 @@ func statTrend(ctx context.Context, db *gorm.DB, stats *DashboardStats, cutoff t
 	return nil
 }
 
-// statPreviousRevenue sums the window immediately before the reported one, so
-// the dashboard can show 环比. It attributes days by creation date exactly like
-// statTrend does; mixing paid_at here would compare two different cohorts.
+// statPreviousRevenue fills the window immediately before the reported one, so
+// the dashboard can show 环比 for revenue, paid orders and new accounts. It
+// attributes days by creation date exactly like statTrend does; mixing paid_at
+// here would compare two different cohorts.
 func statPreviousRevenue(ctx context.Context, db *gorm.DB, stats *DashboardStats, cutoff time.Time) error {
 	from := cutoff.AddDate(0, 0, -stats.PeriodDays)
-	var prev int64
-	err := db.WithContext(ctx).Model(&models.Order{}).
-		Where("status IN ?", paidOrderStatuses).
+
+	var prev struct {
+		Revenue int64
+		Orders  int64
+		Paid    int64
+	}
+	// Deleted rows must be spelled out: this query goes through Table("orders"),
+	// which has no model for GORM to attach soft-delete scope to.
+	err := db.WithContext(ctx).Table("orders").
+		Select(`COALESCE(SUM(CASE WHEN status IN ? THEN total_amount ELSE 0 END), 0) AS revenue,
+			COUNT(*) AS orders,
+			COALESCE(SUM(CASE WHEN status IN ? THEN 1 ELSE 0 END), 0) AS paid`,
+			paidOrderStatuses, paidOrderStatuses).
 		Where("created_at >= ? AND created_at < ?", from, cutoff).
-		Select("COALESCE(SUM(total_amount), 0)").Scan(&prev).Error
+		Where("deleted_at IS NULL").Scan(&prev).Error
 	if err != nil {
 		return err
 	}
-	stats.RevenuePrev = prev
+	stats.RevenuePrev = prev.Revenue
+	stats.OrdersPrev = prev.Orders
+	stats.PaidPrev = prev.Paid
+	stats.RevenueDelta = periodDelta(stats.RevenuePeriod, prev.Revenue)
+	stats.PaidDelta = periodDelta(stats.PaidPeriod, prev.Paid)
+
+	var joined int64
+	if err := db.WithContext(ctx).Model(&models.User{}).
+		Where("created_at >= ? AND created_at < ?", from, cutoff).Count(&joined).Error; err != nil {
+		return err
+	}
+	stats.NewUsersPrev = joined
+	stats.NewUsersDelta = periodDelta(stats.NewUsers, joined)
+	return nil
+}
+
+// periodDelta reads a zero baseline as "nothing to compare against": growth from
+// nothing is reported as a full new period rather than as an infinite jump.
+func periodDelta(current, previous int64) float64 {
 	switch {
-	case prev > 0:
-		stats.RevenueDelta = float64(stats.RevenuePeriod-prev) / float64(prev) * 100
-	case stats.RevenuePeriod > 0:
-		stats.RevenueDelta = 100
+	case previous > 0:
+		return float64(current-previous) / float64(previous) * 100
+	case current > 0:
+		return 100
+	}
+	return 0
+}
+
+func statTopBuyers(ctx context.Context, db *gorm.DB, stats *DashboardStats, cutoff time.Time) error {
+	type row struct {
+		UserID  uint
+		Name    string
+		Orders  int64
+		Revenue int64
+	}
+	var rows []row
+	err := db.WithContext(ctx).Table("orders").
+		Select(`orders.user_id AS user_id, COALESCE(users.username, '') AS name,
+			COUNT(*) AS orders, COALESCE(SUM(orders.total_amount), 0) AS revenue`).
+		Joins("LEFT JOIN users ON users.id = orders.user_id").
+		Where("orders.status IN ?", paidOrderStatuses).
+		Where("orders.created_at >= ?", cutoff).
+		Where("orders.deleted_at IS NULL").
+		Group("orders.user_id, users.username").
+		Order("revenue DESC").Limit(5).Scan(&rows).Error
+	if err != nil {
+		return err
+	}
+	for _, item := range rows {
+		stats.TopBuyers = append(stats.TopBuyers, BuyerStat(item))
 	}
 	return nil
 }

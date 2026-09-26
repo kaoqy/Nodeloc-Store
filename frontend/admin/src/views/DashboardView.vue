@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import StatCard from '../components/StatCard.vue'
 import { listAuditLogs } from '../api/logs'
 import { getStats } from '../api/system'
@@ -20,19 +20,58 @@ const METRICS: Record<Metric, { label: string; unit: string; format: (value: num
   users: { label: '新客', unit: '人', format: (value) => String(value) },
 }
 
+// Moving average window over the trend. Seven days smooths the weekday spikes a
+// small store gets from batch promotions without hiding a real change of pace.
+const AverageWindow = 7
+const AutoRefreshMs = 60_000
+const PrefsKey = 'admin.dashboard.view'
+
+interface ViewPrefs {
+  days: number
+  metric: Metric
+  auto: boolean
+}
+
+function readPrefs(): ViewPrefs {
+  const fallback: ViewPrefs = { days: 30, metric: 'revenue', auto: false }
+  try {
+    const raw = localStorage.getItem(PrefsKey)
+    if (!raw) return fallback
+    const saved = JSON.parse(raw) as Partial<ViewPrefs>
+    return {
+      days: RANGES.some((range) => range.days === saved.days) ? saved.days! : fallback.days,
+      metric: saved.metric && saved.metric in METRICS ? saved.metric : fallback.metric,
+      auto: typeof saved.auto === 'boolean' ? saved.auto : fallback.auto,
+    }
+  } catch {
+    return fallback
+  }
+}
+
+const prefs = readPrefs()
 const loading = ref(true)
 const error = ref('')
-const days = ref(30)
-const metric = ref<Metric>('revenue')
+const days = ref(prefs.days)
+const metric = ref<Metric>(prefs.metric)
+const auto = ref(prefs.auto)
 const stats = ref<DashboardStats | null>(null)
 const logs = ref<AuditLog[]>([])
 const updatedAt = ref('')
+let refreshTimer: number | undefined
 
 const series = computed(() => stats.value?.revenue_series ?? [])
 const topProducts = computed(() => stats.value?.top_products ?? [])
+const topBuyers = computed(() => stats.value?.top_buyers ?? [])
 const stockAlerts = computed(() => stats.value?.stock_alerts ?? [])
 const funnel = computed(() => stats.value?.funnel ?? [])
 const recentOrders = computed(() => stats.value?.recent_orders ?? [])
+const onboarding = computed(() => Boolean(stats.value) && (stats.value?.orders_total ?? 0) === 0)
+
+const onboardingSteps = [
+  { to: '/products/new', label: '上架第一件商品', hint: '定价、描述并公开可见' },
+  { to: '/cards', label: '导入卡密库存', hint: '卡密类商品付款后自动交付' },
+  { to: '/settings', label: '核对支付与登录', hint: 'NodeLoc Payments 与 OAuth 回调' },
+]
 
 const bars = computed(() => {
   const key = metric.value
@@ -41,6 +80,32 @@ const bars = computed(() => {
     const value = point[key]
     return { ...point, value, pct: value ? Math.max((value / peak) * 100, 3) : 0.8 }
   })
+})
+
+// Coordinates share the bars' viewBox scale, so the line sits on the columns
+// instead of being a second, differently-scaled chart.
+const averageLine = computed(() => {
+  const key = metric.value
+  if (series.value.length < 3) return ''
+  const peak = Math.max(1, ...series.value.map((point) => point[key]))
+  const step = 100 / (series.value.length - 1)
+  return series.value
+    .map((_, index) => {
+      const window = series.value.slice(Math.max(0, index - AverageWindow + 1), index + 1)
+      const mean = window.reduce((sum, point) => sum + point[key], 0) / window.length
+      return `${(index * step).toFixed(2)},${(100 - (mean / peak) * 100).toFixed(2)}`
+    })
+    .join(' ')
+})
+
+const sparklines = computed(() => {
+  const points = series.value
+  return {
+    revenue: points.map((point) => point.revenue),
+    orders: points.map((point) => point.orders),
+    users: points.map((point) => point.users),
+    aov: points.map((point) => (point.orders ? point.revenue / point.orders : 0)),
+  }
 })
 
 const bestDay = computed(() => {
@@ -72,11 +137,12 @@ const backlog = computed(() => {
   ].filter((item) => item.count > 0)
 })
 
+const buyerPeak = computed(() => Math.max(1, ...topBuyers.value.map((item) => item.revenue)))
 const funnelPeak = computed(() => Math.max(1, ...funnel.value.map((stage) => stage.count)))
 const revenuePeak = computed(() => Math.max(1, ...topProducts.value.map((item) => item.revenue)))
 
-async function load() {
-  loading.value = true
+async function load(silent = false) {
+  if (!silent) loading.value = true
   error.value = ''
   try {
     const [statsResult, logResult] = await Promise.all([getStats(days.value), listAuditLogs({ page: 1, limit: 6 })])
@@ -96,7 +162,41 @@ async function switchRange(value: number) {
   await load()
 }
 
-onMounted(load)
+function stopAutoRefresh() {
+  if (refreshTimer) window.clearInterval(refreshTimer)
+  refreshTimer = undefined
+}
+
+function syncAutoRefresh() {
+  stopAutoRefresh()
+  if (!auto.value) return
+  // A hidden tab refreshing every minute only spends requests, so the tick is
+  // skipped there and the data reloads as soon as the tab is visible again.
+  refreshTimer = window.setInterval(() => {
+    if (document.hidden || loading.value) return
+    void load(true)
+  }, AutoRefreshMs)
+}
+
+watch([days, metric, auto], () => {
+  localStorage.setItem(PrefsKey, JSON.stringify({ days: days.value, metric: metric.value, auto: auto.value }))
+  syncAutoRefresh()
+})
+
+function onVisible() {
+  if (!document.hidden && auto.value && !loading.value) void load(true)
+}
+
+onMounted(() => {
+  void load()
+  syncAutoRefresh()
+  document.addEventListener('visibilitychange', onVisible)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisible)
+  stopAutoRefresh()
+})
 </script>
 
 <template>
@@ -115,8 +215,17 @@ onMounted(load)
         </button>
       </div>
       <div class="flex items-center gap-3">
+        <button
+          class="btn btn-sm"
+          :class="auto ? 'btn-secondary border-[var(--accent-line)] accent-text' : 'btn-quiet'"
+          :aria-pressed="auto"
+          title="开启后每 60 秒静默刷新一次"
+          @click="auto = !auto"
+        >
+          自动刷新 · {{ auto ? '开' : '关' }}
+        </button>
         <span v-if="updatedAt" class="hint mono">更新于 {{ updatedAt }}</span>
-        <button class="btn btn-quiet btn-sm" :disabled="loading" @click="load">
+        <button class="btn btn-quiet btn-sm" :disabled="loading" @click="load()">
           {{ loading ? '加载中…' : '刷新' }}
         </button>
       </div>
@@ -138,23 +247,46 @@ onMounted(load)
         :value="money(stats?.revenue_period ?? 0)"
         :hint="`累计 ${money(stats?.revenue_total ?? 0)} · 上期 ${money(stats?.revenue_prev ?? 0)}`"
         :delta="(stats?.revenue_prev ?? 0) > 0 ? (stats?.revenue_delta ?? null) : null"
+        :spark="sparklines.revenue"
         accent
       />
       <StatCard
         label="支付订单"
         :value="stats?.paid_period ?? 0"
         :hint="`下单 ${stats?.orders_period ?? 0} 笔 · 转化率 ${Math.round(stats?.conversion ?? 0)}%`"
+        :delta="(stats?.paid_prev ?? 0) > 0 ? (stats?.paid_delta ?? null) : null"
+        :spark="sparklines.orders"
       />
       <StatCard
         label="客单价"
         :value="money(stats?.aov ?? 0)"
         :hint="`已交付 ${stats?.delivered_period ?? 0} 笔 · 退款 ${stats?.refunded_period ?? 0} 笔`"
+        :spark="sparklines.aov"
       />
       <StatCard
         label="期间新客"
         :value="stats?.new_users_period ?? 0"
         :hint="`购买用户 ${stats?.active_buyers_period ?? 0} 人 · 复购 ${stats?.repeat_buyers_period ?? 0} 人`"
+        :delta="(stats?.new_users_prev ?? 0) > 0 ? (stats?.new_users_delta ?? null) : null"
+        :spark="sparklines.users"
       />
+    </div>
+
+    <div v-if="!loading && onboarding" class="card">
+      <h2 class="text-base font-semibold">开张三件事</h2>
+      <p class="hint mt-1">还没有任何订单。按下面顺序把店铺跑起来，这一步跑完看板就会有数据。</p>
+      <ol class="mt-4 grid gap-3 sm:grid-cols-3">
+        <li v-for="(step, index) in onboardingSteps" :key="step.to">
+          <RouterLink
+            :to="step.to"
+            class="flex h-full flex-col gap-1.5 rounded-md border border-[var(--stroke-quiet)] px-4 py-3.5 transition-colors hover:border-[var(--accent-line)]"
+          >
+            <span class="mono quiet text-xs">{{ String(index + 1).padStart(2, '0') }}</span>
+            <span class="text-[13px] font-semibold">{{ step.label }}</span>
+            <span class="hint">{{ step.hint }}</span>
+          </RouterLink>
+        </li>
+      </ol>
     </div>
 
     <div v-if="!loading && backlog.length" class="card !p-4">
@@ -180,6 +312,7 @@ onMounted(load)
             <p class="quiet mt-1 text-xs">
               期间合计 {{ metricFormat(periodTotal) }}{{ METRICS[metric].unit }} · 活跃 {{ activeDays }} 天 · 日均
               {{ metricFormat(dailyAverage) }}{{ METRICS[metric].unit }}
+              <span v-if="averageLine" class="mono"> · <span class="accent-text">┅</span> {{ AverageWindow }} 日均线</span>
             </p>
           </div>
           <div class="flex gap-1.5">
@@ -203,7 +336,7 @@ onMounted(load)
             <div class="absolute inset-0 flex flex-col justify-between" aria-hidden="true">
               <span v-for="i in 4" :key="i" class="block border-t border-dashed border-[var(--stroke-quiet)]" />
             </div>
-            <div class="relative flex h-full items-end gap-[3px]" role="img" :aria-label="`${METRICS[metric].label}趋势，共 ${series.length} 天`">
+            <div class="relative flex h-full items-end gap-[3px]" role="img" :aria-label="`${METRICS[metric].label}趋势，共 ${series.length} 天，含 ${AverageWindow} 日均线`">
               <div
                 v-for="point in bars"
                 :key="point.date"
@@ -228,6 +361,25 @@ onMounted(load)
                 </div>
               </div>
             </div>
+            <svg
+              v-if="averageLine"
+              class="pointer-events-none absolute inset-0 h-full w-full"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <polyline
+                :points="averageLine"
+                fill="none"
+                stroke="var(--accent)"
+                stroke-width="1.5"
+                stroke-dasharray="4 3"
+                stroke-linejoin="round"
+                vector-effect="non-scaling-stroke"
+                opacity="0.85"
+              />
+            </svg>
           </div>
           <div class="mt-3 flex justify-between text-[11px] quiet mono">
             <span>{{ dayLabel(series[0].date) }}</span>
@@ -279,7 +431,7 @@ onMounted(load)
       </div>
     </div>
 
-    <div class="grid gap-5 xl:grid-cols-3">
+    <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
       <div class="card">
         <div class="mb-4 flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold">热销商品</h2>
@@ -303,6 +455,40 @@ onMounted(load)
                 <div
                   class="h-full rounded-full border border-[var(--accent-line)] bg-[var(--accent-soft)]"
                   :style="{ width: `${Math.max((item.revenue / revenuePeak) * 100, 2)}%` }"
+                />
+              </div>
+              <span class="hint nums shrink-0">{{ item.orders }} 单</span>
+            </div>
+          </li>
+        </ol>
+      </div>
+
+      <div class="card">
+        <div class="mb-4 flex items-center justify-between gap-3">
+          <h2 class="text-base font-semibold">买家排行</h2>
+          <RouterLink to="/users" class="text-sm accent-text">用户管理</RouterLink>
+        </div>
+        <div v-if="loading" class="space-y-3">
+          <div v-for="i in 4" :key="i" class="skeleton h-10" />
+        </div>
+        <div v-else-if="!topBuyers.length" class="py-12 text-center text-sm quiet">期间内还没有成交买家</div>
+        <ol v-else class="space-y-3.5">
+          <li v-for="(item, index) in topBuyers" :key="item.user_id">
+            <RouterLink
+              :to="`/users/${item.user_id}`"
+              class="flex items-baseline justify-between gap-3 transition-colors hover:underline"
+            >
+              <p class="min-w-0 truncate text-[13px]">
+                <span class="mono quiet mr-1.5">{{ String(index + 1).padStart(2, '0') }}</span>
+                {{ item.name || `#${item.user_id}` }}
+              </p>
+              <span class="nums shrink-0 text-[13px] font-semibold">{{ money(item.revenue) }}</span>
+            </RouterLink>
+            <div class="mt-1.5 flex items-center gap-2">
+              <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
+                <div
+                  class="h-full rounded-full border border-[var(--accent-line)] bg-[var(--accent-soft)]"
+                  :style="{ width: `${Math.max((item.revenue / buyerPeak) * 100, 2)}%` }"
                 />
               </div>
               <span class="hint nums shrink-0">{{ item.orders }} 单</span>

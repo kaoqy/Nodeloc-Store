@@ -166,6 +166,13 @@ export interface ProductStat {
   revenue: number
 }
 
+export interface BuyerStat {
+  user_id: number
+  name: string
+  orders: number
+  revenue: number
+}
+
 export interface StockAlert {
   product_id: number
   name: string
@@ -205,6 +212,11 @@ export interface DashboardStats {
 
   revenue_prev: number
   revenue_delta: number
+  paid_prev: number
+  paid_delta: number
+  orders_prev: number
+  new_users_prev: number
+  new_users_delta: number
   orders_period: number
   paid_period: number
   conversion: number
@@ -218,6 +230,7 @@ export interface DashboardStats {
 
   // Go omits an empty slice as null, so every collection below is optional.
   top_products: ProductStat[] | null
+  top_buyers: BuyerStat[] | null
   stock_alerts: StockAlert[] | null
   funnel: FunnelCount[] | null
   recent_orders: RecentOrder[] | null
