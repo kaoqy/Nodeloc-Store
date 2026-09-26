@@ -77,7 +77,10 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 			Role:     user.Role,
 		}, nil
 	}
-	paymentMod := payment.Wire(db, cfg, identityFind)
+	paymentMod, err := payment.Wire(db, cfg, identityFind)
+	if err != nil {
+		return nil, err
+	}
 	catalogMod := catalog.Wire(db)
 	notificationMod := notification.Wire(db)
 	auditMod := audit.Wire(db)

@@ -1,70 +1,73 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getUser, toggleActive, adjustPoints } from '../api/users'
+import { adjustPoints, getUser, setRole, toggleActive, toggleAdmin } from '../api/users'
+import { errorMessage, when } from '../utils/format'
 import type { User } from '../types'
 
 const route = useRoute()
 const router = useRouter()
+
 const loading = ref(true)
-const user = ref<User | null>(null)
+const busy = ref(false)
 const error = ref('')
+const notice = ref('')
+const user = ref<User | null>(null)
+const delta = ref<number | ''>('')
 
-const pointsForm = reactive({ delta: 0, reason: '' })
-const pointsLoading = ref(false)
-const pointsMessage = ref('')
-
-const roleText: Record<string, string> = {
-  super_admin: '超级管理员',
-  admin: '管理员',
-  operator: '运营',
-  support: '客服',
-  user: '普通用户',
+const roleMeta: Record<string, { label: string; badge: string }> = {
+  super_admin: { label: '超级管理员', badge: 'badge-danger' },
+  admin: { label: '管理员', badge: 'badge-warning' },
+  user: { label: '普通用户', badge: 'badge-neutral' },
 }
+
+const current = computed(() => roleMeta[user.value?.role || 'user'] || roleMeta.user)
+const bound = computed(() => Boolean(user.value?.oauth_provider))
+const points = computed(() => Number(delta.value || 0))
 
 async function load() {
   loading.value = true
   error.value = ''
+  const id = Number(route.params.id)
+  if (!id) {
+    error.value = '无效的用户 ID'
+    loading.value = false
+    return
+  }
   try {
-    const id = Number(route.params.id)
-    if (!id) {
-      error.value = '无效的用户 ID'
-      return
-    }
-    const result = await getUser(id)
-    user.value = result.user
-  } catch (err: any) {
-    error.value = err.response?.data?.message || '用户加载失败'
+    user.value = await getUser(id)
+  } catch (err) {
+    user.value = null
+    error.value = errorMessage(err, '用户加载失败')
   } finally {
     loading.value = false
   }
 }
 
-async function toggleUserActive() {
+async function run(action: () => Promise<User>, message: string) {
   if (!user.value) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
   try {
-    const result = await toggleActive(user.value.id)
-    user.value = result.user
-  } catch {
-    // silent
+    user.value = await action()
+    notice.value = message
+  } catch (err) {
+    error.value = errorMessage(err, '操作失败')
+  } finally {
+    busy.value = false
   }
 }
 
 async function submitPoints() {
-  if (!user.value || !pointsForm.delta) return
-  pointsLoading.value = true
-  pointsMessage.value = ''
-  try {
-    const result = await adjustPoints(user.value.id, pointsForm.delta, pointsForm.reason)
-    user.value = result.user
-    pointsForm.delta = 0
-    pointsForm.reason = ''
-    pointsMessage.value = '积分调整成功'
-  } catch {
-    pointsMessage.value = '积分调整失败'
-  } finally {
-    pointsLoading.value = false
-  }
+  if (!user.value || !points.value) return
+  await run(() => adjustPoints(user.value!.id, points.value as number), `已调整 ${points.value > 0 ? '+' : ''}${points.value} 积分`)
+  delta.value = ''
+}
+
+function changeRole(event: Event) {
+  const role = (event.target as HTMLSelectElement).value
+  run(() => setRole(user.value!.id, role), '角色已更新')
 }
 
 onMounted(load)
@@ -73,129 +76,133 @@ onMounted(load)
 <template>
   <section v-if="loading" class="space-y-4">
     <div class="skeleton h-8 w-48" />
-    <div class="grid gap-4 sm:grid-cols-2">
-      <div v-for="i in 4" :key="i" class="skeleton h-24" />
+    <div class="grid gap-4 lg:grid-cols-3">
+      <div class="skeleton h-56" />
+      <div class="skeleton h-56 lg:col-span-2" />
     </div>
   </section>
 
-  <section v-else-if="error" class="py-20 text-center">
-    <p class="text-[#fb7185]">{{ error }}</p>
-    <button class="btn-secondary mt-4" @click="router.push('/users')">返回用户列表</button>
+  <section v-else-if="!user" class="card py-16 text-center">
+    <p class="muted">{{ error || '用户不存在' }}</p>
+    <button class="btn btn-secondary btn-sm mt-4" @click="router.push('/users')">返回用户列表</button>
   </section>
 
-  <section v-else-if="user" class="space-y-6">
-    <div class="flex items-center justify-between">
+  <section v-else class="space-y-5">
+    <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <RouterLink to="/users" class="text-sm text-[#7a7890] hover:text-white">← 返回用户列表</RouterLink>
-        <h2 class="mt-2 text-xl font-bold">用户详情</h2>
+        <RouterLink to="/users" class="quiet text-xs hover:text-[var(--text)]">← 返回用户列表</RouterLink>
+        <div class="mt-1.5 flex flex-wrap items-center gap-2.5">
+          <h2 class="truncate text-xl font-bold">{{ user.username }}</h2>
+          <span class="badge" :class="current.badge">{{ current.label }}</span>
+          <span class="badge" :class="user.is_active ? 'badge-success' : 'badge-danger'">
+            {{ user.is_active ? '正常' : '已禁用' }}
+          </span>
+        </div>
       </div>
       <button
-        :class="['btn', user.is_active ? 'btn-danger' : 'btn-primary']"
-        @click="toggleUserActive"
+        class="btn btn-sm"
+        :class="user.is_active ? 'btn-danger' : 'btn-secondary'"
+        :disabled="busy"
+        @click="run(() => toggleActive(user!.id), user!.is_active ? '账号已禁用' : '账号已启用')"
       >
         {{ user.is_active ? '禁用账号' : '启用账号' }}
       </button>
     </div>
 
-    <div class="grid gap-6 lg:grid-cols-3">
-      <!-- Profile Card -->
+    <div v-if="error" class="alert alert-danger">{{ error }}</div>
+    <div v-if="notice" class="alert alert-success">{{ notice }}</div>
+
+    <div class="grid gap-5 lg:grid-cols-3">
       <div class="card text-center">
-        <div class="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500/30 to-purple-500/30 text-2xl font-bold text-indigo-300">
-          {{ user.username?.[0]?.toUpperCase() || 'U' }}
+        <img
+          v-if="user.oauth_avatar || user.avatar_url"
+          :src="user.oauth_avatar || user.avatar_url"
+          :alt="user.username"
+          class="mx-auto mb-4 h-20 w-20 rounded-full border border-[var(--stroke)] object-cover"
+        />
+        <div
+          v-else
+          class="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-[var(--accent-soft)] text-2xl font-bold accent-text"
+        >
+          {{ user.username.slice(0, 1).toUpperCase() }}
         </div>
-        <h3 class="text-lg font-semibold">{{ user.username }}</h3>
-        <p class="mt-1 text-sm text-[#7a7890]">{{ user.email || '未设置邮箱' }}</p>
-        <div class="mt-3">
-          <span
-            :class="[
-              'badge',
-              user.role === 'super_admin' ? 'badge-danger' :
-              user.role === 'admin' ? 'badge-warning' :
-              user.role === 'operator' ? 'badge-info' : 'badge-neutral'
-            ]"
-          >
-            {{ roleText[user.role] || user.role }}
-          </span>
+        <h3 class="text-lg font-semibold">{{ user.nickname || user.username }}</h3>
+        <p class="quiet mt-1 text-sm mono">#{{ user.id }}</p>
+        <p class="quiet mt-0.5 text-sm">{{ user.email || '未设置邮箱' }}</p>
+        <div class="mt-5 grid grid-cols-2 gap-3 text-left">
+          <div class="card-quiet !p-3">
+            <p class="eyebrow">积分</p>
+            <p class="nums mt-1 text-lg font-semibold">{{ user.points }}</p>
+          </div>
+          <div class="card-quiet !p-3">
+            <p class="eyebrow">连续签到</p>
+            <p class="nums mt-1 text-lg font-semibold">{{ user.consecutive_days || 0 }} 天</p>
+          </div>
         </div>
       </div>
 
-      <!-- Details -->
-      <div class="space-y-4 lg:col-span-2">
+      <div class="space-y-5 lg:col-span-2">
         <div class="card">
-          <h3 class="mb-4 font-semibold">基本信息</h3>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <div>
-              <p class="text-xs text-[#7a7890]">用户 ID</p>
-              <p class="mt-1 text-sm font-medium">{{ user.id }}</p>
+          <h3 class="mb-4 text-sm font-semibold">账号信息</h3>
+          <dl class="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <div class="flex justify-between gap-3 border-b border-[var(--stroke-quiet)] pb-2">
+              <dt class="quiet">注册时间</dt>
+              <dd class="text-sm">{{ when(user.created_at) }}</dd>
             </div>
-            <div>
-              <p class="text-xs text-[#7a7890]">积分余额</p>
-              <p class="mt-1 text-sm font-medium text-[#fbbf24]">{{ user.points }}</p>
+            <div class="flex justify-between gap-3 border-b border-[var(--stroke-quiet)] pb-2">
+              <dt class="quiet">最后登录</dt>
+              <dd class="text-sm">{{ user.last_login_at ? when(user.last_login_at) : '从未登录' }}</dd>
             </div>
-            <div>
-              <p class="text-xs text-[#7a7890]">注册时间</p>
-              <p class="mt-1 text-sm font-medium">{{ user.created_at || '-' }}</p>
+            <div class="flex justify-between gap-3 border-b border-[var(--stroke-quiet)] pb-2">
+              <dt class="quiet">NodeLoc</dt>
+              <dd class="text-sm">
+                <span v-if="bound" class="badge badge-accent">{{ user.oauth_username || user.oauth_name || user.oauth_provider }}</span>
+                <span v-else class="quiet">未绑定</span>
+              </dd>
             </div>
-            <div>
-              <p class="text-xs text-[#7a7890]">最后登录</p>
-              <p class="mt-1 text-sm font-medium">{{ user.last_login_at || '-' }}</p>
+            <div class="flex justify-between gap-3 border-b border-[var(--stroke-quiet)] pb-2">
+              <dt class="quiet">信任等级</dt>
+              <dd class="nums text-sm">{{ user.oauth_trust_level ?? '—' }}</dd>
             </div>
+          </dl>
+        </div>
+
+        <div class="card">
+          <h3 class="mb-1 text-sm font-semibold">权限</h3>
+          <p class="quiet mb-4 text-xs">角色决定管理端可见范围；不能修改自己的角色。</p>
+          <div class="flex flex-wrap items-end gap-3">
             <div>
-              <p class="text-xs text-[#7a7890]">连续签到</p>
-              <p class="mt-1 text-sm font-medium">{{ user.consecutive_days || 0 }} 天</p>
+              <label class="label" for="role">角色</label>
+              <select id="role" class="input w-40" :value="user.role" :disabled="busy" @change="changeRole">
+                <option value="user">普通用户</option>
+                <option value="admin">管理员</option>
+                <option value="super_admin">超级管理员</option>
+              </select>
             </div>
-            <div>
-              <p class="text-xs text-[#7a7890]">累计签到</p>
-              <p class="mt-1 text-sm font-medium">{{ user.total_checkins || 0 }} 次</p>
-            </div>
+            <button
+              class="btn btn-secondary btn-sm"
+              :disabled="busy"
+              @click="run(() => toggleAdmin(user!.id), '管理员标记已更新')"
+            >
+              {{ user.is_admin ? '取消管理员' : '设为管理员' }}
+            </button>
           </div>
         </div>
 
         <div class="card">
-          <h3 class="mb-4 font-semibold">账号状态</h3>
-          <div class="space-y-3">
-            <div class="flex items-center justify-between">
-              <span class="text-sm">OAuth 绑定</span>
-              <span :class="['badge', user.oauth_bound ? 'badge-success' : 'badge-neutral']">
-                {{ user.oauth_bound ? '已绑定' : '未绑定' }}
-              </span>
+          <h3 class="mb-1 text-sm font-semibold">积分调账</h3>
+          <p class="quiet mb-4 text-xs">当前余额 {{ user.points }} 分。扣减不能低于 0。</p>
+          <div class="flex flex-wrap items-end gap-3">
+            <div>
+              <label class="label" for="delta">调整数量</label>
+              <input id="delta" v-model="delta" type="number" class="input nums w-32" placeholder="正数加 / 负数扣" />
             </div>
-            <div class="flex items-center justify-between">
-              <span class="text-sm">管理员</span>
-              <span :class="['badge', user.is_admin ? 'badge-warning' : 'badge-neutral']">
-                {{ user.is_admin ? '是' : '否' }}
-              </span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span class="text-sm">账号状态</span>
-              <span :class="['badge', user.is_active ? 'badge-success' : 'badge-danger']">
-                {{ user.is_active ? '正常' : '已禁用' }}
-              </span>
-            </div>
+            <button class="btn btn-primary btn-sm" :disabled="busy || !points" @click="submitPoints">
+              {{ busy ? '处理中…' : '确认调账' }}
+            </button>
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- Points Adjustment -->
-    <div class="card">
-      <h3 class="mb-4 font-semibold">积分调账</h3>
-      <div class="flex flex-wrap items-end gap-4">
-        <div>
-          <label class="mb-1 block text-sm text-[#b3b1c4]">调整数量</label>
-          <input v-model.number="pointsForm.delta" type="number" class="input w-32" placeholder="正数加 / 负数扣" />
-        </div>
-        <div class="flex-1">
-          <label class="mb-1 block text-sm text-[#b3b1c4]">原因</label>
-          <input v-model="pointsForm.reason" class="input" placeholder="调账原因..." />
-        </div>
-        <button class="btn-primary" :disabled="pointsLoading || !pointsForm.delta" @click="submitPoints">
-          {{ pointsLoading ? '处理中...' : '确认调账' }}
-        </button>
-      </div>
-      <p v-if="pointsMessage" class="mt-3 text-sm" :class="pointsMessage.includes('成功') ? 'text-[#34d399]' : 'text-[#fb7185]'">
-        {{ pointsMessage }}
-      </p>
     </div>
   </section>
 </template>

@@ -16,7 +16,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/app/container"
+	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/system"
 )
 
@@ -183,6 +185,7 @@ func buildBootstrapRouter(sysSvc *system.Service, dataDir string) *gin.Engine {
 func buildFullRouter(ctn *container.Container, sysSvc *system.Service, dataDir string) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
+	router.Use(middleware.AdminAudit(audit.NewRecorder(ctn.Audit.Service)))
 	router.GET("/api/health", healthHandler)
 
 	cfg := ctn.Config

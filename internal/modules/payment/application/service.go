@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -20,6 +22,10 @@ var (
 	ErrPaymentNotComplete = errors.New("payment is not complete")
 )
 
+// maxOrderQuantity bounds a single storefront order so one buyer cannot drain
+// the card inventory in one request.
+const maxOrderQuantity = 20
+
 type Service struct {
 	orders      contract.OrderRepo
 	gateway     contract.PaymentGateway
@@ -32,6 +38,14 @@ type CreatePaymentInput struct {
 	UserID      uint
 	OrderNo     string
 	Description string
+}
+
+type CreateOrderInput struct {
+	UserID   uint
+	Slug     string
+	Quantity int
+	Contact  string
+	Note     string
 }
 
 type CreatePaymentOutput struct {
@@ -54,8 +68,8 @@ type OrderList struct {
 }
 
 type RefundInput struct {
-	OrderNo   string
-	ToUserID  string
+	OrderNo    string
+	ToUserID   string
 	ToUsername string
 }
 
@@ -64,6 +78,75 @@ func NewService(orders contract.OrderRepo, gateway contract.PaymentGateway, fulf
 		panic("payment: nil dependency")
 	}
 	return &Service{orders: orders, gateway: gateway, fulfillment: fulfillment, users: users, paymentID: strings.TrimSpace(paymentID)}
+}
+
+func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*models.Order, error) {
+	slug := strings.TrimSpace(input.Slug)
+	if input.UserID == 0 || slug == "" {
+		return nil, ErrInvalidInput
+	}
+	quantity := input.Quantity
+	if quantity == 0 {
+		quantity = 1
+	}
+	if quantity < 1 || quantity > maxOrderQuantity {
+		return nil, fmt.Errorf("%w: quantity must be between 1 and %d", ErrInvalidInput, maxOrderQuantity)
+	}
+
+	user, err := s.users.FindByID(ctx, input.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup order user: %w", err)
+	}
+	if user == nil || !user.IsActive {
+		return nil, ErrForbidden
+	}
+
+	product, err := s.orders.GetPurchasableProduct(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	if product.Price <= 0 {
+		return nil, domain.ErrProductNotPurchasable
+	}
+
+	contact := strings.TrimSpace(input.Contact)
+	note := strings.TrimSpace(input.Note)
+	if len(contact) > 255 {
+		return nil, fmt.Errorf("%w: contact information is too long", ErrInvalidInput)
+	}
+	if product.RequireContact && contact == "" {
+		return nil, fmt.Errorf("%w: this product requires contact information", ErrInvalidInput)
+	}
+	if product.ProductType == "card" && product.AutoDeliver {
+		available, err := s.orders.CountAvailableCards(ctx, product.ID)
+		if err != nil {
+			return nil, fmt.Errorf("count available cards: %w", err)
+		}
+		if available < int64(quantity) {
+			return nil, domain.ErrInsufficientStock
+		}
+	}
+
+	order := &models.Order{
+		OrderNo:           newOrderNo(),
+		UserID:            input.UserID,
+		ProductID:         product.ID,
+		Quantity:          quantity,
+		UnitPrice:         product.Price,
+		TotalAmount:       product.Price * quantity,
+		Status:            "pending",
+		FulfillmentStatus: "pending",
+	}
+	if contact != "" {
+		order.CustomerContact = &contact
+	}
+	if note != "" {
+		order.CustomerNote = &note
+	}
+	if err := s.orders.CreateOrder(ctx, order); err != nil {
+		return nil, fmt.Errorf("create order: %w", err)
+	}
+	return order, nil
 }
 
 func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (*CreatePaymentOutput, error) {
@@ -99,11 +182,17 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 	if len(description) > 255 {
 		description = description[:255]
 	}
+	if s.paymentID == "" {
+		return nil, domain.ErrPaymentNotConfigured
+	}
 
 	result, err := s.gateway.CreatePayment(ctx, contract.CreatePaymentRequest{
 		Amount: order.TotalAmount, Description: description, OrderID: order.OrderNo,
 	})
 	if err != nil {
+		if errors.Is(err, domain.ErrPaymentNotConfigured) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("create provider payment: %w", err)
 	}
 
@@ -136,7 +225,7 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 		OrderID:               order.ID,
 		OrderNo:               order.OrderNo,
 		Provider:              "nodeloc",
-		ProviderTransactionID: result.TransactionID,
+		ProviderTransactionID: stringPointer(result.TransactionID),
 		Type:                  domain.TransactionTypePayment,
 		Status:                status,
 		Amount:                order.TotalAmount,
@@ -186,6 +275,20 @@ func (s *Service) HandleCallback(ctx context.Context, params map[string]string) 
 	paymentOrder.PaidAt = &now
 	if err := s.orders.SavePaymentOrder(ctx, paymentOrder); err != nil {
 		return nil, err
+	}
+	// The provider call is only trusted once verified, so the recorded payment
+	// transaction is settled here rather than at checkout time.
+	paymentTransaction, err := s.orders.GetLatestTransaction(ctx, orderNo, domain.TransactionTypePayment)
+	if err != nil {
+		return nil, fmt.Errorf("load payment transaction: %w", err)
+	}
+	if paymentTransaction != nil {
+		paymentTransaction.Status = domain.StatusPaid
+		paymentTransaction.ProviderTransactionID = stringPointer(transactionID)
+		paymentTransaction.CompletedAt = &now
+		if err := s.orders.SaveTransaction(ctx, paymentTransaction); err != nil {
+			return nil, fmt.Errorf("settle payment transaction: %w", err)
+		}
 	}
 	order, err := s.orders.MarkOrderPaid(ctx, orderNo, transactionID, query.PlatformFee, query.MerchantPoints)
 	if err != nil {
@@ -271,8 +374,8 @@ func (s *Service) AdminGetOrder(ctx context.Context, orderNo string) (*models.Or
 	return order, nil
 }
 
-func (s *Service) AdminListOrders(ctx context.Context, limit, offset int, status string) (*OrderList, error) {
-	orders, total, err := s.orders.ListAllOrders(ctx, limit, offset, status)
+func (s *Service) AdminListOrders(ctx context.Context, limit, offset int, status, search string) (*OrderList, error) {
+	orders, total, err := s.orders.ListAllOrders(ctx, limit, offset, status, search)
 	if err != nil {
 		return nil, err
 	}
@@ -317,4 +420,14 @@ func stringPointer(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+// newOrderNo builds a collision-resistant order number accepted by NodeLoc
+// (alphanumeric, stable across retries, short enough for the callback payload).
+func newOrderNo() string {
+	suffix := make([]byte, 5)
+	if _, err := rand.Read(suffix); err != nil {
+		return fmt.Sprintf("NL%d", time.Now().UnixNano())
+	}
+	return "NL" + time.Now().UTC().Format("20060102150405") + strings.ToUpper(hex.EncodeToString(suffix))
 }

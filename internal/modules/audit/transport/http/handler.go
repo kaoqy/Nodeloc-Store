@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
+	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit/domain"
 )

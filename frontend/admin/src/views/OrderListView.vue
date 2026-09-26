@@ -1,52 +1,90 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { listOrders } from '../api/orders'
+import { errorMessage, fulfillmentStatus, money, orderStatus, when } from '../utils/format'
 import type { Order } from '../types'
+
+const PageSize = 20
 
 const loading = ref(true)
 const orders = ref<Order[]>([])
+const total = ref(0)
+const offset = ref(0)
 const search = ref('')
 const statusFilter = ref('')
-const page = ref(1)
-const perPage = ref(10)
+const error = ref('')
 
-const statusText: Record<string, string> = {
-  pending: '待支付', paid: '已支付', delivered: '已发货', completed: '已完成',
-  cancelled: '已取消', refunded: '已退款',
-}
+const page = computed(() => Math.floor(offset.value / PageSize) + 1)
+const from = computed(() => (orders.value.length ? offset.value + 1 : 0))
+const to = computed(() => offset.value + orders.value.length)
+
+const statuses = [
+  { value: 'pending', label: '待支付' },
+  { value: 'paid', label: '已支付' },
+  { value: 'completed', label: '已完成' },
+  { value: 'cancelled', label: '已取消' },
+  { value: 'refunded', label: '已退款' },
+]
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
-    const params: any = { page: page.value, per_page: perPage.value }
-    if (search.value) params.q = search.value
-    if (statusFilter.value) params.status = statusFilter.value
-    const result = await listOrders(params)
+    const result = await listOrders({
+      limit: PageSize,
+      offset: offset.value,
+      status: statusFilter.value || undefined,
+      q: search.value.trim() || undefined,
+    })
     orders.value = result.data
+    total.value = result.total
+  } catch (err) {
+    error.value = errorMessage(err, '加载订单失败')
   } finally {
     loading.value = false
   }
 }
 
-onMounted(load)
+function applyFilters() {
+  offset.value = 0
+  load()
+}
+
+function shift(delta: number) {
+  offset.value = Math.max(0, Math.min(Math.max(total.value - PageSize, 0), offset.value + delta * PageSize))
+  load()
+}
+
+const route = useRoute()
+
+onMounted(() => {
+  const status = route.query.status
+  if (typeof status === 'string') statusFilter.value = status
+  load()
+})
 </script>
 
 <template>
   <section class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <input v-model="search" class="input w-64" placeholder="搜索订单号..." @keyup.enter="load" />
-        <select v-model="statusFilter" class="input w-32" @change="load">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <input
+          v-model="search"
+          class="input w-64"
+          placeholder="订单号 / 用户 / 商品 / 交易号"
+          @keyup.enter="applyFilters"
+        />
+        <select v-model="statusFilter" class="input w-32" @change="applyFilters">
           <option value="">全部状态</option>
-          <option value="pending">待支付</option>
-          <option value="paid">已支付</option>
-          <option value="delivered">已发货</option>
-          <option value="completed">已完成</option>
-          <option value="cancelled">已取消</option>
+          <option v-for="item in statuses" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
-        <button class="btn-secondary" @click="load">筛选</button>
+        <button class="btn btn-secondary btn-sm" @click="applyFilters">筛选</button>
       </div>
+      <RouterLink to="/orders?status=pending" class="quiet text-xs">只看待支付 →</RouterLink>
     </div>
+
+    <div v-if="error" class="alert alert-danger">{{ error }}</div>
 
     <div class="table-container">
       <table>
@@ -56,50 +94,39 @@ onMounted(load)
             <th>用户</th>
             <th>商品</th>
             <th>金额</th>
-            <th>状态</th>
-            <th>支付时间</th>
-            <th>操作</th>
+            <th>订单状态</th>
+            <th>交付</th>
+            <th>创建时间</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="7">
-              <div class="space-y-2">
-                <div v-for="i in 5" :key="i" class="skeleton h-8" />
-              </div>
-            </td>
+            <td colspan="8"><div class="skeleton h-9" /></td>
           </tr>
           <tr v-else-if="!orders.length">
-            <td colspan="7" class="py-12 text-center text-[#7a7890]">暂无订单</td>
+            <td colspan="8" class="py-12 text-center text-sm quiet">没有符合条件的订单</td>
           </tr>
           <tr v-for="order in orders" :key="order.order_no">
             <td>
-              <RouterLink :to="`/orders/${order.order_no}`" class="text-indigo-300 hover:text-indigo-200">
+              <RouterLink :to="`/orders/${order.order_no}`" class="mono text-sm accent-text">
                 {{ order.order_no }}
               </RouterLink>
             </td>
-            <td>{{ order.user?.username || '-' }}</td>
-            <td>{{ order.product_name || order.product?.name || '数字商品' }}</td>
-            <td>¥{{ Number(order.total_amount).toFixed(2) }}</td>
+            <td class="text-sm">{{ order.user?.username || `#${order.user_id}` }}</td>
+            <td class="max-w-[220px] truncate text-sm">{{ order.product?.name || `#${order.product_id}` }}</td>
+            <td class="nums text-sm">{{ money(order.total_amount) }} <span class="quiet">×{{ order.quantity }}</span></td>
             <td>
-              <span
-                :class="[
-                  'badge',
-                  order.status === 'pending' ? 'badge-warning' :
-                  order.status === 'paid' ? 'badge-info' :
-                  order.status === 'delivered' ? 'badge-success' :
-                  order.status === 'completed' ? 'badge-success' :
-                  order.status === 'cancelled' ? 'badge-danger' : 'badge-neutral'
-                ]"
-              >
-                {{ statusText[order.status] || order.status }}
+              <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
+            </td>
+            <td>
+              <span class="badge" :class="fulfillmentStatus(order.fulfillment_status).badge">
+                {{ fulfillmentStatus(order.fulfillment_status).label }}
               </span>
             </td>
-            <td class="text-[#b3b1c4]">{{ order.paid_at || '-' }}</td>
-            <td>
-              <div class="flex items-center gap-2">
-                <RouterLink :to="`/orders/${order.order_no}`" class="btn-ghost text-xs">详情</RouterLink>
-              </div>
+            <td class="text-sm quiet">{{ when(order.created_at) }}</td>
+            <td class="text-right">
+              <RouterLink :to="`/orders/${order.order_no}`" class="btn btn-ghost btn-sm">详情</RouterLink>
             </td>
           </tr>
         </tbody>
@@ -107,11 +134,11 @@ onMounted(load)
     </div>
 
     <div class="flex items-center justify-between">
-      <p class="text-sm text-[#7a7890]">显示 {{ orders.length }} 条</p>
+      <p class="quiet text-xs mono">第 {{ from }}–{{ to }} 条 · 共 {{ total }} 条</p>
       <div class="flex items-center gap-2">
-        <button class="btn-secondary" :disabled="page <= 1" @click="page--; load()">上一页</button>
-        <span class="text-sm text-[#b3b1c4]">第 {{ page }} 页</span>
-        <button class="btn-secondary" @click="page++; load()">下一页</button>
+        <button class="btn btn-secondary btn-sm" :disabled="offset <= 0 || loading" @click="shift(-1)">上一页</button>
+        <span class="text-sm muted mono">{{ page }}</span>
+        <button class="btn btn-secondary btn-sm" :disabled="to >= total || loading" @click="shift(1)">下一页</button>
       </div>
     </div>
   </section>

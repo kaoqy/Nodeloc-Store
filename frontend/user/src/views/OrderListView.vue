@@ -1,80 +1,126 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { listOrders } from '../api/payment'
+import { errorMessage } from '../api/client'
+import { fulfillmentStatus, money, orderStatus, when } from '../utils/format'
 import type { Order } from '../types'
 
+const PageSize = 20
+
 const orders = ref<Order[]>([])
+const total = ref(0)
 const loading = ref(true)
+const loadingMore = ref(false)
 const error = ref('')
 
-const money = (value: number) =>
-  new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value)
-
-const date = (value: string) =>
-  new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
-
-const statusText = (status: string) =>
-  ({ pending: '待支付', paid: '已支付', processing: '处理中', delivered: '已交付', completed: '已完成', cancelled: '已取消', failed: '失败' }[status] || status)
-
-const statusBadge = (status: string) =>
-  ({ pending: 'badge-warning', paid: 'badge-info', processing: 'badge-info', delivered: 'badge-success', completed: 'badge-success', cancelled: 'badge-danger', failed: 'badge-danger' }[status] || 'badge-neutral')
-
-onMounted(async () => {
+async function load(offset: number) {
+  if (offset === 0) {
+    loading.value = true
+    error.value = ''
+  } else {
+    loadingMore.value = true
+  }
   try {
-    orders.value = (await listOrders()).orders
-  } catch {
-    error.value = '订单加载失败，请稍后重试'
+    const page = await listOrders(PageSize, offset)
+    orders.value = offset === 0 ? page.orders : [...orders.value, ...page.orders]
+    total.value = page.total ?? orders.value.length
+  } catch (e) {
+    if (offset === 0) error.value = errorMessage(e, '订单加载失败，请稍后重试')
+    else error.value = errorMessage(e, '加载更多失败，请稍后重试')
   } finally {
     loading.value = false
+    loadingMore.value = false
   }
-})
+}
+
+onMounted(() => load(0))
 </script>
 
 <template>
-  <div class="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-    <div class="mb-8">
-      <h1 class="text-3xl font-black tracking-tight">我的<span class="gradient-text">订单</span></h1>
-      <p class="mt-2 text-sm text-[#7b7990]">查看支付进度与数字商品交付状态</p>
-    </div>
+  <div class="mx-auto w-full max-w-4xl px-4 py-10 sm:px-6">
+    <header class="mb-8 flex items-end justify-between gap-4">
+      <div>
+        <p class="eyebrow">Orders</p>
+        <h1 class="mt-2 text-2xl font-bold">我的订单</h1>
+      </div>
+      <p v-if="!loading && orders.length" class="hint nums whitespace-nowrap">共 {{ total }} 笔</p>
+    </header>
 
-    <!-- Loading -->
-    <div v-if="loading" class="space-y-4">
-      <div v-for="i in 3" :key="i" class="skeleton h-28" />
-    </div>
-
-    <!-- Error -->
-    <div v-else-if="error" class="glass fade-in p-6 text-rose-300">{{ error }}</div>
-
-    <!-- Orders -->
-    <div v-else-if="orders.length" class="space-y-4 fade-in">
-      <RouterLink
-        v-for="order in orders"
-        :key="order.id"
-        :to="`/orders/${order.order_no}`"
-        class="sheen block rounded-[22px] border border-white/[0.12] bg-gradient-to-b from-white/[0.075] to-white/[0.03] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.13)] backdrop-blur-2xl transition-all duration-400 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] hover:-translate-y-0.5 hover:border-purple-400/35 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_18px_44px_-12px_rgba(0,0,0,0.5),0_0_36px_-10px_rgba(168,85,247,0.3)] sm:p-6"
-      >
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-3">
-              <h2 class="truncate font-semibold">{{ order.product?.name || order.product_name || '数字商品订单' }}</h2>
-              <span :class="['badge', statusBadge(order.status)]">{{ statusText(order.status) }}</span>
-            </div>
-            <p class="mt-2 text-sm text-[#7b7990]">订单号：{{ order.order_no }}</p>
-            <p class="mt-1 text-sm text-[#7b7990]">{{ date(order.created_at) }}</p>
-          </div>
-          <div class="sm:text-right">
-            <p class="text-xl font-bold gradient-text">{{ money(order.amount) }}</p>
-            <p class="mt-1 text-sm text-[#7b7990] transition group-hover:text-white">查看详情 →</p>
-          </div>
+    <div v-if="loading" class="space-y-3">
+      <div v-for="i in 4" :key="i" class="card flex items-center gap-4 !py-5">
+        <div class="skeleton size-14 !rounded-md" />
+        <div class="flex-1 space-y-2">
+          <div class="skeleton h-4 w-1/3" />
+          <div class="skeleton h-3 w-1/2" />
         </div>
-      </RouterLink>
+        <div class="skeleton h-5 w-16 !rounded-full" />
+      </div>
     </div>
 
-    <!-- Empty -->
-    <div v-else class="glass rise-in py-24 text-center">
-      <div class="mx-auto mb-6 grid size-16 place-items-center rounded-full border border-white/15 bg-white/[0.06] text-2xl backdrop-blur-md">🧾</div>
-      <p class="text-xl font-semibold">暂时没有订单</p>
-      <RouterLink to="/" class="mt-4 inline-block font-medium text-purple-300 transition hover:text-purple-200">去逛逛商品 →</RouterLink>
+    <p v-else-if="error && !orders.length" class="alert alert-danger">{{ error }}</p>
+
+    <template v-else>
+      <ul class="space-y-3">
+        <li v-for="order in orders" :key="order.id">
+          <RouterLink
+            :to="`/orders/${order.order_no}`"
+            class="card flex items-center gap-4 !p-4 transition-colors hover:border-[var(--stroke-hi)]"
+          >
+            <div class="grid size-14 shrink-0 place-items-center overflow-hidden rounded-md border border-[var(--stroke-quiet)] bg-[var(--surface-sunken)]">
+              <img
+                v-if="order.product?.image_path"
+                :src="order.product.image_path"
+                :alt="order.product.name"
+                class="size-full object-cover"
+              />
+              <span v-else class="mono text-xs text-[var(--text-quiet)]">
+                {{ (order.product?.name || 'NL').slice(0, 2).toUpperCase() }}
+              </span>
+            </div>
+
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="truncate text-[15px] font-semibold">
+                  {{ order.product?.name || '数字商品' }}
+                </h2>
+                <span v-if="order.quantity > 1" class="badge badge-neutral nums">×{{ order.quantity }}</span>
+              </div>
+              <p class="mono mt-1 truncate text-xs text-[var(--text-quiet)]">{{ order.order_no }}</p>
+              <p class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--text-quiet)]">
+                <span class="nums">{{ when(order.created_at) }}</span>
+                <span v-if="order.status === 'pending' || order.fulfillment_status === 'waiting_stock'" class="badge" :class="orderStatus(order.status).badge">
+                  {{ orderStatus(order.status).label }}
+                </span>
+                <span v-else class="badge" :class="fulfillmentStatus(order.fulfillment_status).badge">
+                  {{ fulfillmentStatus(order.fulfillment_status).label }}
+                </span>
+              </p>
+            </div>
+
+            <div class="shrink-0 text-right">
+              <p class="nums text-[15px] font-bold">{{ money(order.total_amount) }}</p>
+              <span class="mt-1.5 badge" :class="orderStatus(order.status).badge">
+                {{ orderStatus(order.status).label }}
+              </span>
+            </div>
+          </RouterLink>
+        </li>
+      </ul>
+
+      <p v-if="error" class="alert alert-warning mt-4">{{ error }}</p>
+
+      <div v-if="orders.length < total" class="mt-6 text-center">
+        <button class="btn btn-quiet btn-sm" :disabled="loadingMore" @click="load(orders.length)">
+          {{ loadingMore ? '加载中…' : '加载更多订单' }}
+        </button>
+      </div>
+    </template>
+
+    <div v-if="!loading && !orders.length && !error" class="card py-20 text-center">
+      <p class="text-[var(--text-quiet)]" aria-hidden="true">◌</p>
+      <p class="mt-3 font-semibold">还没有订单</p>
+      <p class="mt-1.5 text-sm text-[var(--text-quiet)]">购买支付后，订单与交付内容都会出现在这里。</p>
+      <RouterLink to="/" class="btn btn-primary btn-sm mt-6">去挑选商品</RouterLink>
     </div>
   </div>
 </template>

@@ -1,41 +1,103 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { listCoupons, createCoupon, updateCoupon, deleteCoupon } from '../api/coupons'
+import { computed, onMounted, ref } from 'vue'
+import { createCoupon, deleteCoupon, listCoupons, updateCoupon } from '../api/coupons'
+import { errorMessage, money, when } from '../utils/format'
 import type { Coupon } from '../types'
 
 const loading = ref(true)
+const busy = ref(false)
+const error = ref('')
 const coupons = ref<Coupon[]>([])
-const editing = ref<Coupon | null>(null)
+const editing = ref<Partial<Coupon> | null>(null)
+
+const canSave = computed(() => {
+  const item = editing.value
+  if (!item) return false
+  const value = Number(item.discount_value)
+  if (!item.code?.trim() || !value || value <= 0) return false
+  return item.discount_type !== 'percent' || value <= 100
+})
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
-    const result = await listCoupons()
-    coupons.value = result.data
+    coupons.value = await listCoupons()
+  } catch (err) {
+    error.value = errorMessage(err, '加载优惠券失败')
   } finally {
     loading.value = false
   }
 }
 
-function startEdit(coupon: Coupon) {
-  editing.value = { ...coupon }
-}
-
-async function saveEdit() {
-  if (!editing.value) return
-  if (editing.value.id) {
-    await updateCoupon(editing.value.id, editing.value)
-  } else {
-    await createCoupon(editing.value)
+function startCreate() {
+  editing.value = {
+    code: '',
+    discount_type: 'fixed',
+    discount_value: 0,
+    min_order_amount: 0,
+    max_uses: 0,
+    used_count: 0,
+    is_active: true,
+    valid_from: null,
+    valid_until: null,
   }
-  editing.value = null
-  await load()
 }
 
-async function deleteC(id: number) {
-  if (!confirm('确定删除？')) return
-  await deleteCoupon(id)
-  await load()
+function toDateInput(value?: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10)
+}
+
+function fromDateInput(value: string): string | null {
+  return value ? new Date(`${value}T00:00:00`).toISOString() : null
+}
+
+async function save() {
+  if (!editing.value || !canSave.value) return
+  const item = editing.value
+  busy.value = true
+  error.value = ''
+  try {
+    const payload = {
+      code: item.code?.trim().toUpperCase(),
+      discount_type: item.discount_type,
+      discount_value: Number(item.discount_value),
+      min_order_amount: Number(item.min_order_amount) || 0,
+      max_uses: Number(item.max_uses) || 0,
+      used_count: item.used_count ?? 0,
+      is_active: item.is_active ?? true,
+      valid_from: fromDateInput(toDateInput(item.valid_from)),
+      valid_until: fromDateInput(toDateInput(item.valid_until)),
+    }
+    if (item.id) {
+      await updateCoupon(item.id, payload)
+    } else {
+      await createCoupon(payload)
+    }
+    editing.value = null
+    await load()
+  } catch (err) {
+    error.value = errorMessage(err, '保存优惠券失败')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function remove(coupon: Coupon) {
+  if (!confirm(`删除优惠码「${coupon.code}」？`)) return
+  error.value = ''
+  try {
+    await deleteCoupon(coupon.id)
+    await load()
+  } catch (err) {
+    error.value = errorMessage(err, '删除优惠券失败')
+  }
+}
+
+function discountLabel(coupon: Coupon): string {
+  return coupon.discount_type === 'percent' ? `立减 ${coupon.discount_value}%` : `立减 ${money(coupon.discount_value)}`
 }
 
 onMounted(load)
@@ -43,54 +105,125 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <div class="flex items-center justify-between">
-      <p class="text-sm text-[#7a7890]">管理优惠券</p>
-      <button class="btn-primary" @click="editing = { id: 0, code: '', discount_type: 'fixed', discount_value: 0, min_order_amount: 0, max_uses: 0, used_count: 0, is_active: true }">+ 新建优惠券</button>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <p class="quiet text-sm">优惠码目前独立维护，尚未参与下单金额计算。</p>
+      <button class="btn btn-primary btn-sm" @click="startCreate">+ 新建优惠券</button>
     </div>
+
+    <div v-if="error" class="alert alert-danger">{{ error }}</div>
 
     <div class="table-container">
       <table>
         <thead>
-          <tr><th>ID</th><th>优惠码</th><th>折扣</th><th>最低消费</th><th>使用次数</th><th>状态</th><th>操作</th></tr>
+          <tr>
+            <th>优惠码</th>
+            <th>折扣</th>
+            <th>最低消费</th>
+            <th>使用情况</th>
+            <th>有效期</th>
+            <th>状态</th>
+            <th></th>
+          </tr>
         </thead>
         <tbody>
-          <tr v-if="loading"><td colspan="7"><div class="skeleton h-8" /></td></tr>
-          <tr v-else-if="!coupons.length"><td colspan="7" class="py-8 text-center text-[#7a7890]">暂无优惠券</td></tr>
-          <tr v-for="c in coupons" :key="c.id">
-            <td>{{ c.id }}</td>
-            <td><code class="rounded bg-white/10 px-2 py-0.5 font-mono text-sm">{{ c.code }}</code></td>
-            <td>{{ c.discount_type === 'fixed' ? `¥${c.discount_value}` : `${c.discount_value}%` }}</td>
-            <td>¥{{ c.min_order_amount }}</td>
-            <td>{{ c.used_count }}/{{ c.max_uses || '∞' }}</td>
-            <td><span :class="['badge', c.is_active ? 'badge-success' : 'badge-neutral']">{{ c.is_active ? '启用' : '禁用' }}</span></td>
+          <tr v-if="loading">
+            <td colspan="7"><div class="skeleton h-9" /></td>
+          </tr>
+          <tr v-else-if="!coupons.length">
+            <td colspan="7" class="py-12 text-center text-sm quiet">还没有优惠券</td>
+          </tr>
+          <tr v-for="coupon in coupons" :key="coupon.id">
+            <td><code class="mono text-sm">{{ coupon.code }}</code></td>
+            <td class="nums text-sm">{{ discountLabel(coupon) }}</td>
+            <td class="nums text-sm muted">{{ coupon.min_order_amount ? money(coupon.min_order_amount) : '不限' }}</td>
+            <td class="nums text-sm">
+              {{ coupon.used_count }} / {{ coupon.max_uses || '∞' }}
+            </td>
+            <td class="text-xs quiet">
+              {{ coupon.valid_from || coupon.valid_until ? `${toDateInput(coupon.valid_from) || '立即'} → ${toDateInput(coupon.valid_until) || '长期'}` : '长期有效' }}
+            </td>
             <td>
-              <button class="btn-ghost text-xs" @click="startEdit(c)">编辑</button>
-              <button class="btn-ghost text-xs text-[#fb7185]" @click="deleteC(c.id)">删除</button>
+              <span class="badge" :class="coupon.is_active ? 'badge-success' : 'badge-neutral'">
+                {{ coupon.is_active ? '启用' : '停用' }}
+              </span>
+            </td>
+            <td class="whitespace-nowrap text-right">
+              <button class="btn btn-ghost btn-sm" @click="editing = { ...coupon }">编辑</button>
+              <button class="btn btn-ghost btn-sm text-[var(--danger)]" @click="remove(coupon)">删除</button>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <!-- Edit Modal -->
-    <div v-if="editing" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div class="card w-full max-w-md">
-        <h3 class="mb-4 text-lg font-semibold">{{ editing.id ? '编辑优惠券' : '新建优惠券' }}</h3>
-        <div class="space-y-3">
-          <div><label class="mb-1 block text-sm text-[#b3b1c4]">优惠码</label><input v-model="editing.code" class="input" /></div>
-          <div class="grid grid-cols-2 gap-2">
-            <div><label class="mb-1 block text-sm text-[#b3b1c4]">折扣类型</label>
-              <select v-model="editing.discount_type" class="input"><option value="fixed">固定金额</option><option value="percentage">百分比</option></select>
-            </div>
-            <div><label class="mb-1 block text-sm text-[#b3b1c4]">折扣值</label><input v-model.number="editing.discount_value" type="number" class="input" /></div>
+    <div
+      v-if="editing"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
+      @click.self="editing = null"
+    >
+      <div class="card w-full max-w-md !p-5">
+        <h3 class="text-base font-semibold">{{ editing.id ? '编辑优惠券' : '新建优惠券' }}</h3>
+        <div class="mt-4 space-y-3">
+          <div>
+            <label class="label" for="k-code">优惠码 *</label>
+            <input id="k-code" v-model="editing.code" class="input mono uppercase" placeholder="SUMMER10" />
           </div>
-          <div><label class="mb-1 block text-sm text-[#b3b1c4]">最低消费</label><input v-model.number="editing.min_order_amount" type="number" class="input" /></div>
-          <div><label class="mb-1 block text-sm text-[#b3b1c4]">最大使用次数 (0=无限)</label><input v-model.number="editing.max_uses" type="number" class="input" /></div>
-          <label class="flex items-center gap-2 text-sm"><input v-model="editing.is_active" type="checkbox" /> 启用</label>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="k-type">类型</label>
+              <select id="k-type" v-model="editing.discount_type" class="input">
+                <option value="fixed">固定金额</option>
+                <option value="percent">百分比</option>
+              </select>
+            </div>
+            <div>
+              <label class="label" for="k-value">{{ editing.discount_type === 'percent' ? '折扣（%）' : '立减（元）' }} *</label>
+              <input id="k-value" v-model.number="editing.discount_value" type="number" min="1" class="input nums" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="k-min">最低消费</label>
+              <input id="k-min" v-model.number="editing.min_order_amount" type="number" min="0" class="input nums" />
+            </div>
+            <div>
+              <label class="label" for="k-max">最大次数（0=不限）</label>
+              <input id="k-max" v-model.number="editing.max_uses" type="number" min="0" class="input nums" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="k-from">生效日期</label>
+              <input
+                id="k-from"
+                :value="toDateInput(editing.valid_from)"
+                type="date"
+                class="input"
+                @input="editing.valid_from = fromDateInput(($event.target as HTMLInputElement).value)"
+              />
+            </div>
+            <div>
+              <label class="label" for="k-until">失效日期</label>
+              <input
+                id="k-until"
+                :value="toDateInput(editing.valid_until)"
+                type="date"
+                class="input"
+                @input="editing.valid_until = fromDateInput(($event.target as HTMLInputElement).value)"
+              />
+            </div>
+          </div>
+          <div v-if="editing.id" class="hint">已使用 {{ editing.used_count }} 次 · 创建于 {{ when(editing.created_at) }}</div>
+          <label class="flex items-center gap-2.5 text-sm">
+            <input v-model="editing.is_active" type="checkbox" class="accent-[var(--accent)]" />
+            启用
+          </label>
         </div>
-        <div class="mt-4 flex gap-2">
-          <button class="btn-secondary flex-1" @click="editing = null">取消</button>
-          <button class="btn-primary flex-1" @click="saveEdit">保存</button>
+        <div class="mt-5 flex justify-end gap-2">
+          <button class="btn btn-secondary btn-sm" @click="editing = null">取消</button>
+          <button class="btn btn-primary btn-sm" :disabled="busy || !canSave" @click="save">
+            {{ busy ? '保存中…' : '保存' }}
+          </button>
         </div>
       </div>
     </div>

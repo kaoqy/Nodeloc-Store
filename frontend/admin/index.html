@@ -1,5 +1,18 @@
 <!doctype html>
-<html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="theme-color" content="#070712"><title>Nodeloc Store 管理后台</title></head>
-<body><div id="app"></div><script type="module" src="/src/main.ts"></script></body>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0b0d" />
+    <title>Nodeloc Store 管理后台</title>
+    <script>
+      // Applied before first paint so the theme never flashes.
+      document.documentElement.dataset.theme =
+        localStorage.getItem('store-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>

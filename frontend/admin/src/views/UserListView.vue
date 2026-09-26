@@ -1,31 +1,67 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { listUsers } from '../api/users'
+import { computed, onMounted, ref } from 'vue'
+import { listUsers, toggleActive } from '../api/users'
+import { errorMessage, when } from '../utils/format'
 import type { User } from '../types'
 
-const loading = ref(true)
-const users = ref<User[]>([])
-const search = ref('')
-const page = ref(1)
-const perPage = ref(10)
+const PageSize = 20
 
-const roleText: Record<string, string> = {
-  super_admin: '超级管理员',
-  admin: '管理员',
-  operator: '运营',
-  support: '客服',
-  user: '普通用户',
+const loading = ref(true)
+const busy = ref(false)
+const error = ref('')
+const users = ref<User[]>([])
+const total = ref(0)
+const offset = ref(0)
+const search = ref('')
+
+const page = computed(() => Math.floor(offset.value / PageSize) + 1)
+const from = computed(() => (users.value.length ? offset.value + 1 : 0))
+const to = computed(() => offset.value + users.value.length)
+
+const roleMeta: Record<string, { label: string; badge: string }> = {
+  super_admin: { label: '超级管理员', badge: 'badge-danger' },
+  admin: { label: '管理员', badge: 'badge-warning' },
+  user: { label: '普通用户', badge: 'badge-neutral' },
 }
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
-    const params: any = { page: page.value, per_page: perPage.value }
-    if (search.value) params.q = search.value
-    const result = await listUsers(params)
+    const result = await listUsers({
+      limit: PageSize,
+      offset: offset.value,
+      q: search.value.trim() || undefined,
+    })
     users.value = result.data
+    total.value = result.total
+  } catch (err) {
+    error.value = errorMessage(err, '加载用户失败')
   } finally {
     loading.value = false
+  }
+}
+
+function applyFilters() {
+  offset.value = 0
+  load()
+}
+
+function shift(delta: number) {
+  offset.value = Math.max(0, Math.min(Math.max(total.value - PageSize, 0), offset.value + delta * PageSize))
+  load()
+}
+
+async function toggle(user: User) {
+  busy.value = true
+  error.value = ''
+  try {
+    const next = await toggleActive(user.id)
+    users.value = users.value.map((item) => (item.id === next.id ? next : item))
+  } catch (err) {
+    error.value = errorMessage(err, '更新用户状态失败')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -34,77 +70,82 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <input v-model="search" class="input w-64" placeholder="搜索用户..." @keyup.enter="load" />
-        <button class="btn-secondary" @click="load">筛选</button>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <input v-model="search" class="input w-64" placeholder="用户名 / 邮箱 / 昵称" @keyup.enter="applyFilters" />
+        <button class="btn btn-secondary btn-sm" @click="applyFilters">筛选</button>
       </div>
-      <button class="btn-primary">+ 新建用户</button>
+      <p class="quiet text-xs mono">共 {{ total }} 位用户</p>
     </div>
+
+    <div v-if="error" class="alert alert-danger">{{ error }}</div>
 
     <div class="table-container">
       <table>
         <thead>
           <tr>
-            <th>ID</th>
-            <th>用户名</th>
+            <th>用户</th>
             <th>邮箱</th>
+            <th>NodeLoc</th>
             <th>角色</th>
+            <th>积分</th>
             <th>状态</th>
             <th>注册时间</th>
-            <th>操作</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="7">
-              <div class="space-y-2">
-                <div v-for="i in 5" :key="i" class="skeleton h-8" />
-              </div>
-            </td>
+            <td colspan="8"><div class="skeleton h-9" /></td>
           </tr>
           <tr v-else-if="!users.length">
-            <td colspan="7" class="py-12 text-center text-[#7a7890]">暂无用户</td>
+            <td colspan="8" class="py-12 text-center text-sm quiet">没有符合条件的用户</td>
           </tr>
           <tr v-for="user in users" :key="user.id">
-            <td>{{ user.id }}</td>
             <td>
-              <div class="flex items-center gap-3">
-                <div class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500/30 to-purple-500/30 text-sm font-medium text-indigo-300">
-                  {{ user.username[0].toUpperCase() }}
+              <div class="flex min-w-0 items-center gap-3">
+                <img
+                  v-if="user.oauth_avatar || user.avatar_url"
+                  :src="user.oauth_avatar || user.avatar_url"
+                  :alt="user.username"
+                  class="h-9 w-9 shrink-0 rounded-full border border-[var(--stroke)] object-cover"
+                />
+                <span
+                  v-else
+                  class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-sm font-semibold accent-text"
+                >
+                  {{ user.username.slice(0, 1).toUpperCase() }}
+                </span>
+                <div class="min-w-0">
+                  <RouterLink :to="`/users/${user.id}`" class="block truncate text-sm font-medium hover:text-[var(--accent)]">
+                    {{ user.username }}
+                  </RouterLink>
+                  <p class="quiet text-xs mono">#{{ user.id }}</p>
                 </div>
-                <span class="font-medium">{{ user.username }}</span>
               </div>
             </td>
-            <td class="text-[#b3b1c4]">{{ user.email || '-' }}</td>
-            <td>
-              <span
-                :class="[
-                  'badge',
-                  user.role === 'super_admin' ? 'badge-danger' :
-                  user.role === 'admin' ? 'badge-warning' :
-                  user.role === 'operator' ? 'badge-info' : 'badge-neutral'
-                ]"
-              >
-                {{ roleText[user.role] || user.role }}
-              </span>
+            <td class="max-w-[200px] truncate text-sm muted">{{ user.email || '—' }}</td>
+            <td class="text-sm">
+              <span v-if="user.oauth_provider" class="badge badge-accent">{{ user.oauth_username || user.oauth_provider }}</span>
+              <span v-else class="quiet text-xs">未绑定</span>
             </td>
             <td>
-              <span
-                :class="[
-                  'badge',
-                  user.is_active ? 'badge-success' : 'badge-neutral'
-                ]"
-              >
-                {{ user.is_active ? '正常' : '禁用' }}
+              <span class="badge" :class="(roleMeta[user.role] || roleMeta.user).badge">
+                {{ (roleMeta[user.role] || roleMeta.user).label }}
               </span>
             </td>
-            <td class="text-[#b3b1c4]">{{ user.created_at }}</td>
+            <td class="nums text-sm">{{ user.points }}</td>
             <td>
-              <div class="flex items-center gap-2">
-                <RouterLink :to="`/users/${user.id}`" class="btn-ghost text-xs">详情</RouterLink>
-                <button class="btn-ghost text-xs">编辑</button>
-              </div>
+              <span class="badge" :class="user.is_active ? 'badge-success' : 'badge-neutral'">
+                {{ user.is_active ? '正常' : '已禁用' }}
+              </span>
+            </td>
+            <td class="text-sm quiet">{{ when(user.created_at) }}</td>
+            <td class="text-right whitespace-nowrap">
+              <RouterLink :to="`/users/${user.id}`" class="btn btn-ghost btn-sm">详情</RouterLink>
+              <button class="btn btn-ghost btn-sm" :disabled="busy" @click="toggle(user)">
+                {{ user.is_active ? '禁用' : '启用' }}
+              </button>
             </td>
           </tr>
         </tbody>
@@ -112,11 +153,11 @@ onMounted(load)
     </div>
 
     <div class="flex items-center justify-between">
-      <p class="text-sm text-[#7a7890]">显示 {{ users.length }} 条</p>
+      <p class="quiet text-xs mono">第 {{ from }}–{{ to }} 条 · 共 {{ total }} 条</p>
       <div class="flex items-center gap-2">
-        <button class="btn-secondary" :disabled="page <= 1" @click="page--; load()">上一页</button>
-        <span class="text-sm text-[#b3b1c4]">第 {{ page }} 页</span>
-        <button class="btn-secondary" @click="page++; load()">下一页</button>
+        <button class="btn btn-secondary btn-sm" :disabled="offset <= 0 || loading" @click="shift(-1)">上一页</button>
+        <span class="text-sm muted mono">{{ page }}</span>
+        <button class="btn btn-secondary btn-sm" :disabled="to >= total || loading" @click="shift(1)">下一页</button>
       </div>
     </div>
   </section>

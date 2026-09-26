@@ -1,21 +1,14 @@
 import client from './client'
 import type { Category } from '../types'
 
-export async function listCategories() {
-  const { data } = await client.get<{ data: Category[] }>('/admin/categories')
-  return data
-}
+export const listCategories = () =>
+  client.get<{ data: Category[] }>('/admin/categories').then((r) => r.data.data ?? [])
 
-export async function createCategory(category: Partial<Category>) {
-  const { data } = await client.post('/admin/categories', { category })
-  return data
-}
+// The backend binds the category itself as the request body (no wrapper key).
+export const createCategory = (category: Partial<Category>) =>
+  client.post<{ data: Category }>('/admin/categories', category).then((r) => r.data.data)
 
-export async function updateCategory(id: number, category: Partial<Category>) {
-  const { data } = await client.put(`/admin/categories/${id}`, { category })
-  return data
-}
+export const updateCategory = (id: number, category: Partial<Category>) =>
+  client.put<{ data: Category }>(`/admin/categories/${id}`, category).then((r) => r.data.data)
 
-export async function deleteCategory(id: number) {
-  await client.delete(`/admin/categories/${id}`)
-}
+export const deleteCategory = (id: number) => client.delete(`/admin/categories/${id}`)

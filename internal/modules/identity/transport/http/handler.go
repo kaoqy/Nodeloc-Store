@@ -2,6 +2,7 @@ package http
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity/domain"
@@ -17,6 +19,7 @@ import (
 const (
 	claimsKey        = "identity_claims"
 	oauthStateCookie = "nodeloc_oauth_state"
+	oauthBindCookie  = "nodeloc_oauth_bind"
 )
 
 type Handler struct {
@@ -38,6 +41,115 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	auth.POST("/bind-oauth", h.AuthMiddleware(), h.BindOAuth)
 	auth.DELETE("/unbind-oauth", h.AuthMiddleware(), h.UnbindOAuth)
 	auth.GET("/me", h.AuthMiddleware(), h.Me)
+
+	admin := router.Group("/api/v1/admin/users")
+	admin.Use(h.AuthMiddleware(), middleware.RequireAdmin())
+	admin.GET("", h.AdminListUsers)
+	admin.GET("/:id", h.AdminGetUser)
+	admin.POST("/:id/role", h.AdminSetRole)
+	admin.POST("/:id/toggle-admin", h.AdminToggleAdmin)
+	admin.POST("/:id/toggle-active", h.AdminToggleActive)
+	admin.POST("/:id/points", h.AdminAdjustPoints)
+}
+
+func (h *Handler) AdminListUsers(c *gin.Context) {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil || limit <= 0 {
+		limit = 20
+	}
+	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if err != nil || offset < 0 {
+		offset = 0
+	}
+	users, total, err := h.service.AdminListUsers(c.Request.Context(), limit, offset, c.Query("q"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": users, "total": total, "limit": limit, "offset": offset})
+}
+
+func (h *Handler) AdminGetUser(c *gin.Context) {
+	user, err := h.service.AdminGetUser(c.Request.Context(), idParam(c))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+func (h *Handler) AdminSetRole(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	var request struct {
+		Role string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, domain.ErrInvalidInput)
+		return
+	}
+	user, err := h.service.AdminSetRole(c.Request.Context(), claims.UserID, idParam(c), request.Role)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+func (h *Handler) AdminToggleAdmin(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	user, err := h.service.AdminToggleAdmin(c.Request.Context(), claims.UserID, idParam(c))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+func (h *Handler) AdminToggleActive(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	user, err := h.service.AdminToggleActive(c.Request.Context(), claims.UserID, idParam(c))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+func (h *Handler) AdminAdjustPoints(c *gin.Context) {
+	var request struct {
+		Delta *int `json:"delta" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Delta == nil {
+		writeError(c, domain.ErrInvalidInput)
+		return
+	}
+	user, err := h.service.AdminAdjustPoints(c.Request.Context(), idParam(c), *request.Delta)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+// idParam reads the numeric :id path parameter; 0 means it was missing or junk.
+func idParam(c *gin.Context) uint {
+	id, err := strconv.ParseUint(strings.TrimSpace(c.Param("id")), 10, 32)
+	if err != nil {
+		return 0
+	}
+	return uint(id)
 }
 
 func (h *Handler) Register(c *gin.Context) {
@@ -65,7 +177,7 @@ func (h *Handler) Register(c *gin.Context) {
 func (h *Handler) Login(c *gin.Context) {
 	var request struct {
 		Identifier string `json:"identifier" binding:"required"`
-		Password   string  `json:"password" binding:"required"`
+		Password   string `json:"password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		writeError(c, domain.ErrInvalidCredentials)
@@ -94,7 +206,14 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 		return
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(oauthStateCookie, state, int((10*time.Minute).Seconds()), "/api/v1/auth", "", h.secureCookie, true)
+	c.SetCookie(oauthStateCookie, state, int((10 * time.Minute).Seconds()), "/api/v1/auth", "", h.secureCookie, true)
+	// A bind intent tells the callback to hand the code back to the signed-in
+	// SPA instead of logging the NodeLoc identity in.
+	if c.Query("bind") == "true" {
+		c.SetCookie(oauthBindCookie, "1", int((10 * time.Minute).Seconds()), "/api/v1/auth", "", h.secureCookie, true)
+	} else {
+		c.SetCookie(oauthBindCookie, "", -1, "/api/v1/auth", "", h.secureCookie, true)
+	}
 	if c.Query("redirect") == "true" {
 		c.Redirect(http.StatusFound, redirectURL)
 		return
@@ -103,27 +222,61 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 }
 
 func (h *Handler) OAuthCallback(c *gin.Context) {
+	binding := false
+	if value, err := c.Cookie(oauthBindCookie); err == nil && value != "" {
+		binding = true
+	}
+	c.SetCookie(oauthBindCookie, "", -1, "/api/v1/auth", "", h.secureCookie, true)
+
 	stateCookie, err := c.Cookie(oauthStateCookie)
 	if err != nil || stateCookie == "" || c.Query("state") == "" || stateCookie != c.Query("state") {
-		writeError(c, domain.ErrInvalidCredentials)
+		h.oauthFailure(c, domain.ErrInvalidCredentials, binding)
+		return
+	}
+	if binding {
+		// The SPA redeems the code against POST /auth/bind-oauth with its own
+		// bearer token; fragments never reach a server or log.
+		c.SetCookie(oauthStateCookie, "", -1, "/api/v1/auth", "", h.secureCookie, true)
+		fragment := url.Values{}
+		fragment.Set("bind_code", c.Query("code"))
+		fragment.Set("state", c.Query("state"))
+		c.Redirect(http.StatusFound, "/profile#"+fragment.Encode())
 		return
 	}
 	params := queryParams(c)
 	result, err := h.service.OAuthLogin(c.Request.Context(), c.Query("code"), params)
 	if err != nil {
-		writeError(c, err)
+		h.oauthFailure(c, err, false)
 		return
 	}
 	c.SetCookie(oauthStateCookie, "", -1, "/api/v1/auth", "", h.secureCookie, true)
 	// XHR clients (SPA) get JSON; browser navigations are bounced back to the
 	// SPA callback page with the token in the URL fragment (never logged).
-	if strings.Contains(c.GetHeader("Accept"), "application/json") {
+	if acceptsJSON(c) {
 		c.JSON(http.StatusOK, result)
 		return
 	}
 	fragment := url.Values{}
 	fragment.Set("access_token", result.Tokens.AccessToken)
 	c.Redirect(http.StatusFound, "/oauth/callback#"+fragment.Encode())
+}
+
+// oauthFailure answers the callback: JSON for the SPA, otherwise a redirect so
+// a browser that NodeLoc bounced back here never sees a bare error document.
+func (h *Handler) oauthFailure(c *gin.Context, err error, binding bool) {
+	if acceptsJSON(c) {
+		writeError(c, err)
+		return
+	}
+	if binding {
+		c.Redirect(http.StatusFound, "/profile?oauth_error=bind")
+		return
+	}
+	c.Redirect(http.StatusFound, "/login?oauth_error=1")
+}
+
+func acceptsJSON(c *gin.Context) bool {
+	return strings.Contains(c.GetHeader("Accept"), "application/json")
 }
 
 // AuthMiddleware validates JWT and sets identity claims in context.
@@ -143,6 +296,10 @@ func (h *Handler) AuthMiddleware() gin.HandlerFunc {
 		}
 		c.Set(claimsKey, claims)
 		c.Set("user_id", claims.UserID)
+		// RequireAdmin reads the shared context keys, so this middleware has to
+		// populate them as well or every admin user route is rejected as anonymous.
+		c.Set(middleware.UserRoleKey, claims.Role)
+		c.Set(middleware.IsAdminKey, claims.IsAdmin)
 		c.Next()
 	}
 }
@@ -255,6 +412,10 @@ func writeError(c *gin.Context, err error) {
 		status, message = http.StatusNotFound, err.Error()
 	case errors.Is(err, domain.ErrUsernameTaken), errors.Is(err, domain.ErrEmailTaken), errors.Is(err, domain.ErrIdentityAlreadyBound), errors.Is(err, domain.ErrLastLoginMethod):
 		status, message = http.StatusConflict, err.Error()
+	default:
+		// The client only sees a generic message, so the real cause has to reach
+		// the server log or unexplained 500s cannot be diagnosed.
+		log.Printf("[identity] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
 	}
 	c.JSON(status, gin.H{"error": message})
 }

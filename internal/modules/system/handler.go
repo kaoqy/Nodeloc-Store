@@ -37,6 +37,7 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	admin.POST("/settings", h.SaveSettings)
 	admin.POST("/settings/oauth-test", h.TestOAuth)
 	admin.POST("/settings/payment-test", h.TestPayment)
+	admin.GET("/stats", h.Stats)
 }
 
 func (h *Handler) Status(c *gin.Context) {
@@ -99,6 +100,19 @@ func (h *Handler) TestOAuth(c *gin.Context) {
 func (h *Handler) TestPayment(c *gin.Context) {
 	ok, msg := h.service.TestPayment(c.Request.Context())
 	c.JSON(http.StatusOK, gin.H{"ok": ok, "msg": msg})
+}
+
+func (h *Handler) Stats(c *gin.Context) {
+	days, err := strconv.Atoi(c.DefaultQuery("days", "30"))
+	if err != nil || days <= 0 {
+		days = 30
+	}
+	stats, err := h.service.Stats(c.Request.Context(), days)
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, stats)
 }
 
 // requireAdmin rejects non-admin authenticated users.

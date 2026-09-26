@@ -256,6 +256,85 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*domain.Token
 	return s.tokens.Parse(ctx, token)
 }
 
+// AdminListUsers pages the user directory for the back office.
+func (s *Service) AdminListUsers(ctx context.Context, limit, offset int, search string) ([]*domain.User, int64, error) {
+	return s.repo.List(ctx, limit, offset, search)
+}
+
+func (s *Service) AdminGetUser(ctx context.Context, userID uint) (*domain.User, error) {
+	if userID == 0 {
+		return nil, domain.ErrInvalidInput
+	}
+	return s.repo.FindByID(ctx, userID)
+}
+
+// AdminSetRole changes a user's role. IsAdmin is kept in sync because both the
+// JWT claims and the bootstrap check read it. Self-demotion is refused so an
+// admin can never lock themselves out of the back office.
+func (s *Service) AdminSetRole(ctx context.Context, actorID, userID uint, role string) (*domain.User, error) {
+	role = strings.TrimSpace(role)
+	if role != "user" && role != "admin" && role != "super_admin" {
+		return nil, fmt.Errorf("%w: role must be user, admin or super_admin", domain.ErrInvalidInput)
+	}
+	if actorID == userID {
+		return nil, fmt.Errorf("%w: you cannot change your own role", domain.ErrInvalidInput)
+	}
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	user.Role = role
+	user.IsAdmin = role != "user"
+	if err := s.repo.Update(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *Service) AdminToggleAdmin(ctx context.Context, actorID, userID uint) (*domain.User, error) {
+	next := "user"
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !user.IsAdmin || user.Role == "user" {
+		next = "admin"
+	}
+	return s.AdminSetRole(ctx, actorID, userID, next)
+}
+
+func (s *Service) AdminToggleActive(ctx context.Context, actorID, userID uint) (*domain.User, error) {
+	if actorID == userID {
+		return nil, fmt.Errorf("%w: you cannot disable your own account", domain.ErrInvalidInput)
+	}
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	user.IsActive = !user.IsActive
+	if err := s.repo.Update(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// AdminAdjustPoints moves a user's point balance, never below zero.
+func (s *Service) AdminAdjustPoints(ctx context.Context, userID uint, delta int) (*domain.User, error) {
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	balance := user.Points + delta
+	if balance < 0 {
+		return nil, fmt.Errorf("%w: balance would drop below zero", domain.ErrInvalidInput)
+	}
+	user.Points = balance
+	if err := s.repo.Update(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 func (s *Service) createOAuthUser(ctx context.Context, profile domain.OAuthProfile) (*domain.User, error) {
 	base := strings.TrimSpace(profile.Username)
 	if base == "" {

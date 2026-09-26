@@ -67,6 +67,11 @@ type OAuthIdentity struct {
 	User User `gorm:"foreignKey:UserID;" json:"-"`
 }
 
+// TableName pins the table name; GORM would otherwise derive
+// "o_auth_identities" from the OAuth acronym and miss the table the identity
+// module queries.
+func (OAuthIdentity) TableName() string { return "oauth_identities" }
+
 // ── Points & Checkin ─────────────────────────────────────────────────
 
 type PointLedger struct {
@@ -137,7 +142,7 @@ type Product struct {
 type Card struct {
 	Base
 	ProductID uint   `gorm:"not null;index:idx_product_status" json:"product_id"`
-	Content   string `gorm:"type:text;not null" json:"-"`
+	Content   string `gorm:"type:text;not null" json:"content"`
 	Status    string `gorm:"size:16;default:'available';not null;index:idx_product_status" json:"status"`
 	OrderID   *uint  `json:"order_id,omitempty"`
 	SoldAt    *time.Time `json:"sold_at,omitempty"`
@@ -168,8 +173,8 @@ type Order struct {
 	DeliveryContent   *string `gorm:"type:text" json:"delivery_content,omitempty"`
 	DeliveryNote      *string `gorm:"type:text" json:"delivery_note,omitempty"`
 
-	User    User             `gorm:"foreignKey:UserID;" json:"-"`
-	Product Product          `gorm:"foreignKey:ProductID;" json:"-"`
+	User    *User            `gorm:"foreignKey:UserID;" json:"user,omitempty"`
+	Product *Product         `gorm:"foreignKey:ProductID;" json:"product,omitempty"`
 	Cards   []Card           `gorm:"foreignKey:OrderID;" json:"-"`
 	Records []DeliveryRecord `gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE;" json:"-"`
 }

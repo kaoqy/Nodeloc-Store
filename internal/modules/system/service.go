@@ -89,11 +89,16 @@ func (s *Service) Status() map[string]any {
 		"version":     Version,
 	}
 	if initialized {
-		name := "Nodeloc Store"
-		if rt, err := s.currentRuntime(); err == nil && rt != nil && rt.App.Name != "" {
-			name = rt.App.Name
+		app := map[string]any{"name": "Nodeloc Store"}
+		if rt, err := s.currentRuntime(); err == nil && rt != nil {
+			if rt.App.Name != "" {
+				app["name"] = rt.App.Name
+			}
+			app["slogan"] = rt.App.Slogan
+			app["description"] = rt.App.Description
+			app["logo"] = rt.App.Logo
 		}
-		status["app"] = map[string]any{"name": name}
+		status["app"] = app
 	}
 	return status
 }
@@ -218,7 +223,7 @@ func (s *Service) runInstall(req InstallRequest) (*gorm.DB, error) {
 		Theme:    req.Theme,
 	}
 	rt.OAuth.Enabled = true
-	rt.Payment.Enabled = true
+	rt.Payment.Enabled = req.Payment.PaymentID != "" && req.Payment.SecretKey != ""
 	rt.MergeDefaults()
 	rt.OAuth.RedirectURI = strings.TrimSpace(rt.OAuth.RedirectURI)
 	if rt.OAuth.RedirectURI == "" {
@@ -395,6 +400,7 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	if next.Payment.SecretKey == "" || next.Payment.SecretKey == Redacted {
 		next.Payment.SecretKey = existing.Payment.SecretKey
 	}
+	next.Payment.Enabled = next.Payment.Enabled && next.Payment.PaymentID != "" && next.Payment.SecretKey != ""
 	next.MergeDefaults()
 	if next.App.Domain == "" {
 		next.App.Domain = existing.App.Domain
@@ -442,7 +448,7 @@ func (s *Service) TestPayment(ctx context.Context) (bool, string) {
 	}
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "not fully configured"):
+	case strings.Contains(msg, "not fully configured"), strings.Contains(msg, "payment is not configured"):
 		return false, "支付参数未配置完整（Payment ID / Secret Key）"
 	case strings.Contains(msg, "NodeLoc returned HTTP"):
 		return true, "支付网关可达（NodeLoc 返回: " + msg + "）"

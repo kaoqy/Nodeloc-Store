@@ -122,3 +122,71 @@ func RequireAdmin() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// AuditWriter appends one admin action to the audit trail.
+type AuditWriter interface {
+	Record(action, target, detail string, actorID uint, ip string)
+}
+
+const adminAPIPrefix = "/api/v1/admin/"
+
+// AdminAudit records every successful mutation below the admin API prefix so
+// the back office has a trail of who changed what.
+func AdminAudit(writer AuditWriter) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+		if writer == nil || c.Request.Method == http.MethodGet {
+			return
+		}
+		if !strings.HasPrefix(c.Request.URL.Path, adminAPIPrefix) || c.Writer.Status() >= http.StatusBadRequest {
+			return
+		}
+		target := strings.TrimPrefix(c.Request.URL.Path, adminAPIPrefix)
+		actor, _ := c.Get(UserIDKey)
+		actorID, _ := actor.(uint)
+		writer.Record(auditAction(c.Request.Method, target), target, "", actorID, c.ClientIP())
+	}
+}
+
+// auditAction turns "orders/NL123/cancel" into "order.cancel".
+func auditAction(method, target string) string {
+	segments := strings.Split(strings.Trim(target, "/"), "/")
+	resource := singularResource(segments[0])
+	verb := map[string]string{
+		http.MethodPost:   "create",
+		http.MethodPut:    "update",
+		http.MethodPatch:  "update",
+		http.MethodDelete: "delete",
+	}[method]
+	if verb == "" {
+		verb = strings.ToLower(method)
+	}
+	// A trailing word segment is an explicit action: /orders/:no/refund.
+	if last := segments[len(segments)-1]; len(segments) > 1 && !isNumeric(last) {
+		verb = last
+	} else if len(segments) > 2 {
+		// Nested collection item: /products/:id/cards/:cardID targets cards.
+		resource = singularResource(segments[len(segments)-2])
+	}
+	return resource + "." + verb
+}
+
+// singularResource turns a URL collection segment into a log-friendly subject.
+func singularResource(segment string) string {
+	if strings.HasSuffix(segment, "ies") && len(segment) > 3 {
+		return segment[:len(segment)-3] + "y"
+	}
+	return strings.TrimSuffix(segment, "s")
+}
+
+func isNumeric(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}

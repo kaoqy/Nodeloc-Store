@@ -82,6 +82,7 @@ func (r *GormUserRepo) FindByOAuth(ctx context.Context, provider, providerUID st
 	var user domain.User
 	err := r.db.WithContext(ctx).
 		Table("users").
+		Select("users.*").
 		Joins("JOIN oauth_identities ON oauth_identities.user_id = users.id AND oauth_identities.deleted_at IS NULL").
 		Where("oauth_identities.provider = ? AND oauth_identities.provider_uid = ?", strings.TrimSpace(provider), strings.TrimSpace(providerUID)).
 		First(&user).Error
@@ -199,10 +200,14 @@ func translateGormError(err error) error {
 	return err
 }
 
-func (r *GormUserRepo) List(ctx context.Context, limit, offset int) ([]*domain.User, int64, error) {
+func (r *GormUserRepo) List(ctx context.Context, limit, offset int, search string) ([]*domain.User, int64, error) {
 	var users []*domain.User
 	var total int64
 	query := r.db.WithContext(ctx).Model(&domain.User{})
+	if pattern := strings.TrimSpace(search); pattern != "" {
+		like := "%" + pattern + "%"
+		query = query.Where("username LIKE ? OR email LIKE ? OR nickname LIKE ?", like, like, like)
+	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}

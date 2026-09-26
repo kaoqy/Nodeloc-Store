@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	ErrOrderNotFound        = errors.New("order not found")
-	ErrPaymentOrderNotFound = errors.New("payment order not found")
-	ErrInsufficientStock    = errors.New("insufficient card stock")
+	ErrOrderNotFound         = domain.ErrOrderNotFound
+	ErrPaymentOrderNotFound  = domain.ErrPaymentOrderNotFound
+	ErrInsufficientStock     = domain.ErrInsufficientStock
+	ErrProductNotPurchasable = domain.ErrProductNotPurchasable
 )
 
 type GormStore struct {
@@ -69,10 +70,52 @@ func (s *GormStore) SaveTransaction(ctx context.Context, transaction *domain.Tra
 	return s.db.WithContext(ctx).Save(transaction).Error
 }
 
+// GetLatestTransaction returns the newest transaction of the given type for an
+// order, or nil when the order has none.
+func (s *GormStore) GetLatestTransaction(ctx context.Context, orderNo, transactionType string) (*domain.Transaction, error) {
+	var result domain.Transaction
+	err := s.db.WithContext(ctx).
+		Where("order_no = ? AND type = ?", strings.TrimSpace(orderNo), transactionType).
+		Order("id DESC").
+		First(&result).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetPurchasableProduct loads a product that may be ordered right now.
+func (s *GormStore) GetPurchasableProduct(ctx context.Context, slug string) (*models.Product, error) {
+	var product models.Product
+	err := s.db.WithContext(ctx).
+		Where("slug = ? AND is_published = ? AND is_archived = ?", strings.TrimSpace(slug), true, false).
+		First(&product).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrProductNotPurchasable
+	}
+	return &product, err
+}
+
+func (s *GormStore) CountAvailableCards(ctx context.Context, productID uint) (int64, error) {
+	var count int64
+	err := s.db.WithContext(ctx).Model(&models.Card{}).
+		Where("product_id = ? AND status = ?", productID, "available").
+		Count(&count).Error
+	return count, err
+}
+
+func (s *GormStore) CreateOrder(ctx context.Context, order *models.Order) error {
+	return s.db.WithContext(ctx).Create(order).Error
+}
+
 func (s *GormStore) GetOrderByNo(ctx context.Context, orderNo string) (*models.Order, error) {
 	var order models.Order
 	err := s.db.WithContext(ctx).
 		Preload("Product").
+		Preload("User").
 		Preload("Cards").
 		Preload("Records").
 		Where("order_no = ?", strings.TrimSpace(orderNo)).
@@ -160,7 +203,7 @@ func (s *GormStore) MarkOrderRefunded(ctx context.Context, orderNo string) error
 	return nil
 }
 
-func (s *GormStore) ListAllOrders(ctx context.Context, limit, offset int, status string) ([]models.Order, int64, error) {
+func (s *GormStore) ListAllOrders(ctx context.Context, limit, offset int, status, search string) ([]models.Order, int64, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -174,6 +217,13 @@ func (s *GormStore) ListAllOrders(ctx context.Context, limit, offset int, status
 	query := s.db.WithContext(ctx).Model(&models.Order{})
 	if status != "" {
 		query = query.Where("status = ?", status)
+	}
+	if pattern := strings.TrimSpace(search); pattern != "" {
+		like := "%" + pattern + "%"
+		userIDs := s.db.Model(&models.User{}).Select("id").Where("username LIKE ? OR email LIKE ?", like, like)
+		productIDs := s.db.Model(&models.Product{}).Select("id").Where("name LIKE ? OR slug LIKE ?", like, like)
+		query = query.Where("order_no LIKE ? OR transaction_id LIKE ? OR customer_contact LIKE ? OR user_id IN (?) OR product_id IN (?)",
+			like, like, like, userIDs, productIDs)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -251,14 +301,16 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 		}
 
 		if current.Status != "paid" && current.Status != "completed" {
-			return errors.New("order is not paid")
+			return domain.ErrNotPayable
 		}
 		if current.FulfillmentStatus == "delivered" || current.FulfillmentStatus == "completed" {
 			*order = current
 			return nil
 		}
 
-		if !current.Product.AutoDeliver || current.Product.ProductType != "card" {
+		// A missing product row (deleted after checkout) is treated as manual so
+		// payment is never dropped on the floor.
+		if current.Product == nil || !current.Product.AutoDeliver || current.Product.ProductType != "card" {
 			now := time.Now().UTC()
 			note := "Order requires manual delivery"
 			record := models.DeliveryRecord{
@@ -347,7 +399,7 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 		}
 
 		if err := tx.Model(&current).Updates(map[string]any{
-			"status":              "completed",
+			"status":             "completed",
 			"fulfillment_status": "delivered",
 			"delivery_content":   deliveryContent,
 			"delivered_at":       now,

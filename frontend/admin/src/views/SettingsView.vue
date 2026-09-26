@@ -1,24 +1,37 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { getRuntimeSettings, saveRuntimeSettings, testOAuth, testPayment } from '../api/system'
 import type { RuntimeSettings } from '../types'
+import { errorMessage } from '../utils/format'
+
+type Probe = { ok: boolean; text: string }
 
 const loading = ref(true)
 const saving = ref(false)
 const message = ref('')
 const messageType = ref<'ok' | 'err'>('ok')
-const oauthResult = ref('')
-const paymentResult = ref('')
+const oauth = ref<Probe | null>(null)
+const payment = ref<Probe | null>(null)
 const testingOAuth = ref(false)
 const testingPayment = ref(false)
+const snapshot = ref('')
 
 const settings = reactive<RuntimeSettings>({
   app: { site_name: '', site_slogan: '', site_description: '', site_logo: '', scheme: 'https', domain: '' },
   oauth: { enabled: true, base_url: '', client_id: '', client_secret: '', redirect_uri: '', scopes: '' },
   payment: { enabled: true, payment_id: '', secret_key: '' },
   features: { enabled_registration: true },
-  theme: { theme_primary: '#6366f1', default_locale: 'zh-CN' },
+  theme: { theme_primary: '#f2704a', default_locale: 'zh-CN' },
 })
+
+const dirty = computed(() => snapshot.value !== '' && JSON.stringify(settings) !== snapshot.value)
+const redirectPreview = computed(() => {
+  const custom = settings.oauth.redirect_uri.trim()
+  if (custom) return custom
+  if (!settings.app.domain.trim()) return '填写域名后自动生成'
+  return `${settings.app.scheme}://${settings.app.domain.trim()}/api/v1/auth/oauth/callback`
+})
+const paymentIncomplete = computed(() => !settings.payment.payment_id.trim() || settings.payment.secret_key.trim() === '')
 
 async function load() {
   loading.value = true
@@ -29,8 +42,9 @@ async function load() {
     Object.assign(settings.payment, result.payment)
     Object.assign(settings.features, result.features)
     Object.assign(settings.theme, result.theme)
-  } catch (err: any) {
-    message.value = err.response?.data?.error || '加载配置失败'
+    snapshot.value = JSON.stringify(settings)
+  } catch (err) {
+    message.value = errorMessage(err, '加载配置失败')
     messageType.value = 'err'
   } finally {
     loading.value = false
@@ -41,11 +55,12 @@ async function save() {
   saving.value = true
   message.value = ''
   try {
-    await saveRuntimeSettings({ ...settings, app: { ...settings.app }, oauth: { ...settings.oauth }, payment: { ...settings.payment }, features: { ...settings.features }, theme: { ...settings.theme } })
-    message.value = '已保存，新配置立即生效'
+    await saveRuntimeSettings(JSON.parse(JSON.stringify(settings)))
+    snapshot.value = JSON.stringify(settings)
+    message.value = '已保存，运行时配置已重建并立即生效'
     messageType.value = 'ok'
-  } catch (err: any) {
-    message.value = err.response?.data?.error || '保存失败'
+  } catch (err) {
+    message.value = errorMessage(err, '保存失败')
     messageType.value = 'err'
   } finally {
     saving.value = false
@@ -54,12 +69,12 @@ async function save() {
 
 async function runOAuthTest() {
   testingOAuth.value = true
-  oauthResult.value = ''
+  oauth.value = null
   try {
-    const r = await testOAuth()
-    oauthResult.value = r.ok ? '配置有效，可跳转授权页' : `失败：${r.msg || '请检查 OAuth 参数'}`
-  } catch (err: any) {
-    oauthResult.value = `失败：${err.response?.data?.error || err.message}`
+    const result = await testOAuth()
+    oauth.value = { ok: result.ok, text: result.ok ? result.authorize_url || '配置有效，可跳转授权页' : result.msg || '请检查 OAuth 参数' }
+  } catch (err) {
+    oauth.value = { ok: false, text: `失败：${errorMessage(err, '无法读取 OAuth 配置')}` }
   } finally {
     testingOAuth.value = false
   }
@@ -67,12 +82,12 @@ async function runOAuthTest() {
 
 async function runPaymentTest() {
   testingPayment.value = true
-  paymentResult.value = ''
+  payment.value = null
   try {
-    const r = await testPayment()
-    paymentResult.value = `${r.ok ? '✓ ' : '✗ '}${r.msg}`
-  } catch (err: any) {
-    paymentResult.value = `失败：${err.response?.data?.error || err.message}`
+    const result = await testPayment()
+    payment.value = { ok: result.ok, text: result.msg || (result.ok ? '支付网关连通正常' : '支付网关不可用') }
+  } catch (err) {
+    payment.value = { ok: false, text: `失败：${errorMessage(err, '无法连接支付网关')}` }
   } finally {
     testingPayment.value = false
   }
@@ -83,154 +98,210 @@ onMounted(load)
 
 <template>
   <section v-if="loading" class="space-y-4">
-    <div class="skeleton h-8 w-48" />
-    <div class="grid gap-4"><div v-for="i in 5" :key="i" class="skeleton h-12" /></div>
+    <div class="skeleton h-9 w-52" />
+    <div class="grid gap-4 lg:grid-cols-3">
+      <div class="space-y-4 lg:col-span-2">
+        <div v-for="i in 3" :key="i" class="skeleton h-52" />
+      </div>
+      <div class="space-y-4">
+        <div v-for="i in 2" :key="i" class="skeleton h-40" />
+      </div>
+    </div>
   </section>
 
   <section v-else class="space-y-6">
-    <div class="flex items-center justify-between">
+    <div class="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h2 class="text-xl font-bold">系统设置</h2>
-        <p class="text-sm text-[#7a7890]">初始化时配置的所有参数都可以在这里修改，保存后立即生效</p>
+        <p class="eyebrow">Runtime configuration</p>
+        <h2 class="mt-1 text-xl font-bold">系统设置</h2>
+        <p class="mt-1 text-sm text-[var(--text-quiet)]">保存后运行时配置立即重建，无需重启容器</p>
       </div>
-      <button class="btn-primary" :disabled="saving" @click="save">
-        {{ saving ? '保存中...' : '保存设置' }}
-      </button>
+      <div class="flex items-center gap-3">
+        <span v-if="dirty" class="badge badge-warning">有未保存的更改</span>
+        <button class="btn btn-primary" :disabled="saving || !dirty" @click="save">
+          <span v-if="saving" class="spinner !size-4 !border-t-white/80" />
+          {{ saving ? '正在保存…' : '保存设置' }}
+        </button>
+      </div>
     </div>
 
-    <p v-if="message" :class="['rounded-xl border px-4 py-2.5 text-sm', messageType === 'ok' ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : 'border-rose-400/30 bg-rose-500/10 text-rose-200']">{{ message }}</p>
+    <p v-if="message" :class="['alert', messageType === 'ok' ? 'alert-success' : 'alert-danger']">{{ message }}</p>
 
     <div class="grid gap-6 lg:grid-cols-3">
-      <div class="space-y-4 lg:col-span-2">
+      <div class="space-y-5 lg:col-span-2">
+        <!-- 站点信息 -->
         <div class="card">
-          <h3 class="mb-4 font-semibold">基本信息</h3>
-          <div class="space-y-3">
-            <div class="grid gap-3 sm:grid-cols-2">
+          <div class="mb-5 flex items-baseline justify-between gap-4">
+            <h3 class="font-semibold">站点信息</h3>
+            <span class="hint">展示在商店前台与管理后台</span>
+          </div>
+          <div class="space-y-4">
+            <div class="grid gap-4 sm:grid-cols-2">
               <div>
-                <label class="mb-1 block text-sm text-[#b3b1c4]">网站名称</label>
-                <input v-model="settings.app.site_name" class="input" />
+                <label class="label" for="site-name">网站名称</label>
+                <input id="site-name" v-model="settings.app.site_name" class="input" />
               </div>
               <div>
-                <label class="mb-1 block text-sm text-[#b3b1c4]">标语</label>
-                <input v-model="settings.app.site_slogan" class="input" />
+                <label class="label" for="site-slogan">标语</label>
+                <input id="site-slogan" v-model="settings.app.site_slogan" class="input" />
               </div>
             </div>
-            <div>
-              <label class="mb-1 block text-sm text-[#b3b1c4]">站点域名</label>
-              <input v-model="settings.app.domain" class="input" placeholder="store.example.com" />
-              <p class="mt-1 text-xs text-[#7a7890]">修改后请同步更新 NodeLoc OAuth 应用的重定向 URI</p>
-            </div>
-            <div class="grid gap-3 sm:grid-cols-2">
+            <div class="grid gap-4 sm:grid-cols-[1fr_120px]">
               <div>
-                <label class="mb-1 block text-sm text-[#b3b1c4]">协议</label>
-                <select v-model="settings.app.scheme" class="input">
+                <label class="label" for="site-domain">站点域名</label>
+                <input id="site-domain" v-model="settings.app.domain" class="input mono" placeholder="store.example.com" />
+                <p class="hint mt-1">修改后请同步更新 NodeLoc OAuth 应用的重定向 URI</p>
+              </div>
+              <div>
+                <label class="label" for="site-scheme">协议</label>
+                <select id="site-scheme" v-model="settings.app.scheme" class="input">
                   <option value="https">https</option>
                   <option value="http">http</option>
                 </select>
               </div>
-              <div>
-                <label class="mb-1 block text-sm text-[#b3b1c4]">Logo URL</label>
-                <input v-model="settings.app.site_logo" class="input" />
-              </div>
             </div>
-            <div>
-              <label class="mb-1 block text-sm text-[#b3b1c4]">网站描述</label>
-              <textarea v-model="settings.app.site_description" class="input min-h-20 resize-none" />
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label class="label" for="site-logo">Logo 地址</label>
+                <input id="site-logo" v-model="settings.app.site_logo" class="input" placeholder="留空则使用内置标识" />
+              </div>
+              <div>
+                <label class="label" for="site-desc">网站描述</label>
+                <input id="site-desc" v-model="settings.app.site_description" class="input" />
+              </div>
             </div>
           </div>
         </div>
 
+        <!-- OAuth -->
         <div class="card">
-          <div class="mb-4 flex items-center justify-between">
-            <h3 class="font-semibold">NodeLoc OAuth 登录</h3>
-            <button
-              :class="['btn', settings.oauth.enabled ? 'btn-primary' : 'btn-secondary']"
-              @click="settings.oauth.enabled = !settings.oauth.enabled"
-            >
-              {{ settings.oauth.enabled ? '已启用' : '已禁用' }}
-            </button>
+          <div class="mb-5 flex items-center justify-between gap-4">
+            <div>
+              <h3 class="font-semibold">NodeLoc OAuth 登录</h3>
+              <p class="hint mt-0.5">买家与管理员均可使用 NodeLoc 账号登录</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="hint">{{ settings.oauth.enabled ? '已启用' : '已禁用' }}</span>
+              <button
+                class="switch"
+                :class="{ 'switch-on': settings.oauth.enabled }"
+                type="button"
+                role="switch"
+                :aria-checked="settings.oauth.enabled"
+                aria-label="启用 NodeLoc OAuth 登录"
+                @click="settings.oauth.enabled = !settings.oauth.enabled"
+              />
+            </div>
           </div>
-          <div class="space-y-3">
+          <div class="space-y-4">
             <div>
-              <label class="mb-1 block text-sm text-[#b3b1c4]">NodeLoc 站点地址</label>
-              <input v-model="settings.oauth.base_url" class="input" placeholder="https://www.nodeloc.com" />
+              <label class="label" for="oauth-base">NodeLoc 站点地址</label>
+              <input id="oauth-base" v-model="settings.oauth.base_url" class="input mono" placeholder="https://www.nodeloc.com" />
             </div>
-            <div class="grid gap-3 sm:grid-cols-2">
+            <div class="grid gap-4 sm:grid-cols-2">
               <div>
-                <label class="mb-1 block text-sm text-[#b3b1c4]">Client ID</label>
-                <input v-model="settings.oauth.client_id" class="input" />
+                <label class="label" for="oauth-id">Client ID</label>
+                <input id="oauth-id" v-model="settings.oauth.client_id" class="input mono" />
               </div>
               <div>
-                <label class="mb-1 block text-sm text-[#b3b1c4]">Client Secret</label>
-                <input v-model="settings.oauth.client_secret" type="password" class="input" placeholder="保持 ******** 则不修改" autocomplete="off" />
+                <label class="label" for="oauth-secret">Client Secret</label>
+                <input id="oauth-secret" v-model="settings.oauth.client_secret" type="password" class="input mono" placeholder="保持 ******** 则不修改" autocomplete="off" />
               </div>
             </div>
             <div>
-              <label class="mb-1 block text-sm text-[#b3b1c4]">回调地址（留空自动生成）</label>
-              <input v-model="settings.oauth.redirect_uri" class="input" placeholder="自动生成：协议://域名/api/v1/auth/oauth/callback" />
+              <label class="label" for="oauth-redirect">重定向 URI</label>
+              <input id="oauth-redirect" v-model="settings.oauth.redirect_uri" class="input mono" :placeholder="redirectPreview" />
+              <p class="hint mt-1">留空则自动生成：<span class="mono">{{ redirectPreview }}</span></p>
             </div>
-            <div class="flex items-center gap-3">
-              <button class="btn btn-secondary" :disabled="testingOAuth" @click="runOAuthTest">{{ testingOAuth ? '测试中…' : '测试 OAuth 配置' }}</button>
-              <span v-if="oauthResult" class="text-xs text-[#b3b1c4]">{{ oauthResult }}</span>
+            <div class="flex flex-wrap items-center gap-3">
+              <button class="btn btn-secondary btn-sm" type="button" :disabled="testingOAuth" @click="runOAuthTest">
+                {{ testingOAuth ? '测试中…' : '测试 OAuth 配置' }}
+              </button>
+              <span v-if="oauth" :class="['badge', oauth.ok ? 'badge-success' : 'badge-danger']">{{ oauth.ok ? '通过' : '未通过' }}</span>
             </div>
+            <p v-if="oauth" class="codebox text-xs">{{ oauth.text }}</p>
           </div>
         </div>
 
+        <!-- Payments -->
         <div class="card">
-          <div class="mb-4 flex items-center justify-between">
-            <h3 class="font-semibold">NodeLoc Payments 支付</h3>
-            <button
-              :class="['btn', settings.payment.enabled ? 'btn-primary' : 'btn-secondary']"
-              @click="settings.payment.enabled = !settings.payment.enabled"
-            >
-              {{ settings.payment.enabled ? '已启用' : '已禁用' }}
-            </button>
+          <div class="mb-5 flex items-center justify-between gap-4">
+            <div>
+              <h3 class="font-semibold">NodeLoc Payments 支付</h3>
+              <p class="hint mt-0.5">下单扣减积分，回调地址由订单号自动拼接</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="hint">{{ settings.payment.enabled ? '已启用' : '已禁用' }}</span>
+              <button
+                class="switch"
+                :class="{ 'switch-on': settings.payment.enabled }"
+                type="button"
+                role="switch"
+                :aria-checked="settings.payment.enabled"
+                aria-label="启用 NodeLoc Payments 支付"
+                @click="settings.payment.enabled = !settings.payment.enabled"
+              />
+            </div>
           </div>
-          <div class="space-y-3">
-            <div class="grid gap-3 sm:grid-cols-2">
+          <div class="space-y-4">
+            <div class="grid gap-4 sm:grid-cols-2">
               <div>
-                <label class="mb-1 block text-sm text-[#b3b1c4]">支付 ID（payment_id）</label>
-                <input v-model="settings.payment.payment_id" class="input" />
+                <label class="label" for="payment-id">支付 ID（payment_id）</label>
+                <input id="payment-id" v-model="settings.payment.payment_id" class="input mono" placeholder="例如 12" />
               </div>
               <div>
-                <label class="mb-1 block text-sm text-[#b3b1c4]">Secret Key</label>
-                <input v-model="settings.payment.secret_key" type="password" class="input" placeholder="保持 ******** 则不修改" autocomplete="off" />
+                <label class="label" for="payment-secret">Secret Key</label>
+                <input id="payment-secret" v-model="settings.payment.secret_key" type="password" class="input mono" placeholder="保持 ******** 则不修改" autocomplete="off" />
               </div>
             </div>
-            <div class="flex items-center gap-3">
-              <button class="btn btn-secondary" :disabled="testingPayment" @click="runPaymentTest">{{ testingPayment ? '测试中…' : '测试支付网关' }}</button>
-              <span v-if="paymentResult" class="text-xs text-[#b3b1c4]">{{ paymentResult }}</span>
+            <p v-if="paymentIncomplete" class="alert alert-warning">
+              支付 ID 与 Secret Key 必须同时填写，否则买家下单后会收到「支付未配置」的提示。
+            </p>
+            <div class="flex flex-wrap items-center gap-3">
+              <button class="btn btn-secondary btn-sm" type="button" :disabled="testingPayment" @click="runPaymentTest">
+                {{ testingPayment ? '测试中…' : '测试支付网关' }}
+              </button>
+              <span v-if="payment" :class="['badge', payment.ok ? 'badge-success' : 'badge-danger']">{{ payment.ok ? '通过' : '未通过' }}</span>
             </div>
+            <p v-if="payment" class="codebox text-xs">{{ payment.text }}</p>
           </div>
         </div>
       </div>
 
-      <div class="space-y-4">
+      <!-- 右侧栏 -->
+      <div class="space-y-5">
         <div class="card">
           <h3 class="mb-4 font-semibold">功能开关</h3>
-          <div class="space-y-3">
-            <label class="flex items-center justify-between">
-              <span class="text-sm">开放注册</span>
-              <button
-                :class="['btn', settings.features.enabled_registration ? 'btn-primary' : 'btn-secondary']"
-                @click="settings.features.enabled_registration = !settings.features.enabled_registration"
-              >
-                {{ settings.features.enabled_registration ? '已启用' : '已禁用' }}
-              </button>
-            </label>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <p class="text-sm">开放本地账号注册</p>
+              <p class="hint mt-0.5">关闭后仅能通过 NodeLoc 登录</p>
+            </div>
+            <button
+              class="switch"
+              :class="{ 'switch-on': settings.features.enabled_registration }"
+              type="button"
+              role="switch"
+              :aria-checked="settings.features.enabled_registration"
+              aria-label="开放本地账号注册"
+              @click="settings.features.enabled_registration = !settings.features.enabled_registration"
+            />
           </div>
         </div>
 
         <div class="card">
           <h3 class="mb-4 font-semibold">外观</h3>
-          <div class="space-y-3">
-            <div>
-              <label class="mb-1 block text-sm text-[#b3b1c4]">主题色</label>
-              <input v-model="settings.theme.theme_primary" type="color" class="h-10 w-20 cursor-pointer rounded-lg border-0 bg-transparent" />
+          <div class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="label mb-0" for="theme-primary">主题色</label>
+                <p class="hint mt-0.5 mono">{{ settings.theme.theme_primary }}</p>
+              </div>
+              <input id="theme-primary" v-model="settings.theme.theme_primary" type="color" class="h-9 w-16 cursor-pointer rounded-lg border border-[var(--stroke)] bg-transparent" />
             </div>
             <div>
-              <label class="mb-1 block text-sm text-[#b3b1c4]">默认语言</label>
-              <select v-model="settings.theme.default_locale" class="input">
+              <label class="label" for="theme-locale">默认语言</label>
+              <select id="theme-locale" v-model="settings.theme.default_locale" class="input">
                 <option value="zh-CN">简体中文</option>
                 <option value="zh-TW">繁體中文</option>
                 <option value="en">English</option>
@@ -239,22 +310,25 @@ onMounted(load)
           </div>
         </div>
 
-        <div class="card">
-          <h3 class="mb-4 font-semibold">系统信息</h3>
-          <div class="space-y-2 text-sm">
-            <div class="flex justify-between">
-              <span class="text-[#7a7890]">版本</span>
-              <span>v1.0.0</span>
+        <div class="card card-quiet">
+          <h3 class="mb-4 font-semibold">运行时</h3>
+          <dl class="space-y-2.5 text-sm">
+            <div class="flex items-center justify-between gap-3">
+              <dt class="quiet">版本</dt>
+              <dd class="mono">v1.0.0</dd>
             </div>
-            <div class="flex justify-between">
-              <span class="text-[#7a7890]">配置方式</span>
-              <span>应用内初始化</span>
+            <div class="flex items-center justify-between gap-3">
+              <dt class="quiet">数据库</dt>
+              <dd class="mono">SQLite / MySQL</dd>
             </div>
-            <div class="flex justify-between">
-              <span class="text-[#7a7890]">配置文件</span>
-              <span>无需 yml</span>
+            <div class="flex items-center justify-between gap-3">
+              <dt class="quiet">配置来源</dt>
+              <dd>应用内设置</dd>
             </div>
-          </div>
+          </dl>
+          <p class="hint mt-4 leading-relaxed">
+            配置写入数据库中的运行时记录，不依赖任何 yml 文件；备份数据库即备份全部设置。
+          </p>
         </div>
       </div>
     </div>

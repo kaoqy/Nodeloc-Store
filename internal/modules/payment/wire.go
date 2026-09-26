@@ -40,19 +40,25 @@ func (u *userLookup) FindByID(ctx context.Context, id uint) (*contract.UserInfo,
 }
 
 // Wire constructs the payment module from shared dependencies.
-func Wire(db *gorm.DB, cfg *config.Config, identityFind func(ctx context.Context, userID uint) (*models.User, error)) *Module {
+func Wire(db *gorm.DB, cfg *config.Config, identityFind func(ctx context.Context, userID uint) (*models.User, error)) (*Module, error) {
 	store := infrastructure.NewGormStore(db)
+	// payment_orders and transactions are owned by this module, so this module
+	// migrates them; models.Migrate only covers the shared entities.
+	if err := store.Migrate(context.Background()); err != nil {
+		return nil, err
+	}
 	gateway := infrastructure.NewNodeLocGateway(
 		cfg.NodeLoc.BaseURL,
 		cfg.NodeLoc.PaymentID,
 		cfg.NodeLoc.PaymentSecret,
 		nil,
 	)
-	fulfillment := infrastructure.NewFulfillmentService(db)
-
 	lookup := &userLookup{findByID: identityFind}
 
-	svc := application.NewService(store, gateway, fulfillment, lookup, cfg.NodeLoc.PaymentID)
+	// The store owns card allocation and delivery records, so it also performs
+	// fulfillment; keeping both in one transactional implementation avoids the
+	// two divergent delivery paths that used to coexist here.
+	svc := application.NewService(store, gateway, store, lookup, cfg.NodeLoc.PaymentID)
 	handler := http.NewHandler(svc)
-	return &Module{Service: svc, Handler: handler, Gateway: gateway}
+	return &Module{Service: svc, Handler: handler, Gateway: gateway}, nil
 }

@@ -11,8 +11,8 @@ export async function login(payload: { identifier: string; password: string }) {
   return data
 }
 
-export function oauthInitiate() {
-  window.location.href = '/api/v1/auth/oauth/initiate?redirect=true'
+export function oauthInitiate(bind = false) {
+  window.location.href = `/api/v1/auth/oauth/initiate?redirect=true${bind ? '&bind=true' : ''}`
 }
 
 export async function oauthCallback(code: string, state: string) {
@@ -25,8 +25,13 @@ export async function me() {
   return data
 }
 
-export function bindOAuth() {
-  oauthInitiate()
+/** Redeem a NodeLoc authorization code for the signed-in local account. */
+export async function bindOAuth(code: string, state: string) {
+  const { data } = await client.post<{ user: User }>('/auth/bind-oauth', {
+    code,
+    params: { code, state },
+  })
+  return data.user
 }
 
 export async function unbindOAuth() {

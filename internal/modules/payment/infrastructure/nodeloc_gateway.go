@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/domain"
 	"github.com/kaoqy/Nodeloc-Store/internal/shared"
 )
 
@@ -103,7 +104,7 @@ func (g *NodeLocGateway) VerifyCallback(params map[string]string) bool {
 
 func (g *NodeLocGateway) post(ctx context.Context, path string, params map[string]string) (map[string]any, []byte, error) {
 	if g.baseURL == "" || g.paymentID == "" || g.secretKey == "" {
-		return nil, nil, errors.New("NodeLoc payment gateway is not fully configured")
+		return nil, nil, domain.ErrPaymentNotConfigured
 	}
 
 	params["signature"] = shared.SignWithHashedToken(params, g.secretKey)

@@ -2,43 +2,81 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useSiteStore } from '../stores/site'
+import { useThemeStore } from '../stores/theme'
 
 const auth = useAuthStore()
+const site = useSiteStore()
+const theme = useThemeStore()
 const router = useRouter()
-const open = ref(false)
+const menuOpen = ref(false)
 
-function logout() { auth.logout(); open.value = false; router.push('/') }
+async function logout() {
+  menuOpen.value = false
+  auth.logout()
+  await router.push('/')
+}
 </script>
 
 <template>
-  <div class="pt-4">
-    <header class="nav-shell">
-      <nav class="flex items-center justify-between py-2.5 pl-3.5 pr-3">
-        <RouterLink to="/" class="group flex items-center gap-2.5 pl-1 font-bold">
-          <span class="grid size-9 place-items-center rounded-full border border-white/25 bg-gradient-to-br from-purple-400 via-purple-600 to-indigo-600 text-sm font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_6px_20px_-4px_rgba(168,85,247,0.65)] transition-transform duration-300 group-hover:scale-105 group-hover:rotate-3">N</span>
-          <span class="hidden text-[15px] tracking-tight sm:block">Nodeloc <span class="gradient-text">Store</span></span>
-        </RouterLink>
+  <header class="site-header">
+    <div class="mx-auto flex h-16 w-full max-w-6xl items-center gap-4 px-4 sm:px-6">
+      <RouterLink to="/" class="flex items-center gap-2.5 font-semibold tracking-tight">
+        <img v-if="site.logo" :src="site.logo" :alt="site.name" class="brand-mark object-cover" />
+        <span v-else class="brand-mark">{{ site.initials }}</span>
+        <span class="hidden text-[15px] sm:block">{{ site.name }}</span>
+      </RouterLink>
 
-        <button class="nav-link-pill lg:hidden" aria-label="菜单" @click="open = !open">☰</button>
-
-        <div
-          :class="[
-            open ? 'flex' : 'hidden',
-            'absolute inset-x-2 top-[68px] z-50 flex-col gap-1 rounded-3xl border border-white/[0.14] bg-[#0d0b1a]/85 p-4 shadow-2xl backdrop-blur-2xl lg:static lg:flex lg:flex-row lg:items-center lg:gap-1 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none',
-          ]"
-        >
-          <RouterLink to="/" class="nav-link-pill" @click="open = false">商品</RouterLink>
-          <template v-if="auth.isAuthenticated">
-            <RouterLink to="/orders" class="nav-link-pill" @click="open = false">我的订单</RouterLink>
-            <RouterLink to="/profile" class="nav-link-pill max-w-40 truncate" @click="open = false">{{ auth.user?.username || '个人中心' }}</RouterLink>
-            <button class="nav-link-pill text-left" @click="logout">退出</button>
-          </template>
-          <template v-else>
-            <RouterLink to="/login" class="nav-link-pill" @click="open = false">登录</RouterLink>
-            <RouterLink to="/register" class="btn btn-primary ml-1 !py-2 text-sm" @click="open = false">注册</RouterLink>
-          </template>
-        </div>
+      <nav class="ml-4 hidden items-center gap-6 lg:flex">
+        <RouterLink to="/" class="nav-item">商品</RouterLink>
+        <template v-if="auth.isAuthenticated">
+          <RouterLink to="/orders" class="nav-item">我的订单</RouterLink>
+          <RouterLink to="/profile" class="nav-item">个人中心</RouterLink>
+        </template>
       </nav>
-    </header>
-  </div>
+
+      <div class="ml-auto flex items-center gap-2">
+        <button
+          class="btn btn-ghost !px-2.5"
+          :title="theme.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
+          :aria-label="theme.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
+          @click="theme.toggle"
+        >
+          <span aria-hidden="true">{{ theme.theme === 'dark' ? '☀' : '☾' }}</span>
+        </button>
+
+        <template v-if="auth.isAuthenticated">
+          <RouterLink to="/profile" class="btn btn-quiet btn-sm max-w-[10rem] truncate">
+            {{ auth.user?.username || '我的账户' }}
+          </RouterLink>
+          <button class="btn btn-ghost btn-sm hidden sm:inline-flex" @click="logout">退出</button>
+        </template>
+        <template v-else>
+          <RouterLink to="/login" class="btn btn-ghost btn-sm">登录</RouterLink>
+          <RouterLink to="/register" class="btn btn-primary btn-sm">注册</RouterLink>
+        </template>
+
+        <button class="btn btn-quiet btn-sm lg:hidden" aria-label="打开菜单" @click="menuOpen = !menuOpen">
+          {{ menuOpen ? '✕' : '☰' }}
+        </button>
+      </div>
+    </div>
+
+    <nav
+      v-if="menuOpen"
+      class="fade-in flex flex-col gap-1 border-t border-[var(--stroke)] px-4 py-3 lg:hidden"
+      @click="menuOpen = false"
+    >
+      <RouterLink to="/" class="nav-item w-full">全部商品</RouterLink>
+      <template v-if="auth.isAuthenticated">
+        <RouterLink to="/orders" class="nav-item w-full">我的订单</RouterLink>
+        <RouterLink to="/profile" class="nav-item w-full">个人中心</RouterLink>
+        <button class="btn btn-quiet btn-sm mt-1 self-start" @click="logout">退出登录</button>
+      </template>
+      <template v-else>
+        <RouterLink to="/login" class="nav-item w-full">登录</RouterLink>
+        <RouterLink to="/register" class="nav-item w-full">注册</RouterLink>
+      </template>
+    </nav>
+  </header>
 </template>

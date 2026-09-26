@@ -8,9 +8,9 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const isAuthenticated = computed(() => Boolean(token.value))
 
-  function saveSession(accessToken: string, currentUser: User) {
+  function saveSession(accessToken: string, currentUser?: User | null) {
     token.value = accessToken
-    user.value = currentUser
+    if (currentUser) user.value = currentUser
     localStorage.setItem('token', accessToken)
   }
 
@@ -44,5 +44,5 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  return { user, token, isAuthenticated, login, logout, register, fetchUser }
+  return { user, token, isAuthenticated, saveSession, login, logout, register, fetchUser }
 })

@@ -8,9 +8,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
+	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/application"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/domain"
 )
 
 type Handler struct {
@@ -20,6 +21,13 @@ type Handler struct {
 type createPaymentRequest struct {
 	OrderNo     string `json:"order_no" binding:"required"`
 	Description string `json:"description"`
+}
+
+type createOrderRequest struct {
+	Slug     string `json:"slug" binding:"required"`
+	Quantity int    `json:"quantity"`
+	Contact  string `json:"contact"`
+	Note     string `json:"note"`
 }
 
 func NewHandler(service *application.Service) *Handler {
@@ -32,6 +40,7 @@ func NewHandler(service *application.Service) *Handler {
 func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig) {
 	payment := router.Group("/api/v1/payment")
 	payment.Use(middleware.JWTMiddleware(jwtConfig))
+	payment.POST("/orders", h.CreateOrder)
 	payment.POST("/create", h.CreatePayment)
 	payment.GET("/return", h.Return)
 	payment.GET("/orders/:order_no", h.GetOrder)
@@ -45,11 +54,39 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	adminOrders.POST("/:order_no/cancel", h.AdminCancelOrder)
 	adminOrders.POST("/:order_no/deliver", h.AdminDeliverOrder)
 	adminOrders.POST("/:order_no/refund", h.AdminRefundOrder)
+	adminOrders.POST("/:order_no/fulfill", h.AdminFulfillOrder)
 
 	// NodeLoc notifies via a browser GET redirect (signature-verified); POST is
 	// accepted as well for server-push style integrations.
 	router.GET("/api/v1/payment/callback", h.Callback)
 	router.POST("/api/v1/payment/callback", h.Callback)
+}
+
+func (h *Handler) CreateOrder(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	var request createOrderRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	order, err := h.service.CreateOrder(c.Request.Context(), application.CreateOrderInput{
+		UserID:   userID,
+		Slug:     strings.TrimSpace(request.Slug),
+		Quantity: request.Quantity,
+		Contact:  strings.TrimSpace(request.Contact),
+		Note:     strings.TrimSpace(request.Note),
+	})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"order": order})
 }
 
 func (h *Handler) CreatePayment(c *gin.Context) {
@@ -250,6 +287,14 @@ func writeError(c *gin.Context, err error) {
 		status = http.StatusUnauthorized
 	case errors.Is(err, application.ErrForbidden):
 		status = http.StatusForbidden
+	case errors.Is(err, domain.ErrProductNotPurchasable),
+		errors.Is(err, domain.ErrOrderNotFound),
+		errors.Is(err, domain.ErrPaymentOrderNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, domain.ErrInsufficientStock), errors.Is(err, domain.ErrNotPayable):
+		status = http.StatusConflict
+	case errors.Is(err, domain.ErrPaymentNotConfigured):
+		status = http.StatusServiceUnavailable
 	case strings.Contains(strings.ToLower(err.Error()), "not found"):
 		status = http.StatusNotFound
 	}
@@ -274,7 +319,7 @@ func (h *Handler) AdminListOrders(c *gin.Context) {
 	}
 	status := c.DefaultQuery("status", "")
 
-	result, err := h.service.AdminListOrders(c.Request.Context(), limit, offset, status)
+	result, err := h.service.AdminListOrders(c.Request.Context(), limit, offset, status, c.Query("q"))
 	if err != nil {
 		writeError(c, err)
 		return
@@ -340,6 +385,22 @@ func (h *Handler) AdminRefundOrder(c *gin.Context) {
 		return
 	}
 	order, err := h.service.AdminRefundOrder(c.Request.Context(), orderNo)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": order})
+}
+
+// AdminFulfillOrder retries delivery, e.g. after card stock has been restocked
+// for an order that was parked in waiting_stock.
+func (h *Handler) AdminFulfillOrder(c *gin.Context) {
+	orderNo := strings.TrimSpace(c.Param("order_no"))
+	if orderNo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "order_no is required"})
+		return
+	}
+	order, err := h.service.FulfillOrder(c.Request.Context(), orderNo)
 	if err != nil {
 		writeError(c, err)
 		return

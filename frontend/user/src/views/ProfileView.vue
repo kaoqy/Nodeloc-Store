@@ -1,81 +1,156 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { bindOAuth, unbindOAuth } from '../api/auth'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { bindOAuth, oauthInitiate, unbindOAuth } from '../api/auth'
+import { errorMessage } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { when } from '../utils/format'
 
 const auth = useAuthStore()
-const loading = ref(false)
+const route = useRoute()
+const router = useRouter()
+
+const busy = ref(false)
 const message = ref('')
 const error = ref('')
 
+const user = computed(() => auth.user)
+const bound = computed(() => Boolean(user.value?.oauth_provider))
+const displayName = computed(() => user.value?.oauth_username || user.value?.username || '账户')
+const avatar = computed(() => user.value?.oauth_avatar || user.value?.avatar_url || '')
+const initials = computed(() => displayName.value.slice(0, 1).toUpperCase())
+
 async function unbind() {
-  loading.value = true
+  if (busy.value) return
+  busy.value = true
   message.value = ''
   error.value = ''
   try {
     const response = await unbindOAuth()
     auth.user = response.user
-    message.value = 'NodeLoc 账号已解绑'
-  } catch {
-    error.value = '解绑失败，请稍后重试'
+    message.value = '已解除 NodeLoc 绑定，本地账号与订单不受影响。'
+  } catch (e) {
+    error.value = errorMessage(e, '解绑失败，请稍后重试')
   } finally {
-    loading.value = false
+    busy.value = false
   }
 }
+
+async function consumeBindCode() {
+  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const code = fragment.get('bind_code') || ''
+  const state = fragment.get('state') || ''
+  if (!code || !state) return
+  history.replaceState(null, '', window.location.pathname + window.location.search)
+  busy.value = true
+  error.value = ''
+  try {
+    auth.user = await bindOAuth(code, state)
+    message.value = 'NodeLoc 账号已绑定，之后可直接用 NodeLoc 登录。'
+  } catch (e) {
+    error.value = errorMessage(e, '绑定失败，请重试')
+  } finally {
+    busy.value = false
+  }
+}
+
+onMounted(async () => {
+  await auth.fetchUser().catch(() => undefined)
+  if (!auth.isAuthenticated) {
+    await router.replace('/login')
+    return
+  }
+  if (route.query.oauth_error === 'bind') {
+    error.value = 'NodeLoc 授权未完成，链接可能已过期，请重新点击绑定。'
+    await router.replace({ path: '/profile' })
+    return
+  }
+  await consumeBindCode()
+})
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-    <h1 class="text-3xl font-black tracking-tight">个人<span class="gradient-text">中心</span></h1>
-    <p class="mt-2 text-sm text-[#7b7990]">管理账号资料与第三方登录绑定</p>
+  <div class="mx-auto w-full max-w-2xl px-4 py-10 sm:px-6">
+    <header class="mb-7">
+      <p class="eyebrow">Account</p>
+      <h1 class="mt-2 text-2xl font-bold">个人中心</h1>
+    </header>
 
-    <!-- Profile Card -->
-    <section class="glass rise-in mt-8 p-7 sm:p-9">
-      <div class="flex items-center gap-5">
-        <div class="grid size-18 shrink-0 place-items-center overflow-hidden rounded-full border border-white/25 bg-gradient-to-br from-purple-400 via-purple-600 to-indigo-600 text-2xl font-black shadow-[inset_0_2px_0_rgba(255,255,255,0.4),0_12px_32px_-8px_rgba(168,85,247,0.55)]">
-          <img v-if="auth.user?.avatar" :src="auth.user.avatar" alt="头像" class="h-full w-full object-cover" />
-          <span v-else>{{ auth.user?.username?.slice(0, 1).toUpperCase() }}</span>
+    <section class="card">
+      <div class="flex items-center gap-4">
+        <div class="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--stroke)] bg-[var(--surface-hi)] text-lg font-bold">
+          <img v-if="avatar" :src="avatar" :alt="displayName" class="size-full object-cover" />
+          <span v-else>{{ initials }}</span>
         </div>
-        <div>
-          <h2 class="text-xl font-semibold">{{ auth.user?.username }}</h2>
-          <p class="mt-1 text-sm text-[#b4b2c3]">{{ auth.user?.email || '未设置邮箱' }}</p>
+        <div class="min-w-0">
+          <p class="truncate text-lg font-semibold">{{ displayName }}</p>
+          <p class="hint mt-0.5 truncate">
+            {{ user?.email || '未绑定邮箱' }}
+            <span v-if="user?.is_admin" class="badge badge-accent ml-1">管理员</span>
+          </p>
         </div>
       </div>
 
-      <div class="mt-7 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+      <div class="my-5 divider" />
 
-      <dl class="mt-7 grid gap-5 sm:grid-cols-2">
-        <div class="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
-          <dt class="text-xs text-[#7b7990]">用户 ID</dt>
-          <dd class="mt-1.5 font-medium">{{ auth.user?.id }}</dd>
+      <dl class="grid grid-cols-2 gap-x-6 gap-y-4 text-sm sm:grid-cols-3">
+        <div>
+          <dt class="text-[var(--text-quiet)]">用户 ID</dt>
+          <dd class="nums mt-1">{{ user?.id ?? '—' }}</dd>
         </div>
-        <div class="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
-          <dt class="text-xs text-[#7b7990]">注册时间</dt>
-          <dd class="mt-1.5 font-medium">{{ auth.user?.created_at ? new Date(auth.user.created_at).toLocaleDateString('zh-CN') : '暂无' }}</dd>
+        <div>
+          <dt class="text-[var(--text-quiet)]">注册时间</dt>
+          <dd class="mt-1">{{ when(user?.created_at) }}</dd>
+        </div>
+        <div>
+          <dt class="text-[var(--text-quiet)]">上次登录</dt>
+          <dd class="mt-1">{{ when(user?.last_login_at) }}</dd>
         </div>
       </dl>
     </section>
 
-    <!-- OAuth Card -->
-    <section class="glass fade-in mt-6 p-7 sm:p-9">
-      <div class="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-        <div class="flex items-center gap-4">
-          <span class="grid size-11 place-items-center rounded-2xl border border-white/15 bg-gradient-to-br from-purple-500/25 to-indigo-500/15 text-lg backdrop-blur-md">🔗</span>
-          <div>
-            <h2 class="text-lg font-semibold">NodeLoc 账号</h2>
-            <p class="mt-1 text-sm text-[#b4b2c3]">绑定后可使用 NodeLoc 快速登录</p>
-          </div>
+    <section class="card mt-5">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <h2 class="text-[15px] font-bold">NodeLoc 账号</h2>
+          <p class="hint mt-1">
+            <template v-if="bound">
+              已绑定 <span class="mono">{{ user?.oauth_username || user?.oauth_provider }}</span>，
+              之后可直接用 NodeLoc 登录本店。
+            </template>
+            <template v-else>
+              绑定后可使用 NodeLoc 账号一键登录，本地订单仍保留在此账号下。
+            </template>
+          </p>
         </div>
-        <button
-          v-if="auth.user?.oauth_bound"
-          class="btn btn-danger"
-          :disabled="loading"
-          @click="unbind"
-        >{{ loading ? '解绑中…' : '解除绑定' }}</button>
-        <button v-else class="btn btn-primary" @click="bindOAuth">绑定 NodeLoc</button>
+        <div class="flex shrink-0 gap-2">
+          <button v-if="bound" class="btn btn-danger btn-sm" :disabled="busy" @click="unbind">解除绑定</button>
+          <button v-else class="btn btn-primary btn-sm" @click="oauthInitiate(true)">绑定 NodeLoc</button>
+        </div>
       </div>
-      <p v-if="message" class="fade-in mt-5 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">{{ message }}</p>
-      <p v-if="error" class="fade-in mt-5 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{{ error }}</p>
+
+      <p v-if="message" class="alert alert-success mt-5">{{ message }}</p>
+      <p v-if="error" class="alert alert-danger mt-5">{{ error }}</p>
+      <p v-if="!bound && !error" class="alert alert-info mt-5">
+        若该 NodeLoc 账号此前已在本店独立注册过，它将作为另一个账号绑定失败——可先联系管理员合并。
+      </p>
     </section>
+
+    <nav class="mt-5 grid gap-3 sm:grid-cols-2">
+      <RouterLink to="/orders" class="card-hover flex items-center justify-between gap-3">
+        <span>
+          <span class="block text-[15px] font-semibold">我的订单</span>
+          <span class="hint">支付进度与交付内容</span>
+        </span>
+        <span aria-hidden="true" class="text-[var(--text-quiet)]">→</span>
+      </RouterLink>
+      <RouterLink to="/" class="card-hover flex items-center justify-between gap-3">
+        <span>
+          <span class="block text-[15px] font-semibold">继续挑选</span>
+          <span class="hint">浏览在售的数码商品</span>
+        </span>
+        <span aria-hidden="true" class="text-[var(--text-quiet)]">→</span>
+      </RouterLink>
+    </nav>
   </div>
 </template>

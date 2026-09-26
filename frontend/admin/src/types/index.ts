@@ -1,9 +1,10 @@
 export interface User {
   id: number
   username: string
-  name?: string
+  nickname?: string
+  avatar_url?: string
+  bio?: string
   email?: string | null
-  avatar?: string | null
   role: string
   points: number
   is_admin: boolean
@@ -17,7 +18,8 @@ export interface User {
   oauth_username?: string | null
   oauth_name?: string | null
   oauth_avatar?: string | null
-  oauth_bound?: boolean
+  oauth_trust_level?: number | null
+  oauth_has_email?: boolean
   created_at?: string
   updated_at?: string
 }
@@ -73,7 +75,6 @@ export interface Order {
   user?: User
   product?: Product
   product_id?: number
-  product_name?: string
   quantity: number
   unit_price?: number
   total_amount: number
@@ -117,23 +118,56 @@ export interface Coupon {
   updated_at?: string
 }
 
-export interface AuditLog {
+export interface Notification {
   id: number
-  user_id?: number
-  user?: User
-  action: string
-  resource?: string
-  resource_id?: string | number
-  details?: string | Record<string, unknown>
-  ip?: string
+  user_id: number
+  type: string
+  title: string
+  content?: string | null
+  link?: string | null
+  is_read: boolean
   created_at: string
 }
 
-export interface PaginationParams {
-  page?: number
-  per_page?: number
-  search?: string
+export interface AuditLog {
+  id: number
+  actor_id?: number | null
+  action: string
+  target?: string | null
+  detail?: string | null
+  ip?: string | null
+  created_at: string
+}
+
+export interface PageParams {
+  limit?: number
+  offset?: number
   status?: string
+  q?: string
+}
+
+export interface Page<T> {
+  data: T[]
+  total: number
+}
+
+export interface RevenuePoint {
+  date: string
+  revenue: number
+  orders: number
+}
+
+export interface DashboardStats {
+  revenue_total: number
+  revenue_period: number
+  orders_total: number
+  orders_pending: number
+  orders_waiting: number
+  products_total: number
+  users_total: number
+  cards_available: number
+  period_days: number
+  revenue_series: RevenuePoint[]
 }
 
 export type SettingsMap = Record<string, string | number | boolean | null>

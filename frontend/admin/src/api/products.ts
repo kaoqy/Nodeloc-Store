@@ -1,53 +1,36 @@
 import client from './client'
-import type { Card, Category, Coupon, PaginationParams, Product } from '../types'
+import type { Card, Product } from '../types'
 
-export const listProducts = (params?: PaginationParams) =>
-  client.get<{data: Product[]}>('/admin/products', { params }).then(r => r.data.data)
+export const listProducts = () =>
+  client.get<{ data: Product[] }>('/admin/products').then((r) => r.data.data ?? [])
 
 export const getProduct = (id: number) =>
-  client.get<{data: Product}>(`/admin/products/${id}`).then(r => r.data.data)
+  client.get<{ data: Product }>(`/admin/products/${id}`).then((r) => r.data.data)
 
+// The backend binds the product itself as the request body (no wrapper key).
 export const createProduct = (product: Partial<Product>) =>
-  client.post<{data: Product}>('/admin/products', { product }).then(r => r.data.data)
+  client.post<{ data: Product }>('/admin/products', product).then((r) => r.data.data)
 
 export const updateProduct = (id: number, product: Partial<Product>) =>
-  client.put<{data: Product}>(`/admin/products/${id}`, { product }).then(r => r.data.data)
+  client.put<{ data: Product }>(`/admin/products/${id}`, product).then((r) => r.data.data)
 
-export const deleteProduct = (id: number) =>
-  client.delete(`/admin/products/${id}`)
+export const deleteProduct = (id: number) => client.delete(`/admin/products/${id}`)
 
-export const listCards = (id: number, params?: PaginationParams) =>
-  client.get<{data: Card[]}>(`/admin/products/${id}/cards`, { params }).then(r => r.data.data)
+export const listCards = (productId: number) =>
+  client.get<{ data: Card[] }>(`/admin/products/${productId}/cards`).then((r) => r.data.data ?? [])
 
-export const addCard = (id: number, card: Partial<Card>) =>
-  client.post<{data: Card}>(`/admin/products/${id}/cards`, { card }).then(r => r.data.data)
+export const addCard = (productId: number, content: string, status = 'available') =>
+  client.post<{ data: Card }>(`/admin/products/${productId}/cards`, { content, status }).then((r) => r.data.data)
 
-export const batchAddCards = (id: number, cards: string[]) =>
-  client.post<{data: Card[]; count: number}>(`/admin/products/${id}/cards/batch-add`, { cards }).then(r => r.data)
+export const batchAddCards = (productId: number, contents: string[]) =>
+  client
+    .post<{ data: Card[]; count: number }>(`/admin/products/${productId}/cards/batch-add`, { cards: contents })
+    .then((r) => r.data)
 
-export const deleteCard = (id: number, cardId: number) =>
-  client.delete(`/admin/products/${id}/cards/${cardId}`)
+export const updateCard = (productId: number, cardId: number, patch: Partial<Card>) =>
+  client
+    .put<{ data: Card }>(`/admin/products/${productId}/cards/${cardId}`, patch)
+    .then((r) => r.data.data)
 
-export const listCategories = () =>
-  client.get<{data: Category[]}>('/admin/categories').then(r => r.data.data)
-
-export const createCategory = (category: Partial<Category>) =>
-  client.post<{data: Category}>('/admin/categories', { category }).then(r => r.data.data)
-
-export const updateCategory = (id: number, category: Partial<Category>) =>
-  client.put<{data: Category}>(`/admin/categories/${id}`, { category }).then(r => r.data.data)
-
-export const deleteCategory = (id: number) =>
-  client.delete(`/admin/categories/${id}`)
-
-export const listCoupons = () =>
-  client.get<{data: Coupon[]}>('/admin/coupons').then(r => r.data.data)
-
-export const createCoupon = (coupon: Partial<Coupon>) =>
-  client.post<{data: Coupon}>('/admin/coupons', { coupon }).then(r => r.data.data)
-
-export const updateCoupon = (id: number, coupon: Partial<Coupon>) =>
-  client.put<{data: Coupon}>(`/admin/coupons/${id}`, { coupon }).then(r => r.data.data)
-
-export const deleteCoupon = (id: number) =>
-  client.delete(`/admin/coupons/${id}`)
+export const deleteCard = (productId: number, cardId: number) =>
+  client.delete(`/admin/products/${productId}/cards/${cardId}`)

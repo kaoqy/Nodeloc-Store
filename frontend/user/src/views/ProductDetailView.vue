@@ -1,44 +1,75 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getProduct } from '../api/products'
-import { createPayment } from '../api/payment'
+import { createOrder, createPayment } from '../api/payment'
+import { errorMessage } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { money } from '../utils/format'
 import type { Product } from '../types'
+
+const MaxQuantity = 20
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
 const product = ref<Product | null>(null)
-const orderNo = ref('')
-const description = ref('')
+const quantity = ref(1)
+const contact = ref('')
+const note = ref('')
 const loading = ref(true)
-const paying = ref(false)
+const submitting = ref(false)
 const error = ref('')
 
-const money = (value: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value)
+const cardStock = computed(() => {
+  const item = product.value
+  if (!item || item.product_type !== 'card' || !item.auto_deliver) return null
+  return item.stock_count
+})
+
+const limit = computed(() => {
+  if (cardStock.value === null) return MaxQuantity
+  return Math.min(MaxQuantity, Math.max(cardStock.value, 0))
+})
+
+const soldOut = computed(() => limit.value === 0)
+const total = computed(() => (product.value?.price ?? 0) * quantity.value)
+
+function step(delta: number) {
+  quantity.value = Math.min(limit.value, Math.max(1, quantity.value + delta))
+}
 
 async function purchase() {
-  if (!auth.isAuthenticated) { await router.push({ name: 'login', query: { redirect: route.fullPath } }); return }
-  if (!orderNo.value.trim()) { error.value = '请输入订单号'; return }
-  paying.value = true
+  const item = product.value
+  if (!item || submitting.value) return
+  if (!auth.isAuthenticated) {
+    await router.push({ name: 'login', query: { redirect: route.fullPath } })
+    return
+  }
+  submitting.value = true
   error.value = ''
   try {
-    const result = await createPayment({ order_no: orderNo.value.trim(), description: description.value || undefined })
-    window.location.href = result.payment_order.payment_url
-  } catch {
-    error.value = '创建支付订单失败，请稍后重试'
-  } finally {
-    paying.value = false
+    const order = await createOrder({
+      slug: item.slug,
+      quantity: quantity.value,
+      contact: contact.value.trim() || undefined,
+      note: note.value.trim() || undefined,
+    })
+    const payment = await createPayment(order.order_no, item.name)
+    if (!payment.payment_url) throw new Error('支付通道未返回付款地址，请稍后在订单页重试')
+    window.location.href = payment.payment_url
+  } catch (e) {
+    error.value = errorMessage(e, '下单失败，请稍后重试')
+    submitting.value = false
   }
 }
 
 onMounted(async () => {
   try {
-    product.value = (await getProduct(String(route.params.slug))).data
-  } catch {
-    error.value = '商品信息加载失败'
+    product.value = await getProduct(String(route.params.slug))
+  } catch (e) {
+    error.value = errorMessage(e, '商品加载失败')
   } finally {
     loading.value = false
   }
@@ -46,64 +77,129 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl px-4 py-10 sm:px-6">
-    <!-- Loading -->
-    <div v-if="loading" class="py-28 text-center text-[#b4b2c3]">
-      <div class="skeleton mx-auto mb-4 h-8 w-48 !rounded-full" />
-      <div class="skeleton mx-auto h-64 max-w-3xl" />
+  <div class="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
+    <div v-if="loading" class="grid gap-8 lg:grid-cols-[1.5fr_1fr]">
+      <div class="space-y-4">
+        <div class="skeleton aspect-[16/9] w-full !rounded-lg" />
+        <div class="skeleton h-7 w-1/2" />
+        <div class="skeleton h-4 w-full" />
+        <div class="skeleton h-4 w-5/6" />
+      </div>
+      <div class="skeleton h-80 w-full !rounded-lg" />
     </div>
 
-    <!-- Content -->
-    <div v-else-if="product" class="fade-in grid gap-8 lg:grid-cols-[1.4fr_0.6fr]">
-      <!-- Product Info -->
-      <section class="sheen self-start overflow-hidden rounded-[26px] border border-white/[0.13] bg-gradient-to-b from-white/[0.08] to-white/[0.025] shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_20px_60px_-14px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
-        <div class="relative aspect-video bg-gradient-to-br from-purple-500/15 via-indigo-500/8 to-sky-500/15">
-          <img v-if="product.cover_image" :src="product.cover_image" :alt="product.name" class="h-full w-full object-cover" />
-          <div v-else class="grid h-full place-items-center text-7xl font-black text-white/[0.06]">N</div>
-          <div class="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#0a0916]/75 to-transparent" />
-        </div>
-        <div class="p-7 sm:p-10">
-          <span v-if="product.category" class="badge badge-accent mb-4">{{ product.category.name }}</span>
-          <h1 class="text-3xl font-black tracking-tight">{{ product.name }}</h1>
-          <div class="mt-4 flex items-baseline gap-3">
-            <span class="text-4xl font-black gradient-text">{{ money(product.price) }}</span>
-            <span v-if="product.original_price" class="text-lg text-[#7b7990] line-through">{{ money(product.original_price) }}</span>
+    <p v-else-if="!product" class="alert alert-danger max-w-xl">
+      {{ error || '未找到该商品，它可能已经下架。' }}
+    </p>
+
+    <div v-else class="fade-in grid items-start gap-8 lg:grid-cols-[1.5fr_1fr]">
+      <section>
+        <RouterLink to="/" class="hint inline-flex items-center gap-1.5 transition-colors hover:text-[var(--text)]">
+          ← 全部商品
+        </RouterLink>
+
+        <div class="card mt-4 overflow-hidden !p-0">
+          <div class="aspect-[16/9] w-full bg-[var(--surface-sunken)]">
+            <img
+              v-if="product.image_path"
+              :src="product.image_path"
+              :alt="product.name"
+              class="h-full w-full object-cover"
+            />
+            <div v-else class="grid h-full place-items-center">
+              <span class="mono text-3xl font-bold tracking-[0.24em] text-[var(--text-quiet)]/45">
+                {{ product.name.slice(0, 2).toUpperCase() }}
+              </span>
+            </div>
           </div>
-          <div class="mt-7 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
-          <p class="mt-7 whitespace-pre-line leading-8 text-[#b4b2c3]">{{ product.description }}</p>
+
+          <div class="p-6 sm:p-8">
+            <div class="flex flex-wrap items-center gap-2">
+              <span v-if="product.category" class="badge badge-neutral">{{ product.category.name }}</span>
+              <span class="badge" :class="product.product_type === 'card' ? 'badge-teal' : 'badge-accent'">
+                {{ product.product_type === 'card' ? '付款后自动交付' : '商家人工交付' }}
+              </span>
+            </div>
+
+            <h1 class="mt-4 text-3xl font-bold">{{ product.name }}</h1>
+            <p v-if="product.summary" class="mt-2 text-[15px] text-[var(--text-dim)]">{{ product.summary }}</p>
+
+            <div v-if="product.description" class="my-6 divider" />
+
+            <p v-if="product.description" class="whitespace-pre-line text-[15px] leading-7 text-[var(--text-dim)]">
+              {{ product.description }}
+            </p>
+          </div>
         </div>
       </section>
 
-      <!-- Purchase Card -->
-      <aside class="glass h-fit p-7 lg:sticky lg:top-28">
-        <h3 class="text-lg font-bold tracking-tight">立即购买</h3>
-        <div class="mt-4 rounded-2xl border border-purple-400/25 bg-gradient-to-br from-purple-500/15 to-indigo-500/10 p-5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
-          <p class="text-xs tracking-widest text-[#b4b2c3] uppercase">商品价格</p>
-          <p class="mt-1 text-3xl font-black gradient-text">{{ money(product.price) }}</p>
+      <aside class="card lg:sticky lg:top-24">
+        <div class="flex items-baseline justify-between gap-3">
+          <span class="label !mb-0">单价</span>
+          <span class="nums text-2xl font-bold">{{ money(product.price) }}</span>
         </div>
-        <form class="mt-6 space-y-4" @submit.prevent="purchase">
-          <div>
-            <label class="mb-1.5 block text-sm font-medium text-[#b4b2c3]">订单号</label>
-            <input v-model="orderNo" class="input" required placeholder="请输入待支付订单号" />
+        <p v-if="product.original_price && product.original_price > product.price" class="mt-1 text-right">
+          <span class="nums hint line-through">{{ money(product.original_price) }}</span>
+        </p>
+
+        <div class="my-5 divider" />
+
+        <form class="space-y-4" @submit.prevent="purchase">
+          <div class="flex items-center justify-between gap-3">
+            <span class="label !mb-0">数量</span>
+            <div class="stepper">
+              <button type="button" :disabled="quantity <= 1 || soldOut" aria-label="减少数量" @click="step(-1)">−</button>
+              <span class="stepper-value py-2">{{ soldOut ? 0 : quantity }}</span>
+              <button type="button" :disabled="quantity >= limit" aria-label="增加数量" @click="step(1)">+</button>
+            </div>
           </div>
-          <div>
-            <label class="mb-1.5 block text-sm font-medium text-[#b4b2c3]">备注（选填）</label>
-            <textarea v-model="description" class="input min-h-[88px] resize-none" placeholder="补充订单说明"></textarea>
+
+          <div v-if="cardStock !== null" class="hint -mt-1">
+            现货 <span class="nums">{{ cardStock }}</span> 件{{ soldOut ? '，暂时缺货' : '' }}
           </div>
-          <p v-if="error" class="fade-in rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{{ error }}</p>
-          <button class="btn btn-primary w-full py-3.5" :disabled="paying || product.stock === 0">
-            {{ product.stock === 0 ? '暂时缺货' : paying ? '正在创建支付…' : '立即购买' }}
+
+          <div v-if="product.require_contact">
+            <label class="label" for="contact">联系方式 <span class="accent-text">*</span></label>
+            <input
+              id="contact"
+              v-model="contact"
+              class="input"
+              required
+              maxlength="255"
+              placeholder="商家交付时需要用到的账号或邮箱"
+            />
+            <p class="hint mt-1.5">仅商家可见，用于向你交付商品。</p>
+          </div>
+
+          <div>
+            <label class="label" for="note">备注</label>
+            <textarea id="note" v-model="note" class="input" maxlength="500" placeholder="选填，例如规格要求"></textarea>
+          </div>
+
+          <div class="divider" />
+
+          <div class="flex items-baseline justify-between">
+            <span class="text-sm text-[var(--text-dim)]">应付合计</span>
+            <span class="nums accent-text text-2xl font-bold">{{ money(total) }}</span>
+          </div>
+
+          <p v-if="error" class="alert alert-danger">{{ error }}</p>
+
+          <button class="btn btn-primary btn-lg w-full" type="submit" :disabled="submitting || soldOut">
+            <span v-if="submitting" class="spinner !border-white/40 !border-t-white" />
+            {{ soldOut ? '暂时缺货' : submitting ? '正在跳转支付…' : '立即购买' }}
           </button>
+
+          <p class="hint text-center">
+            {{ auth.isAuthenticated ? '点击后跳转至 Nodeloc Payments 完成扣款' : '登录后即可下单，订单会保留你的选择' }}
+          </p>
         </form>
-        <div class="mt-5 flex items-center justify-center gap-4 text-[11px] text-[#7b7990]">
-          <span class="flex items-center gap-1.5"><span class="size-1 rounded-full bg-emerald-400" />安全支付</span>
-          <span class="flex items-center gap-1.5"><span class="size-1 rounded-full bg-purple-400" />自动发货</span>
-          <span class="flex items-center gap-1.5"><span class="size-1 rounded-full bg-sky-400" />订单可追踪</span>
-        </div>
+
+        <ul class="mt-5 space-y-1.5 text-xs text-[var(--text-quiet)]">
+          <li class="flex items-center gap-2"><span class="size-1 rounded-full bg-[var(--teal)]" />支付成功即可在订单页查看交付结果</li>
+          <li class="flex items-center gap-2"><span class="size-1 rounded-full bg-[var(--info)]" />未支付的订单可随时继续付款</li>
+        </ul>
       </aside>
     </div>
-
-    <!-- Error -->
-    <p v-else class="glass p-10 text-center text-rose-300">{{ error || '未找到该商品' }}</p>
   </div>
 </template>

@@ -6,9 +6,9 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
-	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification/infrastructure"
 )

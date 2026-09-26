@@ -2,167 +2,172 @@
 import { computed, onMounted, ref } from 'vue'
 import StatCard from '../components/StatCard.vue'
 import { listOrders } from '../api/orders'
-import { listProducts } from '../api/products'
-import { listUsers } from '../api/users'
 import { listAuditLogs } from '../api/logs'
-import type { AuditLog, Order } from '../types'
+import { getStats } from '../api/system'
+import { errorMessage, money, orderStatus, when, dayLabel } from '../utils/format'
+import type { AuditLog, DashboardStats, Order } from '../types'
 
 const loading = ref(true)
+const error = ref('')
+const days = ref(30)
+const stats = ref<DashboardStats | null>(null)
 const orders = ref<Order[]>([])
 const logs = ref<AuditLog[]>([])
-const productCount = ref(0)
-const userCount = ref(0)
 
-const revenue = computed(() => orders.value.reduce((sum, order) => sum + Number(order.total_amount || 0), 0))
-const pendingCount = computed(() => orders.value.filter(order => ['pending', 'paid'].includes(order.status)).length)
+const series = computed(() => stats.value?.revenue_series ?? [])
+const peak = computed(() => Math.max(1, ...series.value.map((point) => point.revenue)))
+const activeDays = computed(() => series.value.filter((point) => point.revenue > 0).length)
+const averageRevenue = computed(() =>
+  activeDays.value ? Math.round((stats.value?.revenue_period ?? 0) / activeDays.value) : 0,
+)
 
-const statusText: Record<string, string> = {
-  pending: '待支付', paid: '已支付', delivered: '已发货', completed: '已完成',
-  cancelled: '已取消', refunded: '已退款',
-}
-
-onMounted(async () => {
+async function load() {
+  loading.value = true
+  error.value = ''
   try {
-    const [orderResult, productResult, userResult, logResult] = await Promise.all([
-      listOrders({ page: 1, per_page: 8 }),
-      listProducts({ page: 1, per_page: 100 }),
-      listUsers({ page: 1, per_page: 100 }),
-      listAuditLogs({ page: 1, per_page: 8 }),
+    const [statsResult, orderResult, logResult] = await Promise.all([
+      getStats(days.value),
+      listOrders({ limit: 6, offset: 0 }),
+      listAuditLogs({ page: 1, limit: 6 }),
     ])
+    stats.value = statsResult
     orders.value = orderResult.data
-    productCount.value = productResult.data.length
-    userCount.value = userResult.data.length
     logs.value = logResult.items
+  } catch (err) {
+    error.value = errorMessage(err, '加载概览数据失败')
   } finally {
     loading.value = false
   }
-})
+}
+
+async function switchRange(value: number) {
+  if (days.value === value) return
+  days.value = value
+  await load()
+}
+
+onMounted(load)
 </script>
 
 <template>
-  <section class="space-y-6">
-    <!-- Stats Grid -->
+  <section class="space-y-5">
+    <div v-if="error" class="alert alert-danger">{{ error }}</div>
+
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <StatCard title="订单收入" :value="`¥${revenue.toFixed(2)}`" subtitle="本月累计" icon="¥" />
-      <StatCard title="待处理订单" :value="pendingCount" subtitle="需要关注" icon="◎" />
-      <StatCard title="商品数量" :value="productCount" subtitle="在售中" icon="▣" />
-      <StatCard title="用户数量" :value="userCount" subtitle="注册用户" icon="♙" />
+      <StatCard
+        label="期间收入"
+        :value="money(stats?.revenue_period ?? 0)"
+        :hint="`近 ${days} 天 · 累计 ${money(stats?.revenue_total ?? 0)}`"
+        accent
+      />
+      <StatCard label="订单总数" :value="stats?.orders_total ?? 0" :hint="`待支付 ${stats?.orders_pending ?? 0} 笔`" />
+      <StatCard
+        label="可用卡密"
+        :value="stats?.cards_available ?? 0"
+        :hint="`等待补货订单 ${stats?.orders_waiting ?? 0} 笔`"
+      />
+      <StatCard label="注册用户" :value="stats?.users_total ?? 0" :hint="`在售商品 ${stats?.products_total ?? 0} 个`" />
     </div>
 
-    <!-- Charts Row -->
-    <div class="grid gap-6 xl:grid-cols-3">
-      <!-- Sales Chart -->
+    <div class="grid gap-5 xl:grid-cols-3">
       <div class="card xl:col-span-2">
-        <div class="mb-4 flex items-center justify-between">
-          <h3 class="font-semibold">销售趋势</h3>
+        <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-base font-semibold">收入趋势</h2>
+            <p class="quiet mt-1 text-xs">
+              有成交 {{ activeDays }} 天 · 日均 {{ money(averageRevenue) }}
+            </p>
+          </div>
           <div class="flex gap-2">
-            <button class="btn-secondary text-xs">日</button>
-            <button class="btn-primary text-xs">周</button>
-            <button class="btn-secondary text-xs">月</button>
+            <button
+              v-for="option in [{ days: 7, label: '近 7 天' }, { days: 30, label: '近 30 天' }]"
+              :key="option.days"
+              class="btn btn-sm"
+              :class="days === option.days ? 'btn-primary' : 'btn-secondary'"
+              @click="switchRange(option.days)"
+            >
+              {{ option.label }}
+            </button>
           </div>
         </div>
-        <div class="relative h-64 flex items-end justify-between gap-2">
-          <!-- Chart bars placeholder -->
-          <div v-for="(h, i) in [60, 45, 78, 52, 90, 65, 85]" :key="i"
-            class="flex-1 rounded-t-lg bg-gradient-to-t from-indigo-600/30 to-indigo-400/10 border border-indigo-500/20"
-            :style="{ height: h + '%' }"
-          />
-        </div>
-        <div class="mt-4 flex justify-between text-xs text-[#7a7890]">
-          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+
+        <div v-if="loading" class="skeleton h-52" />
+        <div v-else-if="!series.length" class="py-16 text-center text-sm quiet">暂无数据</div>
+        <div v-else>
+          <div class="flex h-52 items-end gap-1.5">
+            <div
+              v-for="point in series"
+              :key="point.date"
+              class="group relative flex-1 rounded-t-sm bg-[var(--accent-soft)] transition-colors hover:bg-[var(--accent-line)]"
+              :class="point.revenue ? 'border border-b-0 border-[var(--accent-line)]' : 'border border-b-0 border-[var(--stroke-quiet)]'"
+              :style="{ height: `${Math.max((point.revenue / peak) * 100, 2)}%` }"
+              :title="`${point.date} · ${money(point.revenue)} · ${point.orders} 单`"
+            />
+          </div>
+          <div class="mt-3 flex justify-between text-[11px] quiet mono">
+            <span>{{ dayLabel(series[0].date) }}</span>
+            <span>{{ dayLabel(series[Math.floor(series.length / 2)].date) }}</span>
+            <span>{{ dayLabel(series[series.length - 1].date) }}</span>
+          </div>
         </div>
       </div>
 
-      <!-- Top Products -->
       <div class="card">
         <div class="mb-4 flex items-center justify-between">
-          <h3 class="font-semibold">热销商品</h3>
-          <RouterLink to="/products" class="text-sm text-indigo-300 hover:text-indigo-200">查看全部</RouterLink>
+          <h2 class="text-base font-semibold">近期操作</h2>
+          <RouterLink to="/logs" class="text-sm accent-text">审计日志</RouterLink>
         </div>
         <div v-if="loading" class="space-y-3">
-          <div v-for="i in 5" :key="i" class="skeleton h-8" />
+          <div v-for="i in 5" :key="i" class="skeleton h-10" />
         </div>
-        <div v-else class="space-y-3">
-          <div v-for="i in 5" :key="i" class="flex items-center gap-3">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/10 text-sm font-bold text-indigo-300">
-              {{ i }}
-            </div>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm">示例商品 {{ i }}</p>
-              <p class="text-xs text-[#7a7890]">¥{{ (i * 10).toFixed(2) }}</p>
-            </div>
-            <span class="text-xs text-[#34d399]">+{{ i * 5 }}%</span>
+        <div v-else-if="!logs.length" class="py-12 text-center text-sm quiet">暂无日志</div>
+        <div v-else class="space-y-3.5">
+          <div v-for="log in logs" :key="log.id" class="border-l-2 border-[var(--accent-line)] pl-3">
+            <p class="mono text-xs">{{ log.action }}</p>
+            <p class="quiet mt-1 truncate text-xs">{{ log.target || '—' }} · {{ when(log.created_at) }}</p>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Tables Row -->
-    <div class="grid gap-6 xl:grid-cols-3">
-      <!-- Recent Orders -->
-      <div class="card overflow-hidden xl:col-span-2">
-        <div class="mb-4 flex items-center justify-between">
-          <h3 class="font-semibold">近期订单</h3>
-          <RouterLink to="/orders" class="text-sm text-indigo-300 hover:text-indigo-200">查看全部</RouterLink>
-        </div>
-        <div v-if="loading" class="space-y-3">
-          <div v-for="i in 4" :key="i" class="skeleton h-12" />
-        </div>
-        <div v-else-if="!orders.length" class="py-10 text-center text-[#7a7890]">暂无订单</div>
-        <div v-else class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>订单号</th>
-                <th>商品</th>
-                <th>金额</th>
-                <th>状态</th>
-                <th>时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="order in orders.slice(0, 6)" :key="order.order_no">
-                <td>
-                  <RouterLink :to="`/orders/${order.order_no}`" class="text-indigo-300 hover:text-indigo-200">
-                    {{ order.order_no }}
-                  </RouterLink>
-                </td>
-                <td>{{ order.product_name || order.product?.name || '数字商品' }}</td>
-                <td>¥{{ Number(order.total_amount).toFixed(2) }}</td>
-                <td>
-                  <span
-                    :class="[
-                      'badge',
-                      order.status === 'pending' ? 'badge-warning' :
-                      order.status === 'paid' ? 'badge-info' :
-                      order.status === 'delivered' ? 'badge-success' :
-                      order.status === 'completed' ? 'badge-success' :
-                      order.status === 'cancelled' ? 'badge-danger' : 'badge-neutral'
-                    ]"
-                  >
-                    {{ statusText[order.status] || order.status }}
-                  </span>
-                </td>
-                <td class="text-[#b3b1c4]">{{ order.created_at || '-' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+    <div class="card !p-0 overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-4">
+        <h2 class="text-base font-semibold">最新订单</h2>
+        <RouterLink to="/orders" class="text-sm accent-text">查看全部</RouterLink>
       </div>
-
-      <!-- Recent Activity -->
-      <div class="card">
-        <div class="mb-4 flex items-center justify-between">
-          <h3 class="font-semibold">近期操作</h3>
-          <RouterLink to="/logs" class="text-sm text-indigo-300 hover:text-indigo-200">审计日志</RouterLink>
-        </div>
-        <div v-if="!logs.length" class="py-10 text-center text-[#7a7890]">暂无日志</div>
-        <div v-else class="space-y-4">
-          <div v-for="log in logs.slice(0, 6)" :key="log.id" class="border-l-2 border-indigo-500/40 pl-3">
-            <p class="text-sm">{{ log.action }}</p>
-            <p class="mt-1 text-xs text-[#7a7890]">{{ log.user?.name || log.user?.email || '系统' }} · {{ log.created_at }}</p>
-          </div>
-        </div>
+      <div v-if="loading" class="space-y-2 px-5 pb-5">
+        <div v-for="i in 4" :key="i" class="skeleton h-11" />
+      </div>
+      <p v-else-if="!orders.length" class="px-5 pb-8 text-center text-sm quiet">暂无订单</p>
+      <div v-else class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>订单号</th>
+              <th>用户</th>
+              <th>商品</th>
+              <th>金额</th>
+              <th>状态</th>
+              <th>创建时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="order in orders" :key="order.order_no">
+              <td>
+                <RouterLink :to="`/orders/${order.order_no}`" class="mono text-sm accent-text">
+                  {{ order.order_no }}
+                </RouterLink>
+              </td>
+              <td class="text-sm">{{ order.user?.username || `#${order.user_id}` }}</td>
+              <td class="truncate text-sm">{{ order.product?.name || `#${order.product_id}` }}</td>
+              <td class="nums text-sm">{{ money(order.total_amount) }}</td>
+              <td>
+                <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
+              </td>
+              <td class="text-sm quiet">{{ when(order.created_at) }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </section>

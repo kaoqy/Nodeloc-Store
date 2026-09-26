@@ -9,7 +9,7 @@ type Transaction struct {
 	OrderID               uint       `gorm:"not null;index" json:"order_id"`
 	OrderNo               string     `gorm:"size:64;not null;index" json:"order_no"`
 	Provider              string     `gorm:"size:32;not null;default:nodeloc" json:"provider"`
-	ProviderTransactionID string     `gorm:"size:128;uniqueIndex" json:"provider_transaction_id"`
+	ProviderTransactionID *string    `gorm:"size:128;uniqueIndex" json:"provider_transaction_id,omitempty"`
 	Type                  string     `gorm:"size:24;not null;index" json:"type"`
 	Status                string     `gorm:"size:24;not null;index" json:"status"`
 	Amount                int        `gorm:"not null" json:"amount"`
@@ -50,11 +50,11 @@ const (
 	TransactionTypeTransfer = "transfer"
 	TransactionTypeRefund   = "refund"
 
-	StatusPending   = "pending"
+	StatusPending    = "pending"
 	StatusProcessing = "processing"
-	StatusPaid      = "paid"
-	StatusSucceeded = "succeeded"
-	StatusFailed    = "failed"
-	StatusRefunded  = "refunded"
-	StatusCancelled = "cancelled"
+	StatusPaid       = "paid"
+	StatusSucceeded  = "succeeded"
+	StatusFailed     = "failed"
+	StatusRefunded   = "refunded"
+	StatusCancelled  = "cancelled"
 )

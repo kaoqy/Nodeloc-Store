@@ -1,5 +1,5 @@
 import client from './client'
-import type { RuntimeSettings } from '../types'
+import type { DashboardStats, RuntimeSettings } from '../types'
 
 export interface SystemStatus {
   initialized: boolean
@@ -88,3 +88,6 @@ export const testOAuth = () =>
 
 export const testPayment = () =>
   client.post<{ ok: boolean; msg: string }>('/admin/settings/payment-test').then((r) => r.data)
+
+export const getStats = (days = 30) =>
+  client.get<DashboardStats>('/admin/stats', { params: { days } }).then((r) => r.data)

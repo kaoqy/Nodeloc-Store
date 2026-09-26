@@ -1,41 +1,73 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { listCategories, createCategory, updateCategory, deleteCategory } from '../api/categories'
+import { computed, onMounted, ref } from 'vue'
+import { createCategory, deleteCategory, listCategories, updateCategory } from '../api/categories'
+import { errorMessage } from '../utils/format'
 import type { Category } from '../types'
 
 const loading = ref(true)
+const busy = ref(false)
+const error = ref('')
 const categories = ref<Category[]>([])
-const editing = ref<Category | null>(null)
+const editing = ref<Partial<Category> | null>(null)
+
+const sorted = computed(() => [...categories.value].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id))
+const canSave = computed(() => Boolean(editing.value?.name?.trim() && editing.value?.slug?.trim()))
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^\w一-龥]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
-    const result = await listCategories()
-    categories.value = result.data
+    categories.value = await listCategories()
+  } catch (err) {
+    error.value = errorMessage(err, '加载分类失败')
   } finally {
     loading.value = false
   }
 }
 
-function startEdit(cat: Category) {
-  editing.value = { ...cat }
-}
-
-async function saveEdit() {
-  if (!editing.value) return
-  if (editing.value.id) {
-    await updateCategory(editing.value.id, editing.value)
-  } else {
-    await createCategory(editing.value)
+async function save() {
+  if (!editing.value || !canSave.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    const payload = {
+      name: editing.value.name?.trim(),
+      slug: editing.value.slug?.trim(),
+      description: editing.value.description || null,
+      icon: editing.value.icon || null,
+      sort_order: Number(editing.value.sort_order) || 0,
+      is_visible: editing.value.is_visible ?? true,
+    }
+    if (editing.value.id) {
+      await updateCategory(editing.value.id, payload)
+    } else {
+      await createCategory(payload)
+    }
+    editing.value = null
+    await load()
+  } catch (err) {
+    error.value = errorMessage(err, '保存分类失败')
+  } finally {
+    busy.value = false
   }
-  editing.value = null
-  await load()
 }
 
-async function deleteCat(id: number) {
-  if (!confirm('确定删除此分类？')) return
-  await deleteCategory(id)
-  await load()
+async function remove(category: Category) {
+  if (!confirm(`删除分类「${category.name}」？该分类下的商品会变成未分类。`)) return
+  error.value = ''
+  try {
+    await deleteCategory(category.id)
+    await load()
+  } catch (err) {
+    error.value = errorMessage(err, '删除分类失败')
+  }
 }
 
 onMounted(load)
@@ -43,48 +75,104 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <div class="flex items-center justify-between">
-      <p class="text-sm text-[#7a7890]">管理商品分类</p>
-      <button class="btn-primary" @click="editing = { id: 0, name: '', slug: '', icon: '', sort_order: 0, is_visible: true }">+ 新建分类</button>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <p class="quiet text-sm">前台分类导航的顺序与显隐在这里维护。</p>
+      <button
+        class="btn btn-primary btn-sm"
+        @click="editing = { name: '', slug: '', description: '', icon: '', sort_order: 0, is_visible: true }"
+      >
+        + 新建分类
+      </button>
     </div>
+
+    <div v-if="error" class="alert alert-danger">{{ error }}</div>
 
     <div class="table-container">
       <table>
         <thead>
-          <tr><th>ID</th><th>名称</th><th>别名</th><th>排序</th><th>可见</th><th>操作</th></tr>
+          <tr>
+            <th>分类</th>
+            <th>别名</th>
+            <th>图标</th>
+            <th>排序</th>
+            <th>可见</th>
+            <th></th>
+          </tr>
         </thead>
         <tbody>
-          <tr v-if="loading"><td colspan="6"><div class="skeleton h-8" /></td></tr>
-          <tr v-else-if="!categories.length"><td colspan="6" class="py-8 text-center text-[#7a7890]">暂无分类</td></tr>
-          <tr v-for="cat in categories" :key="cat.id">
-            <td>{{ cat.id }}</td>
-            <td>{{ cat.name }}</td>
-            <td>{{ cat.slug }}</td>
-            <td>{{ cat.sort_order }}</td>
-            <td><span :class="['badge', cat.is_visible ? 'badge-success' : 'badge-neutral']">{{ cat.is_visible ? '显示' : '隐藏' }}</span></td>
+          <tr v-if="loading">
+            <td colspan="6"><div class="skeleton h-9" /></td>
+          </tr>
+          <tr v-else-if="!sorted.length">
+            <td colspan="6" class="py-12 text-center text-sm quiet">还没有分类</td>
+          </tr>
+          <tr v-for="category in sorted" :key="category.id">
             <td>
-              <button class="btn-ghost text-xs" @click="startEdit(cat)">编辑</button>
-              <button class="btn-ghost text-xs text-[#fb7185]" @click="deleteCat(cat.id)">删除</button>
+              <p class="text-sm font-medium">{{ category.name }}</p>
+              <p v-if="category.description" class="quiet truncate text-xs">{{ category.description }}</p>
+            </td>
+            <td class="mono text-sm quiet">{{ category.slug }}</td>
+            <td class="text-sm">{{ category.icon || '—' }}</td>
+            <td class="nums text-sm">{{ category.sort_order ?? 0 }}</td>
+            <td>
+              <span class="badge" :class="category.is_visible ? 'badge-success' : 'badge-neutral'">
+                {{ category.is_visible ? '显示' : '隐藏' }}
+              </span>
+            </td>
+            <td class="whitespace-nowrap text-right">
+              <button class="btn btn-ghost btn-sm" @click="editing = { ...category }">编辑</button>
+              <button class="btn btn-ghost btn-sm text-[var(--danger)]" @click="remove(category)">删除</button>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <!-- Edit Modal -->
-    <div v-if="editing" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div class="card w-full max-w-md">
-        <h3 class="mb-4 text-lg font-semibold">{{ editing.id ? '编辑分类' : '新建分类' }}</h3>
-        <div class="space-y-3">
-          <div><label class="mb-1 block text-sm text-[#b3b1c4]">名称</label><input v-model="editing.name" class="input" /></div>
-          <div><label class="mb-1 block text-sm text-[#b3b1c4]">别名</label><input v-model="editing.slug" class="input" /></div>
-          <div><label class="mb-1 block text-sm text-[#b3b1c4]">图标</label><input v-model="editing.icon" class="input" /></div>
-          <div><label class="mb-1 block text-sm text-[#b3b1c4]">排序</label><input v-model.number="editing.sort_order" type="number" class="input" /></div>
-          <label class="flex items-center gap-2 text-sm"><input v-model="editing.is_visible" type="checkbox" /> 可见</label>
+    <div
+      v-if="editing"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
+      @click.self="editing = null"
+    >
+      <div class="card w-full max-w-md !p-5">
+        <h3 class="text-base font-semibold">{{ editing.id ? '编辑分类' : '新建分类' }}</h3>
+        <div class="mt-4 space-y-3">
+          <div>
+            <label class="label" for="c-name">名称 *</label>
+            <input
+              id="c-name"
+              v-model="editing.name"
+              class="input"
+              @blur="!editing.slug && (editing.slug = slugify(editing.name || ''))"
+            />
+          </div>
+          <div>
+            <label class="label" for="c-slug">别名 (slug) *</label>
+            <input id="c-slug" v-model="editing.slug" class="input mono text-xs" />
+          </div>
+          <div>
+            <label class="label" for="c-desc">描述</label>
+            <input id="c-desc" v-model="editing.description" class="input" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="c-icon">图标</label>
+              <input id="c-icon" v-model="editing.icon" class="input" placeholder="可选" />
+            </div>
+            <div>
+              <label class="label" for="c-sort">排序</label>
+              <input id="c-sort" v-model.number="editing.sort_order" type="number" class="input nums" />
+            </div>
+          </div>
+          <label class="flex items-center gap-2.5 text-sm">
+            <input v-model="editing.is_visible" type="checkbox" class="accent-[var(--accent)]" />
+            在前台显示
+          </label>
         </div>
-        <div class="mt-4 flex gap-2">
-          <button class="btn-secondary flex-1" @click="editing = null">取消</button>
-          <button class="btn-primary flex-1" @click="saveEdit">保存</button>
+        <div class="mt-5 flex justify-end gap-2">
+          <button class="btn btn-secondary btn-sm" @click="editing = null">取消</button>
+          <button class="btn btn-primary btn-sm" :disabled="busy || !canSave" @click="save">
+            {{ busy ? '保存中…' : '保存' }}
+          </button>
         </div>
       </div>
     </div>

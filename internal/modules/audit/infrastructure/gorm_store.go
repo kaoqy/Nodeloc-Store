@@ -29,7 +29,8 @@ func (s *GormStore) Create(ctx context.Context, log *domain.AuditLog) error {
 func (s *GormStore) List(ctx context.Context, filter domain.LogFilter) ([]domain.AuditLog, int64, error) {
 	query := s.db.WithContext(ctx).Model(&domain.AuditLog{})
 	if filter.Action != "" {
-		query = query.Where("action = ?", filter.Action)
+		// Prefix match so "order" also finds order.cancel and order.refund.
+		query = query.Where("action LIKE ?", filter.Action+"%")
 	}
 
 	var total int64

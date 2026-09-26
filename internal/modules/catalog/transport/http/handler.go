@@ -34,6 +34,7 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	admin.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin())
 
 	admin.GET("/products", h.listProducts)
+	admin.GET("/products/:id", h.getProduct)
 	admin.POST("/products", h.createProduct)
 	admin.PUT("/products/:id", h.updateProduct)
 	admin.DELETE("/products/:id", h.deleteProduct)
@@ -89,6 +90,19 @@ func (h *Handler) listProducts(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": products})
+}
+
+func (h *Handler) getProduct(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	product, err := h.service.GetProduct(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": product})
 }
 
 func (h *Handler) createProduct(c *gin.Context) {

@@ -1,118 +1,112 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import ProductCard from '../components/ProductCard.vue'
 import { listCategories, listProducts } from '../api/products'
+import { errorMessage } from '../api/client'
 import type { Category, Product } from '../types'
 
 const products = ref<Product[]>([])
 const categories = ref<Category[]>([])
-const q = ref('')
-const category = ref('')
-const page = ref(1)
-const lastPage = ref(1)
-const loading = ref(false)
+const keyword = ref('')
+const activeCategory = ref('')
+const loading = ref(true)
 const error = ref('')
 
-async function load(reset = false) {
-  if (reset) page.value = 1
-  loading.value = true
-  error.value = ''
+const visible = computed(() => {
+  const needle = keyword.value.trim().toLowerCase()
+  return products.value.filter((product) => {
+    if (activeCategory.value && product.category?.slug !== activeCategory.value) return false
+    if (!needle) return true
+    return [product.name, product.summary, product.description]
+      .filter(Boolean)
+      .some((field) => String(field).toLowerCase().includes(needle))
+  })
+})
+
+const purchasable = computed(() => products.value.filter((item) => item.stock_count > 0).length)
+
+onMounted(async () => {
   try {
-    const result = await listProducts({
-      q: q.value || undefined,
-      category: category.value || undefined,
-      page: page.value,
-    })
-    products.value = result.data
-    lastPage.value = result.last_page || 1
-  } catch {
-    error.value = '商品加载失败，请稍后重试'
+    const [items, groups] = await Promise.all([listProducts(), listCategories()])
+    products.value = items
+    categories.value = groups
+  } catch (e) {
+    error.value = errorMessage(e, '商品加载失败，请稍后重试')
   } finally {
     loading.value = false
   }
-}
-
-async function changePage(next: number) {
-  page.value = next
-  await load()
-  window.scrollTo({ top: 0, behavior: 'smooth' })
-}
-
-onMounted(async () => {
-  await Promise.all([
-    load(),
-    listCategories().then(r => categories.value = r.data).catch(() => undefined),
-  ])
 })
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl px-4 py-10 sm:px-6">
-    <!-- Hero -->
-    <section class="rise-in relative mb-10 overflow-hidden rounded-[30px] border border-white/[0.14] bg-gradient-to-br from-purple-500/12 via-white/[0.03] to-indigo-500/12 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_24px_70px_-14px_rgba(0,0,0,0.6)] backdrop-blur-2xl sm:p-14">
-      <div class="pointer-events-none absolute -top-24 -left-24 size-72 rounded-full bg-purple-500/25 blur-3xl" />
-      <div class="pointer-events-none absolute -bottom-28 -right-20 size-80 rounded-full bg-indigo-500/20 blur-3xl" />
-      <div class="relative">
-        <span class="badge badge-accent mb-5 tracking-[0.28em] uppercase">Digital Marketplace</span>
-        <h1 class="max-w-3xl text-4xl font-black tracking-tight sm:text-6xl sm:leading-[1.08]">
-          发现优质<span class="gradient-text">数字商品</span>
-        </h1>
-        <p class="mt-5 max-w-2xl text-base leading-relaxed text-[#b4b2c3] sm:text-lg">
-          安全支付，即时交付。精选数字资源，让创意与效率触手可及。
-        </p>
-        <div class="mt-8 flex flex-wrap items-center gap-6 text-sm text-[#7b7990]">
-          <span class="flex items-center gap-2"><span class="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]" />Nodeloc Payments 担保支付</span>
-          <span class="flex items-center gap-2"><span class="size-1.5 rounded-full bg-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.9)]" />卡密自动交付</span>
-          <span class="flex items-center gap-2"><span class="size-1.5 rounded-full bg-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.9)]" />NodeLoc 一键登录</span>
+  <div class="mx-auto w-full max-w-6xl px-4 sm:px-6">
+    <!-- Editorial intro: what this store ships, stated plainly. -->
+    <section class="rise-in mt-12 max-w-3xl">
+      <p class="eyebrow">Digital goods store</p>
+      <h1 class="mt-3 text-4xl font-bold sm:text-5xl">
+        下单、支付、<span class="accent-text">即时到货</span>
+      </h1>
+      <p class="mt-4 text-[15px] leading-relaxed text-[var(--text-dim)]">
+        使用 NodeLoc 账号登录即可购买。卡密类商品在付款完成的瞬间自动交付，人工交付的商品会进入商家的发货队列并同步到你的订单。
+      </p>
+      <dl class="mt-7 grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:max-w-md">
+        <div>
+          <dt class="text-[var(--text-quiet)]">在售商品</dt>
+          <dd class="nums text-lg font-semibold">{{ loading ? '—' : products.length }}</dd>
         </div>
+        <div>
+          <dt class="text-[var(--text-quiet)]">现货可购</dt>
+          <dd class="nums text-lg font-semibold">{{ loading ? '—' : purchasable }}</dd>
+        </div>
+      </dl>
+    </section>
+
+    <!-- Search + category filter -->
+    <section class="mt-12 flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div class="relative sm:max-w-xs sm:flex-1">
+        <input v-model="keyword" class="input !pl-9" placeholder="搜索商品…" aria-label="搜索商品" />
+        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-quiet)]">⌕</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button class="chip" :class="{ 'chip-active': activeCategory === '' }" @click="activeCategory = ''">
+          全部
+        </button>
+        <button
+          v-for="item in categories"
+          :key="item.id"
+          class="chip"
+          :class="{ 'chip-active': activeCategory === item.slug }"
+          @click="activeCategory = item.slug"
+        >
+          {{ item.name }}
+        </button>
       </div>
     </section>
 
-    <!-- Search & Filter -->
-    <form
-      class="glass mb-10 grid gap-3 rounded-full p-3 sm:grid-cols-[1fr_220px_auto]"
-      @submit.prevent="load(true)"
-    >
-      <input v-model="q" class="input !border-transparent !bg-white/[0.05] !shadow-none" placeholder="搜索商品…" />
-      <select v-model="category" class="input !border-transparent !bg-white/[0.05] !shadow-none" @change="load(true)">
-        <option value="">全部分类</option>
-        <option v-for="item in categories" :key="item.id" :value="item.slug">{{ item.name }}</option>
-      </select>
-      <button class="btn btn-primary !px-8" :disabled="loading">搜索</button>
-    </form>
-
-    <!-- Error -->
-    <p v-if="error" class="glass fade-in rounded-2xl border-red-500/25 !bg-rose-500/[0.07] p-5 text-rose-300">{{ error }}</p>
+    <p v-if="error" class="alert alert-danger mt-8">{{ error }}</p>
 
     <!-- Loading -->
-    <div v-else-if="loading" class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-      <div v-for="i in 6" :key="i" class="overflow-hidden rounded-[22px] border border-white/[0.1] bg-white/[0.03] backdrop-blur-xl">
-        <div class="skeleton aspect-[16/10] !rounded-none !border-0" />
+    <div v-else-if="loading" class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      <div v-for="i in 6" :key="i" class="card overflow-hidden !p-0">
+        <div class="skeleton aspect-[16/9] !rounded-none" />
         <div class="space-y-3 p-5">
-          <div class="skeleton h-4 w-3/4" />
+          <div class="skeleton h-4 w-2/3" />
           <div class="skeleton h-3 w-full" />
           <div class="skeleton h-3 w-1/2" />
         </div>
       </div>
     </div>
 
-    <!-- Products Grid -->
-    <div v-else-if="products.length" class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 fade-in">
-      <ProductCard v-for="product in products" :key="product.id" :product="product" />
+    <div v-else-if="visible.length" class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      <ProductCard v-for="product in visible" :key="product.id" :product="product" />
     </div>
 
-    <!-- Empty -->
-    <div v-else class="glass rise-in py-24 text-center">
-      <div class="mx-auto mb-6 grid size-16 place-items-center rounded-full border border-white/15 bg-white/[0.06] text-2xl backdrop-blur-md">🔮</div>
-      <p class="text-xl font-semibold">没有找到商品</p>
-      <p class="mt-2 text-[#7b7990]">换个关键词或分类试试吧</p>
-    </div>
-
-    <!-- Pagination -->
-    <div v-if="lastPage > 1" class="mt-12 flex items-center justify-center gap-4">
-      <button class="btn btn-secondary" :disabled="page <= 1" @click="changePage(page - 1)">← 上一页</button>
-      <span class="glass rounded-full px-5 py-2 text-sm text-[#b4b2c3]">第 {{ page }} / {{ lastPage }} 页</span>
-      <button class="btn btn-secondary" :disabled="page >= lastPage" @click="changePage(page + 1)">下一页 →</button>
+    <div v-else class="card mt-8 py-20 text-center">
+      <p class="text-[var(--text-quiet)]" aria-hidden="true">◍</p>
+      <p class="mt-3 font-semibold">{{ products.length ? '没有匹配的商品' : '店铺还没有上架商品' }}</p>
+      <p class="mt-1.5 text-sm text-[var(--text-quiet)]">
+        {{ products.length ? '换个关键词或分类试试' : '管理员在后台上架商品后即可在此购买' }}
+      </p>
     </div>
   </div>
 </template>

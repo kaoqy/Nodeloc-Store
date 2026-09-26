@@ -1,17 +1,17 @@
 import client from './client'
-import type { Category, Product, ProductListResponse } from '../types'
+import type { Category, Product } from '../types'
 
-export async function listProducts(params: { q?: string; category?: string; page?: number } = {}) {
-  const { data } = await client.get<ProductListResponse>('/store/products', { params })
-  return data
+export async function listProducts(): Promise<Product[]> {
+  const { data } = await client.get<{ data: Product[] }>('/store/products')
+  return data.data
 }
 
-export async function getProduct(slug: string) {
+export async function getProduct(slug: string): Promise<Product> {
   const { data } = await client.get<{ data: Product }>(`/store/products/${slug}`)
-  return data
+  return data.data
 }
 
-export async function listCategories() {
+export async function listCategories(): Promise<Category[]> {
   const { data } = await client.get<{ data: Category[] }>('/store/categories')
-  return data
+  return data.data
 }

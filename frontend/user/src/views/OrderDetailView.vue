@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { createPayment, getOrder } from '../api/payment'
+import { errorMessage } from '../api/client'
+import { fulfillmentStatus, money, orderStatus, when } from '../utils/format'
 import type { Order } from '../types'
 
 const route = useRoute()
@@ -9,110 +11,211 @@ const order = ref<Order | null>(null)
 const loading = ref(true)
 const paying = ref(false)
 const error = ref('')
+const payError = ref('')
+const copied = ref(false)
 
-const money = (value: number) =>
-  new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value)
+const isPaid = computed(() => {
+  const status = order.value?.status ?? ''
+  return status !== 'pending' && status !== 'cancelled' && status !== 'failed'
+})
 
-const date = (value?: string | null) =>
-  value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '暂无'
+const delivered = computed(() => {
+  const current = order.value
+  return Boolean(current?.delivery_content) || current?.fulfillment_status === 'delivered' || current?.fulfillment_status === 'completed'
+})
 
-const statusText = (status?: string) =>
-  ({ pending: '待支付', paid: '已支付', processing: '处理中', delivered: '已交付', completed: '已完成', cancelled: '已取消', failed: '失败' }[status || ''] || status || '未知')
-
-const statusBadge = (status?: string) =>
-  ({ pending: 'badge-warning', paid: 'badge-info', processing: 'badge-info', delivered: 'badge-success', completed: 'badge-success', cancelled: 'badge-danger', failed: 'badge-danger' }[status || ''] || 'badge-neutral')
-
-async function pay() {
-  if (!order.value) return
-  paying.value = true
+async function load() {
+  loading.value = true
   error.value = ''
   try {
-    const result = await createPayment({
-      order_no: order.value.order_no,
-      description: order.value.description || undefined,
-    })
-    window.location.href = result.payment_order.payment_url
-  } catch {
-    error.value = '创建支付失败'
+    order.value = await getOrder(String(route.params.orderNo))
+  } catch (e) {
+    error.value = errorMessage(e, '订单加载失败')
   } finally {
+    loading.value = false
+  }
+}
+
+async function pay() {
+  const current = order.value
+  if (!current || paying.value) return
+  paying.value = true
+  payError.value = ''
+  try {
+    const payment = await createPayment(current.order_no, current.product?.name)
+    if (!payment.payment_url) throw new Error('支付通道未返回付款地址，请稍后重试')
+    window.location.href = payment.payment_url
+  } catch (e) {
+    payError.value = errorMessage(e, '发起支付失败')
     paying.value = false
   }
 }
 
-onMounted(async () => {
+async function copyContent() {
+  const content = order.value?.delivery_content
+  if (!content) return
   try {
-    order.value = (await getOrder(String(route.params.orderNo))).order
+    await navigator.clipboard.writeText(content)
+    copied.value = true
+    window.setTimeout(() => (copied.value = false), 1800)
   } catch {
-    error.value = '订单详情加载失败'
-  } finally {
-    loading.value = false
+    payError.value = '浏览器不允许自动复制，请长按选中后手动复制'
   }
-})
+}
+
+onMounted(load)
 </script>
 
 <template>
-  <div class="mx-auto max-w-4xl px-4 py-10 sm:px-6">
-    <!-- Loading -->
-    <div v-if="loading" class="py-24 text-center text-[#b4b2c3]">
-      <div class="mx-auto mb-4 size-10 animate-spin rounded-full border-4 border-white/10 border-t-purple-400" />
-      正在加载订单…
+  <div class="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6">
+    <div v-if="loading" class="space-y-5">
+      <div class="skeleton h-28 w-full !rounded-lg" />
+      <div class="skeleton h-52 w-full !rounded-lg" />
     </div>
 
-    <!-- Content -->
-    <div v-else-if="order" class="space-y-6 fade-in">
-      <!-- Order Header -->
-      <div class="glass p-7 sm:p-9">
-        <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+    <p v-else-if="!order" class="alert alert-danger">{{ error || '未找到该订单' }}</p>
+
+    <div v-else class="fade-in space-y-5">
+      <RouterLink to="/orders" class="hint inline-flex items-center gap-1.5 transition-colors hover:text-[var(--text)]">
+        ← 我的订单
+      </RouterLink>
+
+      <section class="card">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="eyebrow">Order</p>
+            <h1 class="mono mt-1.5 break-all text-lg font-semibold">{{ order.order_no }}</h1>
+          </div>
+          <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
+        </div>
+
+        <div class="my-5 divider" />
+
+        <div class="flex items-start gap-4">
+          <div class="grid size-16 shrink-0 place-items-center overflow-hidden rounded-md border border-[var(--stroke-quiet)] bg-[var(--surface-sunken)]">
+            <img
+              v-if="order.product?.image_path"
+              :src="order.product.image_path"
+              :alt="order.product.name"
+              class="size-full object-cover"
+            />
+            <span v-else class="mono text-xs text-[var(--text-quiet)]">
+              {{ (order.product?.name || 'NL').slice(0, 2).toUpperCase() }}
+            </span>
+          </div>
+          <div class="min-w-0 flex-1">
+            <RouterLink
+              v-if="order.product"
+              :to="`/products/${order.product.slug}`"
+              class="text-[15px] font-semibold underline-offset-4 hover:underline"
+            >
+              {{ order.product.name }}
+            </RouterLink>
+            <p v-else class="text-[15px] font-semibold">数字商品</p>
+            <p class="hint mt-1 nums">
+              {{ money(order.unit_price) }} × {{ order.quantity }}
+            </p>
+          </div>
+          <div class="text-right">
+            <p class="hint">实付</p>
+            <p class="nums accent-text text-xl font-bold">{{ money(order.total_amount) }}</p>
+          </div>
+        </div>
+
+        <div v-if="payError" class="alert alert-danger mt-5">{{ payError }}</div>
+        <p v-if="error" class="alert alert-warning mt-5">{{ error }}</p>
+
+        <div v-if="order.status === 'pending'" class="mt-5 flex flex-wrap items-center gap-3">
+          <button class="btn btn-primary" :disabled="paying" @click="pay">
+            <span v-if="paying" class="spinner !border-white/40 !border-t-white" />
+            {{ paying ? '跳转支付中…' : '继续支付' }}
+          </button>
+          <RouterLink to="/" class="btn btn-quiet btn-sm">返回挑选</RouterLink>
+        </div>
+        <div v-else-if="!delivered" class="mt-5 flex flex-wrap items-center gap-3">
+          <p class="flex-1 text-sm text-[var(--text-dim)]">
+            支付已完成，交付通常几秒内到达；人工交付会进入商家队列。
+          </p>
+          <button class="btn btn-quiet btn-sm" @click="load">刷新状态</button>
+        </div>
+      </section>
+
+      <!-- Delivery -->
+      <section class="card">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-[15px] font-bold">交付内容</h2>
+          <span class="badge" :class="fulfillmentStatus(order.fulfillment_status).badge">
+            {{ fulfillmentStatus(order.fulfillment_status).label }}
+          </span>
+        </div>
+
+        <template v-if="order.delivery_content">
+          <p class="hint mt-4">
+            请妥善保存，商品仅交付一次。
+            <span v-if="order.product?.product_type === 'card' && order.product.auto_deliver">（卡密类商品不支持退换）</span>
+          </p>
+          <div class="codebox mt-3">{{ order.delivery_content }}</div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button class="btn btn-secondary btn-sm" @click="copyContent">
+              {{ copied ? '已复制' : '复制全部内容' }}
+            </button>
+          </div>
+        </template>
+
+        <div v-else class="card-quiet mt-4 text-sm text-[var(--text-dim)]">
+          <template v-if="order.status === 'pending'">支付成功后即可查看交付内容。</template>
+          <template v-else-if="order.fulfillment_status === 'waiting_stock'">
+            卡密库存已临时售罄，补货后商家会立即为你发货。
+          </template>
+          <template v-else-if="order.fulfillment_status === 'manual_pending'">
+            商家正在人工交付，完成后这里会显示结果与说明。
+          </template>
+          <template v-else>暂无交付内容，可稍后刷新或联系管理员。</template>
+        </div>
+
+        <template v-if="order.delivery_note">
+          <h3 class="mt-6 text-[13px] font-semibold text-[var(--text-dim)]">商家说明</h3>
+          <p class="mt-2 whitespace-pre-line text-sm leading-7 text-[var(--text-dim)]">{{ order.delivery_note }}</p>
+        </template>
+      </section>
+
+      <!-- Timeline + meta -->
+      <section class="card">
+        <h2 class="text-[15px] font-bold">订单进度</h2>
+        <div class="mt-5">
+          <div class="timeline-item timeline-done">
+            <p class="text-sm font-medium">下单成功</p>
+            <p class="hint nums mt-0.5">{{ when(order.created_at) }}</p>
+          </div>
+          <div class="timeline-item" :class="order.paid_at ? 'timeline-done' : 'timeline-active'">
+            <p class="text-sm font-medium">支付完成</p>
+            <p class="hint nums mt-0.5">{{ when(order.paid_at) }}</p>
+          </div>
+          <div class="timeline-item" :class="delivered ? 'timeline-done' : ''">
+            <p class="text-sm font-medium">商品交付</p>
+            <p class="hint nums mt-0.5">{{ when(order.delivered_at) }}</p>
+          </div>
+        </div>
+
+        <dl class="mt-6 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
           <div>
-            <p class="text-xs tracking-widest text-[#7b7990] uppercase">订单号</p>
-            <h1 class="mt-1 break-all text-xl font-bold">{{ order.order_no }}</h1>
-            <p class="mt-2 text-sm text-[#b4b2c3]">创建于 {{ date(order.created_at) }}</p>
+            <dt class="text-[var(--text-quiet)]">交易号</dt>
+            <dd class="mono mt-0.5 truncate">{{ order.transaction_id || '—' }}</dd>
           </div>
-          <span :class="['badge', statusBadge(order.status)]">{{ statusText(order.status) }}</span>
-        </div>
-
-        <div class="mt-7 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
-
-        <div class="mt-7 grid gap-5 sm:grid-cols-3">
-          <div class="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
-            <p class="text-xs text-[#7b7990]">商品</p>
-            <p class="mt-1.5 font-medium">{{ order.product?.name || order.product_name || '数字商品' }}</p>
+          <div>
+            <dt class="text-[var(--text-quiet)]">交付状态</dt>
+            <dd class="mt-0.5">{{ fulfillmentStatus(order.fulfillment_status).label }}</dd>
           </div>
-          <div class="rounded-2xl border border-purple-400/20 bg-gradient-to-br from-purple-500/12 to-indigo-500/8 p-4">
-            <p class="text-xs text-[#7b7990]">金额</p>
-            <p class="mt-1.5 text-xl font-black gradient-text">{{ money(order.amount) }}</p>
+          <div v-if="order.customer_contact">
+            <dt class="text-[var(--text-quiet)]">联系方式</dt>
+            <dd class="mono mt-0.5 break-all">{{ order.customer_contact }}</dd>
           </div>
-          <div class="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
-            <p class="text-xs text-[#7b7990]">交付状态</p>
-            <p class="mt-1.5 font-medium">{{ statusText(order.delivery_status) }}</p>
+          <div v-if="order.customer_note">
+            <dt class="text-[var(--text-quiet)]">我的备注</dt>
+            <dd class="mt-0.5 whitespace-pre-line text-[var(--text-dim)]">{{ order.customer_note }}</dd>
           </div>
-        </div>
-
-        <button v-if="order.status === 'pending'" class="btn btn-primary mt-7 px-8" :disabled="paying" @click="pay">
-          {{ paying ? '跳转支付中…' : '继续支付' }}
-        </button>
-        <p v-if="error" class="fade-in mt-4 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{{ error }}</p>
-      </div>
-
-      <!-- Delivery Content -->
-      <div class="glass p-7 sm:p-9">
-        <h2 class="text-lg font-bold tracking-tight">交付内容</h2>
-        <p v-if="!order.cards?.length" class="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.035] p-6 text-[#b4b2c3]">
-          商品尚未交付。支付成功后，交付内容会显示在这里。
-        </p>
-        <div v-else class="mt-5 space-y-4">
-          <div v-for="card in order.cards" :key="card.id" class="rounded-2xl border border-white/[0.1] bg-[#0a0916]/60 p-5 backdrop-blur-md">
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-xs tracking-widest text-[#7b7990] uppercase">卡密 / 数字内容</span>
-              <span class="badge badge-success">{{ card.status || '已交付' }}</span>
-            </div>
-            <code class="mt-3 block break-all whitespace-pre-wrap rounded-xl bg-black/30 p-3.5 text-sm text-[#e4e4e7]">{{ card.code || card.content }}</code>
-          </div>
-        </div>
-      </div>
+        </dl>
+      </section>
     </div>
-
-    <!-- Error -->
-    <p v-else class="glass p-10 text-center text-rose-300">{{ error || '未找到订单' }}</p>
   </div>
 </template>

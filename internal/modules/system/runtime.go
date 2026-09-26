@@ -69,7 +69,7 @@ func Default() *RuntimeConfig {
 		},
 		Payment:  PaymentConfig{Enabled: true},
 		Features: FeaturesConfig{RegistrationEnabled: true},
-		Theme:    ThemeConfig{Primary: "#6366f1", Locale: "zh-CN"},
+		Theme:    ThemeConfig{Primary: "#f2704a", Locale: "zh-CN"},
 	}
 }
 
