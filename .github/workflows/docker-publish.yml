@@ -52,8 +52,8 @@ jobs:
             VERSION="$RELEASE_TAG"
           fi
 
-          VERSION="${VERSION#v}"
-
+          # The image tag mirrors the git tag exactly (v1.0.0), so the registry
+          # and the release always show the same string.
           if [[ -z "$VERSION" ]]; then
             echo "Version cannot be empty." >&2
             exit 1

@@ -118,7 +118,7 @@ docker run -d --name nodeloc-store --restart unless-stopped \
   -p 8080:8080 \
   -v "$PWD/data:/app/data" \
   -v "$PWD/uploads:/app/uploads" \
-  kaoqy666/nodeloc-store:1.0.0
+  kaoqy666/nodeloc-store:v1.0.0
 ```
 
 跟随最新版：把上面的镜像名换成 `kaoqy666/nodeloc-store:latest` 即可。
@@ -211,8 +211,8 @@ docker compose logs -f store          # compose 部署
 # 重启容器
 docker restart nodeloc-store
 
-# 升级到新版本（版本号不变时直接重拉 tag 为 1.0.0 的镜像即可）
-docker pull kaoqy666/nodeloc-store:1.0.0
+# 升级到新版本（版本号不变时直接重拉 tag 为 v1.0.0 的镜像即可）
+docker pull kaoqy666/nodeloc-store:v1.0.0
 docker restart nodeloc-store
 
 # 源码构建部署时升级
