@@ -9,21 +9,47 @@ const products = ref<Product[]>([])
 const categories = ref<Category[]>([])
 const keyword = ref('')
 const activeCategory = ref('')
+const sortBy = ref('default')
 const loading = ref(true)
 const error = ref('')
 
+const SORTS: { key: string; label: string }[] = [
+  { key: 'default', label: '默认排序' },
+  { key: 'price-asc', label: '价格从低到高' },
+  { key: 'price-desc', label: '价格从高到低' },
+  { key: 'newest', label: '最新上架' },
+]
+
 const visible = computed(() => {
   const needle = keyword.value.trim().toLowerCase()
-  return products.value.filter((product) => {
+  const list = products.value.filter((product) => {
     if (activeCategory.value && product.category?.slug !== activeCategory.value) return false
     if (!needle) return true
     return [product.name, product.summary, product.description]
       .filter(Boolean)
       .some((field) => String(field).toLowerCase().includes(needle))
   })
+  if (sortBy.value === 'price-asc' || sortBy.value === 'price-desc') {
+    const sign = sortBy.value === 'price-asc' ? 1 : -1
+    return [...list].sort((a, b) => (a.price - b.price) * sign)
+  }
+  if (sortBy.value === 'newest') {
+    return [...list].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+  }
+  return list
 })
 
 const purchasable = computed(() => products.value.filter((item) => item.stock_count > 0).length)
+
+const categoryName = computed(
+  () => categories.value.find((item) => item.slug === activeCategory.value)?.name || activeCategory.value,
+)
+
+function resetFilters() {
+  keyword.value = ''
+  activeCategory.value = ''
+  sortBy.value = 'default'
+}
 
 onMounted(async () => {
   try {
@@ -62,9 +88,9 @@ onMounted(async () => {
     </section>
 
     <!-- Search + category filter -->
-    <section class="mt-12 flex flex-col gap-3 sm:flex-row sm:items-center">
+    <section class="mt-12 flex flex-col gap-3 lg:flex-row lg:items-center">
       <div class="relative sm:max-w-xs sm:flex-1">
-        <input v-model="keyword" class="input !pl-9" placeholder="搜索商品…" aria-label="搜索商品" />
+        <input v-model="keyword" type="search" class="input !pl-9" placeholder="搜索商品…" aria-label="搜索商品" />
         <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-quiet)]">⌕</span>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -81,9 +107,20 @@ onMounted(async () => {
           {{ item.name }}
         </button>
       </div>
+      <div class="flex items-center gap-2 lg:ml-auto">
+        <label class="hint whitespace-nowrap" for="sort">排序</label>
+        <select id="sort" v-model="sortBy" class="input !w-auto !py-1.5 text-[13px]">
+          <option v-for="item in SORTS" :key="item.key" :value="item.key">{{ item.label }}</option>
+        </select>
+      </div>
     </section>
 
-    <p v-if="error" class="alert alert-danger mt-8">{{ error }}</p>
+    <p v-if="!loading && !error && products.length" class="hint mt-5 nums" role="status">
+      找到 <span class="text-[var(--text-dim)]">{{ visible.length }}</span> 件商品
+      <template v-if="activeCategory"> · {{ categoryName }}</template>
+    </p>
+
+    <p v-if="error" class="alert alert-danger mt-8" role="alert">{{ error }}</p>
 
     <!-- Loading -->
     <div v-else-if="loading" class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -107,6 +144,7 @@ onMounted(async () => {
       <p class="mt-1.5 text-sm text-[var(--text-quiet)]">
         {{ products.length ? '换个关键词或分类试试' : '管理员在后台上架商品后即可在此购买' }}
       </p>
+      <button v-if="products.length" class="btn btn-secondary btn-sm mt-6" @click="resetFilters">清除筛选</button>
     </div>
   </div>
 </template>

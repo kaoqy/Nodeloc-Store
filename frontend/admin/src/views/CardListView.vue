@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import PaginationFooter from '../components/PaginationFooter.vue'
 import { batchAddCards, deleteCard, listCards, listProducts, updateCard } from '../api/products'
 import { cardStatus, errorMessage, when } from '../utils/format'
 import type { Card, Product } from '../types'
@@ -48,6 +49,10 @@ const paged = computed(() => {
 })
 
 const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / PageSize)))
+const pageSummary = computed(() => {
+  const first = filtered.value.length ? (page.value - 1) * PageSize + 1 : 0
+  return `第 ${first}–${first - 1 + paged.value.length} 张 · 共 ${filtered.value.length} 张`
+})
 
 async function loadProducts() {
   try {
@@ -207,14 +212,21 @@ onMounted(async () => {
     </div>
 
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <input v-model="query" class="input w-64" placeholder="搜索卡密内容或 ID…" @input="page = 1" />
+      <input
+        v-model="query"
+        class="input w-64"
+        type="search"
+        placeholder="搜索卡密内容或 ID…"
+        aria-label="搜索卡密"
+        @input="page = 1"
+      />
       <p class="quiet text-xs mono">
         {{ filtered.length }} / {{ cards.length }} 条
       </p>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
-    <div v-if="notice" class="alert alert-success">{{ notice }}</div>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+    <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 
     <div class="table-container">
       <table>
@@ -229,11 +241,18 @@ onMounted(async () => {
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading">
-            <td colspan="6"><div class="skeleton h-9" /></td>
-          </tr>
+          <template v-if="loading">
+            <tr v-for="i in 5" :key="`skeleton-${i}`">
+              <td colspan="6"><div class="skeleton h-6" /></td>
+            </tr>
+          </template>
           <tr v-else-if="!paged.length">
-            <td colspan="6" class="py-10 text-center text-sm quiet">没有符合条件的卡密</td>
+            <td colspan="6">
+              <div class="empty-state">
+                <p class="empty-glyph" aria-hidden="true">◌</p>
+                <p class="empty-title">没有符合条件的卡密</p>
+              </div>
+            </td>
           </tr>
           <tr v-for="card in paged" :key="card.id">
             <td class="nums text-sm quiet">{{ card.id }}</td>
@@ -274,18 +293,12 @@ onMounted(async () => {
       </table>
     </div>
 
-    <div class="flex items-center justify-between">
-      <p class="quiet text-xs">第 {{ page }} / {{ totalPages }} 页</p>
-      <div class="flex items-center gap-2">
-        <button class="btn btn-secondary btn-sm" :disabled="page <= 1" @click="page--">上一页</button>
-        <button class="btn btn-secondary btn-sm" :disabled="page >= totalPages" @click="page++">下一页</button>
-      </div>
-    </div>
+    <PaginationFooter :page="page" :pages="totalPages" :summary="pageSummary" @change="page = $event" />
 
     <!-- Import overlay -->
     <div
       v-if="showImport"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
+      class="overlay" role="dialog" aria-modal="true" aria-label="导入卡密"
       @click.self="showImport = false"
     >
       <div class="card w-full max-w-lg !p-5">

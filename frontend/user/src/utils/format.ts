@@ -53,3 +53,33 @@ export function fulfillmentStatus(status: string, paymentStatus?: string): Statu
   }
   return FULFILLMENT_STATUS[status] || { label: status || '未知', badge: 'badge-neutral' }
 }
+
+const PAYMENT_NOTICE: Record<string, StatusMeta> = {
+  ok: { label: '支付已确认，正在为你交付。', badge: 'alert-success' },
+  signature: {
+    label: '支付结果校验失败：回调签名与商户密钥不一致，本单暂未入账。请稍后重新支付，或联系店家核对后台设置。',
+    badge: 'alert-danger',
+  },
+  amount: {
+    label: '支付金额与订单不一致，本单暂未入账。请重新支付，或联系店家核实。',
+    badge: 'alert-danger',
+  },
+  pending: {
+    label: '支付渠道回报本单尚未完成。若已扣款请稍候刷新，仍未到账请联系店家处理。',
+    badge: 'alert-warning',
+  },
+  unknown_order: {
+    label: '没有找到对应的订单，本单暂未入账。请重新下单支付，或联系店家核实。',
+    badge: 'alert-warning',
+  },
+  error: {
+    label: '支付结果处理失败，本单暂未入账。请稍后重试或联系店家。',
+    badge: 'alert-danger',
+  },
+}
+
+/** paymentNotice explains why the provider redirect came back unpaid. */
+export function paymentNotice(code?: string | null): StatusMeta | null {
+  if (!code) return null
+  return PAYMENT_NOTICE[code] || PAYMENT_NOTICE.error
+}

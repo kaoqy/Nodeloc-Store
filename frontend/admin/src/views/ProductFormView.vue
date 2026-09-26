@@ -146,7 +146,7 @@ onMounted(load)
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <div class="grid gap-5 lg:grid-cols-3">
       <div class="space-y-5 lg:col-span-2">

@@ -177,7 +177,7 @@ async function submit() {
           </template>
         </ol>
 
-        <p v-if="error" class="alert alert-danger mb-5">{{ error }}</p>
+        <p v-if="error" class="alert alert-danger mb-5" role="alert">{{ error }}</p>
 
         <!-- 1. 站点与数据库 -->
         <div v-if="step === 0" class="space-y-4">
@@ -316,7 +316,7 @@ async function submit() {
           <span v-else class="hint">第 {{ step + 1 }} / {{ steps.length }} 步</span>
           <button v-if="step < steps.length - 1" class="btn btn-primary" @click="next">下一步</button>
           <button v-else class="btn btn-primary min-w-32" :disabled="submitting" @click="submit">
-            <span v-if="submitting" class="spinner !size-4 !border-t-white/80" />
+            <span v-if="submitting" class="spinner spinner-light !size-4" />
             {{ submitting ? '正在初始化…' : '完成初始化' }}
           </button>
         </div>

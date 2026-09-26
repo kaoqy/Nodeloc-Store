@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { createPayment, getOrder } from '../api/payment'
 import { errorMessage } from '../api/client'
-import { fulfillmentStatus, money, orderStatus, when } from '../utils/format'
+import { fulfillmentStatus, money, orderStatus, paymentNotice, when } from '../utils/format'
 import type { Order } from '../types'
 
 const route = useRoute()
@@ -13,6 +13,9 @@ const paying = ref(false)
 const error = ref('')
 const payError = ref('')
 const copied = ref(false)
+const copiedNo = ref(false)
+const notice = computed(() => paymentNotice(typeof route.query.pay === 'string' ? route.query.pay : ''))
+let settleTimer: number | undefined
 
 const isPaid = computed(() => {
   const status = order.value?.status ?? ''
@@ -63,7 +66,45 @@ async function copyContent() {
   }
 }
 
-onMounted(load)
+async function copyOrderNo() {
+  const current = order.value
+  if (!current) return
+  try {
+    await navigator.clipboard.writeText(current.order_no)
+    copiedNo.value = true
+    window.setTimeout(() => (copiedNo.value = false), 1800)
+  } catch {
+    payError.value = '浏览器不允许自动复制，请长按选中订单号后手动复制'
+  }
+}
+
+onMounted(async () => {
+  await load()
+  watchSettlement()
+})
+
+onUnmounted(() => {
+  if (settleTimer) window.clearInterval(settleTimer)
+})
+
+function watchSettlement() {
+  // NodeLoc can notify server-side a moment after the browser lands here, so an
+  // unpaid-looking redirect is polled quietly instead of leaving 待支付 on screen.
+  if (settleTimer || order.value?.status !== 'pending') return
+  let waited = 0
+  settleTimer = window.setInterval(async () => {
+    waited += 8
+    try {
+      order.value = await getOrder(String(route.params.orderNo))
+    } catch {
+      // keep showing the last known state and retry on the next tick
+    }
+    if (order.value?.status !== 'pending' || waited >= 120) {
+      if (settleTimer) window.clearInterval(settleTimer)
+      settleTimer = undefined
+    }
+  }, 8000)
+}
 </script>
 
 <template>
@@ -73,18 +114,29 @@ onMounted(load)
       <div class="skeleton h-52 w-full !rounded-lg" />
     </div>
 
-    <p v-else-if="!order" class="alert alert-danger">{{ error || '未找到该订单' }}</p>
+    <p v-else-if="!order" class="alert alert-danger" role="alert">{{ error || '未找到该订单' }}</p>
 
     <div v-else class="fade-in space-y-5">
       <RouterLink to="/orders" class="hint inline-flex items-center gap-1.5 transition-colors hover:text-[var(--text)]">
         ← 我的订单
       </RouterLink>
 
+      <p v-if="notice" class="alert" :class="notice.badge" role="status">{{ notice.label }}</p>
+
       <section class="card">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
             <p class="eyebrow">Order</p>
-            <h1 class="mono mt-1.5 break-all text-lg font-semibold">{{ order.order_no }}</h1>
+            <div class="flex flex-wrap items-center gap-2">
+              <h1 class="mono mt-1.5 break-all text-lg font-semibold">{{ order.order_no }}</h1>
+              <button
+                class="btn btn-quiet btn-sm shrink-0"
+                :aria-label="copiedNo ? '订单号已复制' : '复制订单号'"
+                @click="copyOrderNo"
+              >
+                {{ copiedNo ? '已复制' : '复制单号' }}
+              </button>
+            </div>
           </div>
           <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
         </div>
@@ -122,12 +174,12 @@ onMounted(load)
           </div>
         </div>
 
-        <div v-if="payError" class="alert alert-danger mt-5">{{ payError }}</div>
-        <p v-if="error" class="alert alert-warning mt-5">{{ error }}</p>
+        <div v-if="payError" class="alert alert-danger mt-5" role="alert">{{ payError }}</div>
+        <p v-if="error" class="alert alert-warning mt-5" role="alert">{{ error }}</p>
 
         <div v-if="order.status === 'pending'" class="mt-5 flex flex-wrap items-center gap-3">
           <button class="btn btn-primary" :disabled="paying" @click="pay">
-            <span v-if="paying" class="spinner !border-white/40 !border-t-white" />
+            <span v-if="paying" class="spinner spinner-light" />
             {{ paying ? '跳转支付中…' : '继续支付' }}
           </button>
           <RouterLink to="/" class="btn btn-quiet btn-sm">返回挑选</RouterLink>

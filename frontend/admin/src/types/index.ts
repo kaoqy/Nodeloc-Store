@@ -155,6 +155,40 @@ export interface RevenuePoint {
   date: string
   revenue: number
   orders: number
+  users: number
+}
+
+export interface ProductStat {
+  product_id: number
+  name: string
+  slug: string
+  orders: number
+  revenue: number
+}
+
+export interface StockAlert {
+  product_id: number
+  name: string
+  slug: string
+  available: number
+  sold: number
+}
+
+export interface FunnelCount {
+  key: string
+  label: string
+  count: number
+}
+
+export interface RecentOrder {
+  order_no: string
+  product: string
+  buyer: string
+  amount: number
+  status: string
+  fulfillment_status: string
+  created_at: string
+  paid_at?: string
 }
 
 export interface DashboardStats {
@@ -168,6 +202,25 @@ export interface DashboardStats {
   cards_available: number
   period_days: number
   revenue_series: RevenuePoint[]
+
+  revenue_prev: number
+  revenue_delta: number
+  orders_period: number
+  paid_period: number
+  conversion: number
+  aov: number
+  refunded_period: number
+  orders_manual_pending: number
+  delivered_period: number
+  new_users_period: number
+  active_buyers_period: number
+  repeat_buyers_period: number
+
+  // Go omits an empty slice as null, so every collection below is optional.
+  top_products: ProductStat[] | null
+  stock_alerts: StockAlert[] | null
+  funnel: FunnelCount[] | null
+  recent_orders: RecentOrder[] | null
 }
 
 export type SettingsMap = Record<string, string | number | boolean | null>

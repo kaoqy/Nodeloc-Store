@@ -110,10 +110,10 @@ async function submit() {
           <p v-if="mismatch" class="hint mt-1.5 text-[var(--danger)]">两次输入的密码不一致</p>
         </div>
 
-        <p v-if="error" class="alert alert-danger">{{ error }}</p>
+        <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
         <button class="btn btn-primary w-full" type="submit" :disabled="loading">
-          <span v-if="loading" class="spinner !border-white/40 !border-t-white" />
+          <span v-if="loading" class="spinner spinner-light" />
           {{ loading ? '创建中…' : '创建账号' }}
         </button>
       </form>

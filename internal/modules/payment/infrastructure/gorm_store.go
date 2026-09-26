@@ -126,7 +126,7 @@ func (s *GormStore) GetOrderByNo(ctx context.Context, orderNo string) (*models.O
 	return &order, err
 }
 
-func (s *GormStore) ListOrdersByUser(ctx context.Context, userID uint, limit, offset int) ([]models.Order, int64, error) {
+func (s *GormStore) ListOrdersByUser(ctx context.Context, userID uint, limit, offset int, status string) ([]models.Order, int64, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -138,6 +138,9 @@ func (s *GormStore) ListOrdersByUser(ctx context.Context, userID uint, limit, of
 	}
 
 	query := s.db.WithContext(ctx).Model(&models.Order{}).Where("user_id = ?", userID)
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err

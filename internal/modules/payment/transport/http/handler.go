@@ -2,6 +2,8 @@ package http
 
 import (
 	"errors"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -115,20 +117,39 @@ func (h *Handler) CreatePayment(c *gin.Context) {
 }
 
 func (h *Handler) Callback(c *gin.Context) {
-	params, err := requestParams(c)
-	if err != nil {
+	sets, err := callbackParamSets(c)
+	if err != nil || len(sets) == 0 {
+		log.Printf("payment callback: unreadable payload from %s: %v", c.ClientIP(), err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid callback payload"})
 		return
 	}
 
-	result, err := h.service.HandleCallback(c.Request.Context(), params)
+	var result *application.CallbackResult
+	for _, params := range sets {
+		result, err = h.service.HandleCallback(c.Request.Context(), params)
+		if err == nil || !errors.Is(err, application.ErrInvalidCallback) {
+			break
+		}
+	}
+	orderNo := ""
+	if result != nil {
+		orderNo = result.OrderNo
+	}
+	code := "ok"
+	if err != nil {
+		code = callbackErrorCode(err)
+		log.Printf("payment callback rejected (%s) from %s: %v", code, c.ClientIP(), err)
+	}
+
 	if c.Request.Method == http.MethodGet {
-		// Browser redirect flow: land the user on the order page either way.
-		if err == nil && result != nil && result.OrderNo != "" {
-			c.Redirect(http.StatusFound, "/orders/"+url.PathEscape(result.OrderNo))
+		// Browser redirect flow: land the buyer on the order either way, but say
+		// why a payment did not settle so the page can explain it instead of
+		// silently showing 待支付.
+		if err == nil && orderNo != "" {
+			c.Redirect(http.StatusFound, "/orders/"+url.PathEscape(orderNo)+"?pay=ok")
 			return
 		}
-		c.Redirect(http.StatusFound, "/orders")
+		c.Redirect(http.StatusFound, "/orders?pay="+code)
 		return
 	}
 	if err != nil {
@@ -136,6 +157,23 @@ func (h *Handler) Callback(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
+// callbackErrorCode keeps provider detail server-side while still telling the
+// buyer which kind of problem to report.
+func callbackErrorCode(err error) string {
+	switch {
+	case errors.Is(err, application.ErrInvalidCallback):
+		return "signature"
+	case errors.Is(err, application.ErrAmountMismatch):
+		return "amount"
+	case errors.Is(err, application.ErrPaymentNotComplete):
+		return "pending"
+	case errors.Is(err, domain.ErrOrderNotFound), errors.Is(err, domain.ErrPaymentOrderNotFound):
+		return "unknown_order"
+	default:
+		return "error"
+	}
 }
 
 func (h *Handler) Return(c *gin.Context) {
@@ -204,7 +242,7 @@ func (h *Handler) ListOrders(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.ListOrders(c.Request.Context(), userID, limit, offset)
+	result, err := h.service.ListOrders(c.Request.Context(), userID, limit, offset, c.Query("status"))
 	if err != nil {
 		writeError(c, err)
 		return
@@ -212,14 +250,18 @@ func (h *Handler) ListOrders(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-func requestParams(c *gin.Context) (map[string]string, error) {
-	params := make(map[string]string)
+// callbackParamSets returns the payload variants to verify. ParseForm rewrites
+// '+' as a space, which breaks the recomputed signature whenever a signed value
+// such as paid_at=2026-09-26T18:00:00+08:00 arrives unencoded, so the raw
+// query/body is offered as a second candidate decoded without that rewrite.
+func callbackParamSets(c *gin.Context) ([]map[string]string, error) {
 	contentType := strings.ToLower(c.GetHeader("Content-Type"))
 	if strings.Contains(contentType, "application/json") {
 		var payload map[string]any
 		if err := c.ShouldBindJSON(&payload); err != nil {
 			return nil, err
 		}
+		params := make(map[string]string, len(payload))
 		for key, value := range payload {
 			switch typed := value.(type) {
 			case string:
@@ -230,18 +272,73 @@ func requestParams(c *gin.Context) (map[string]string, error) {
 				params[key] = strconv.FormatBool(typed)
 			}
 		}
-		return params, nil
+		return []map[string]string{params}, nil
 	}
 
+	raw := c.Request.URL.RawQuery
+	if c.Request.Method == http.MethodPost {
+		body, err := c.GetRawData()
+		if err != nil {
+			return nil, err
+		}
+		raw = string(body)
+		c.Request.Body = io.NopCloser(strings.NewReader(raw))
+	}
 	if err := c.Request.ParseForm(); err != nil {
 		return nil, err
 	}
+
+	decoded := make(map[string]string, len(c.Request.Form))
 	for key, values := range c.Request.Form {
 		if len(values) != 0 {
-			params[key] = values[0]
+			decoded[key] = values[0]
 		}
 	}
-	return params, nil
+	if len(decoded) == 0 {
+		return nil, errors.New("empty callback payload")
+	}
+	sets := []map[string]string{decoded}
+	if literal := parseFormLiteral(raw); len(literal) > 0 && !sameParams(decoded, literal) {
+		sets = append(sets, literal)
+	}
+	return sets, nil
+}
+
+// parseFormLiteral percent-decodes a x-www-form-urlencoded string while leaving
+// '+' inside values alone.
+func parseFormLiteral(raw string) map[string]string {
+	params := map[string]string{}
+	for _, pair := range strings.Split(raw, "&") {
+		if pair == "" {
+			continue
+		}
+		key, value, found := strings.Cut(pair, "=")
+		if !found {
+			continue
+		}
+		decodedKey, err := url.PathUnescape(key)
+		if err != nil {
+			continue
+		}
+		decodedValue, err := url.PathUnescape(value)
+		if err != nil {
+			continue
+		}
+		params[decodedKey] = decodedValue
+	}
+	return params
+}
+
+func sameParams(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		if b[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func currentUserID(c *gin.Context) (uint, bool) {

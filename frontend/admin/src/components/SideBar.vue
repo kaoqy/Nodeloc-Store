@@ -53,7 +53,7 @@ const numbered = computed(() => {
 </script>
 
 <template>
-  <div v-if="open" class="fixed inset-0 z-30 bg-black/60 lg:hidden" @click="$emit('close')" />
+  <div v-if="open" class="scrim fixed inset-0 z-30 lg:hidden" @click="$emit('close')" />
 
   <aside
     :class="[

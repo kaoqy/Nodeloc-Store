@@ -115,7 +115,7 @@ onMounted(load)
       <button class="btn btn-primary btn-sm" @click="startCreate">+ 新建优惠券</button>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <div class="table-container">
       <table>
@@ -131,11 +131,18 @@ onMounted(load)
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading">
-            <td colspan="7"><div class="skeleton h-9" /></td>
-          </tr>
+          <template v-if="loading">
+            <tr v-for="i in 5" :key="`skeleton-${i}`">
+              <td colspan="7"><div class="skeleton h-6" /></td>
+            </tr>
+          </template>
           <tr v-else-if="!coupons.length">
-            <td colspan="7" class="py-12 text-center text-sm quiet">还没有优惠券</td>
+            <td colspan="7">
+              <div class="empty-state">
+                <p class="empty-glyph" aria-hidden="true">◌</p>
+                <p class="empty-title">还没有优惠券</p>
+              </div>
+            </td>
           </tr>
           <tr v-for="coupon in coupons" :key="coupon.id">
             <td><code class="mono text-sm">{{ coupon.code }}</code></td>
@@ -163,7 +170,7 @@ onMounted(load)
 
     <div
       v-if="editing"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
+      class="overlay" role="dialog" aria-modal="true" aria-label="优惠券表单"
       @click.self="editing = null"
     >
       <div class="card w-full max-w-md !p-5">

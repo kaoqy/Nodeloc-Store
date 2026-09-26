@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import PaginationFooter from '../components/PaginationFooter.vue'
 import { broadcastNotification, listNotifications, markAsRead, sendNotification } from '../api/notifications'
 import { errorMessage, when } from '../utils/format'
 import type { Notification } from '../types'
@@ -17,6 +18,7 @@ const page = ref(1)
 const form = ref({ type: 'system', title: '', content: '', link: '', user_id: '' })
 
 const unread = computed(() => notifications.value.filter((item) => !item.is_read).length)
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
 
 async function load() {
   loading.value = true
@@ -87,16 +89,17 @@ onMounted(load)
           <h2 class="text-base font-semibold">我的通知</h2>
           <span v-if="unread" class="badge badge-accent">{{ unread }} 未读</span>
         </div>
-        <div class="flex items-center gap-2">
-          <button class="btn btn-ghost btn-sm" :disabled="page <= 1 || loading" @click="go(page - 1)">上一页</button>
-          <span class="quiet text-xs mono">{{ page }} / {{ Math.max(1, Math.ceil(total / PageSize)) }}</span>
-          <button class="btn btn-ghost btn-sm" :disabled="page * PageSize >= total || loading" @click="go(page + 1)">
-            下一页
-          </button>
-        </div>
+        <PaginationFooter
+          class="!justify-end"
+          :page="page"
+          :pages="totalPages"
+          :loading="loading"
+          summary=""
+          @change="go"
+        />
       </div>
 
-      <div v-if="error" class="alert alert-danger">{{ error }}</div>
+      <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
       <div v-if="loading" class="space-y-2">
         <div v-for="i in 5" :key="i" class="skeleton h-20" />
@@ -121,7 +124,7 @@ onMounted(load)
             <p v-if="item.content" class="mt-1 text-sm muted">{{ item.content }}</p>
             <p class="quiet mt-1.5 text-xs">{{ when(item.created_at) }}</p>
           </div>
-          <button v-if="!item.is_read" class="btn btn-ghost btn-sm" @click="read(item)">标为已读</button>
+          <button v-if="!item.is_read" class="btn btn-ghost btn-sm" :disabled="busy" @click="read(item)">标为已读</button>
         </div>
       </div>
     </div>
@@ -157,7 +160,7 @@ onMounted(load)
         </div>
       </div>
 
-      <div v-if="notice" class="alert alert-success mt-4">{{ notice }}</div>
+      <p v-if="notice" class="alert alert-success mt-4" role="status">{{ notice }}</p>
 
       <button class="btn btn-primary mt-4 w-full" :disabled="busy || !form.title.trim()" @click="publish">
         {{ busy ? '发送中…' : '发送' }}

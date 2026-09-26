@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import PaginationFooter from '../components/PaginationFooter.vue'
 import { listOrders } from '../api/orders'
 import { errorMessage, fulfillmentStatus, money, orderStatus, when } from '../utils/format'
 import type { Order } from '../types'
@@ -16,6 +17,7 @@ const statusFilter = ref('')
 const error = ref('')
 
 const page = computed(() => Math.floor(offset.value / PageSize) + 1)
+const pages = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
 const from = computed(() => (orders.value.length ? offset.value + 1 : 0))
 const to = computed(() => offset.value + orders.value.length)
 
@@ -26,6 +28,8 @@ const statuses = [
   { value: 'cancelled', label: '已取消' },
   { value: 'refunded', label: '已退款' },
 ]
+
+const filtered = computed(() => Boolean(search.value.trim() || statusFilter.value))
 
 async function load() {
   loading.value = true
@@ -51,8 +55,8 @@ function applyFilters() {
   load()
 }
 
-function shift(delta: number) {
-  offset.value = Math.max(0, Math.min(Math.max(total.value - PageSize, 0), offset.value + delta * PageSize))
+function goTo(target: number) {
+  offset.value = Math.min(pages.value - 1, Math.max(0, target - 1)) * PageSize
   load()
 }
 
@@ -72,10 +76,12 @@ onMounted(() => {
         <input
           v-model="search"
           class="input w-64"
+          type="search"
           placeholder="订单号 / 用户 / 商品 / 交易号"
+          aria-label="搜索订单"
           @keyup.enter="applyFilters"
         />
-        <select v-model="statusFilter" class="input w-32" @change="applyFilters">
+        <select v-model="statusFilter" class="input w-32" aria-label="按订单状态筛选" @change="applyFilters">
           <option value="">全部状态</option>
           <option v-for="item in statuses" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
@@ -84,7 +90,7 @@ onMounted(() => {
       <RouterLink to="/orders?status=pending" class="quiet text-xs">只看待支付 →</RouterLink>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <div class="table-container">
       <table>
@@ -101,11 +107,21 @@ onMounted(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading">
-            <td colspan="8"><div class="skeleton h-9" /></td>
-          </tr>
+          <template v-if="loading">
+            <tr v-for="i in 5" :key="`skeleton-${i}`">
+              <td colspan="8"><div class="skeleton h-6" /></td>
+            </tr>
+          </template>
           <tr v-else-if="!orders.length">
-            <td colspan="8" class="py-12 text-center text-sm quiet">没有符合条件的订单</td>
+            <td colspan="8">
+              <div class="empty-state">
+                <p class="empty-glyph" aria-hidden="true">◌</p>
+                <p class="empty-title">{{ filtered ? '没有符合条件的订单' : '还没有订单' }}</p>
+                <p class="empty-hint">
+                  {{ filtered ? '换个关键词或选择全部状态。' : '买家在前台下单后会出现在这里。' }}
+                </p>
+              </div>
+            </td>
           </tr>
           <tr v-for="order in orders" :key="order.order_no">
             <td>
@@ -133,13 +149,12 @@ onMounted(() => {
       </table>
     </div>
 
-    <div class="flex items-center justify-between">
-      <p class="quiet text-xs mono">第 {{ from }}–{{ to }} 条 · 共 {{ total }} 条</p>
-      <div class="flex items-center gap-2">
-        <button class="btn btn-secondary btn-sm" :disabled="offset <= 0 || loading" @click="shift(-1)">上一页</button>
-        <span class="text-sm muted mono">{{ page }}</span>
-        <button class="btn btn-secondary btn-sm" :disabled="to >= total || loading" @click="shift(1)">下一页</button>
-      </div>
-    </div>
+    <PaginationFooter
+      :page="page"
+      :pages="pages"
+      :loading="loading"
+      :summary="`第 ${from}–${to} 条 · 共 ${total} 条`"
+      @change="goTo"
+    />
   </section>
 </template>

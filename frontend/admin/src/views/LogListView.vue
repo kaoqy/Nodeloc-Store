@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import PaginationFooter from '../components/PaginationFooter.vue'
 import { listAuditLogs } from '../api/logs'
 import { errorMessage, when } from '../utils/format'
 import type { AuditLog } from '../types'
@@ -55,7 +56,9 @@ onMounted(load)
         <input
           v-model="actionFilter"
           class="input w-56"
+          type="search"
           placeholder="按操作过滤，如 order.create"
+          aria-label="按操作类型过滤日志"
           @keyup.enter="apply"
         />
         <button class="btn btn-secondary btn-sm" @click="apply">筛选</button>
@@ -63,7 +66,7 @@ onMounted(load)
       <p class="quiet text-xs mono">共 {{ total }} 条</p>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <div class="table-container">
       <table>
@@ -79,11 +82,21 @@ onMounted(load)
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading">
-            <td colspan="7"><div class="skeleton h-9" /></td>
-          </tr>
+          <template v-if="loading">
+            <tr v-for="i in 6" :key="`skeleton-${i}`">
+              <td colspan="7"><div class="skeleton h-6" /></td>
+            </tr>
+          </template>
           <tr v-else-if="!logs.length">
-            <td colspan="7" class="py-12 text-center text-sm quiet">暂无日志</td>
+            <td colspan="7">
+              <div class="empty-state">
+                <p class="empty-glyph" aria-hidden="true">◌</p>
+                <p class="empty-title">{{ actionFilter.trim() ? '没有匹配的日志' : '暂无操作日志' }}</p>
+                <p class="empty-hint">
+                  {{ actionFilter.trim() ? '换一个操作名试试。' : '后台的每一次写入都会记录在这里。' }}
+                </p>
+              </div>
+            </td>
           </tr>
           <tr v-for="log in logs" :key="log.id">
             <td class="nums text-sm quiet">{{ log.id }}</td>
@@ -98,13 +111,12 @@ onMounted(load)
       </table>
     </div>
 
-    <div class="flex items-center justify-between">
-      <p class="quiet text-xs mono">第 {{ range.first }}–{{ range.last }} 条 · 共 {{ total }} 条</p>
-      <div class="flex items-center gap-2">
-        <button class="btn btn-secondary btn-sm" :disabled="page <= 1 || loading" @click="go(page - 1)">上一页</button>
-        <span class="text-sm muted mono">{{ page }} / {{ totalPages }}</span>
-        <button class="btn btn-secondary btn-sm" :disabled="page >= totalPages || loading" @click="go(page + 1)">下一页</button>
-      </div>
-    </div>
+    <PaginationFooter
+      :page="page"
+      :pages="totalPages"
+      :loading="loading"
+      :summary="`第 ${range.first}–${range.last} 条 · 共 ${total} 条`"
+      @change="go"
+    />
   </section>
 </template>

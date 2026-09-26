@@ -26,9 +26,9 @@ export async function getOrder(orderNo: string): Promise<Order> {
   return data.order
 }
 
-export async function listOrders(limit = 50, offset = 0) {
+export async function listOrders(limit = 50, offset = 0, status = '') {
   const { data } = await client.get<{ orders: Order[]; total: number }>('/payment/orders', {
-    params: { limit, offset },
+    params: { limit, offset, status: status || undefined },
   })
   return data
 }

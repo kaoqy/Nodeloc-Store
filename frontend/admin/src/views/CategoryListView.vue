@@ -85,7 +85,7 @@ onMounted(load)
       </button>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <div class="table-container">
       <table>
@@ -100,11 +100,18 @@ onMounted(load)
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading">
-            <td colspan="6"><div class="skeleton h-9" /></td>
-          </tr>
+          <template v-if="loading">
+            <tr v-for="i in 5" :key="`skeleton-${i}`">
+              <td colspan="6"><div class="skeleton h-6" /></td>
+            </tr>
+          </template>
           <tr v-else-if="!sorted.length">
-            <td colspan="6" class="py-12 text-center text-sm quiet">还没有分类</td>
+            <td colspan="6">
+              <div class="empty-state">
+                <p class="empty-glyph" aria-hidden="true">◌</p>
+                <p class="empty-title">还没有分类</p>
+              </div>
+            </td>
           </tr>
           <tr v-for="category in sorted" :key="category.id">
             <td>
@@ -130,7 +137,7 @@ onMounted(load)
 
     <div
       v-if="editing"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
+      class="overlay" role="dialog" aria-modal="true" aria-label="分类表单"
       @click.self="editing = null"
     >
       <div class="card w-full max-w-md !p-5">

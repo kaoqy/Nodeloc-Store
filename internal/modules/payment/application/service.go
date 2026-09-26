@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -200,73 +202,125 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 	if status == "" {
 		status = domain.StatusPending
 	}
-	paymentOrder := &domain.PaymentOrder{
-		OrderID:     order.ID,
-		OrderNo:     order.OrderNo,
-		UserID:      order.UserID,
-		PaymentID:   s.paymentID,
-		Provider:    "nodeloc",
-		Amount:      order.TotalAmount,
-		Description: description,
-		Status:      status,
+
+	// payment_orders keeps one row per order, so a buyer who returns from the
+	// checkout page and pays again must update that row instead of failing the
+	// retry with a unique-constraint error.
+	existing, err := s.orders.GetPaymentOrderByOrderNo(ctx, order.OrderNo)
+	if err != nil && !errors.Is(err, domain.ErrPaymentOrderNotFound) {
+		return nil, fmt.Errorf("load payment order: %w", err)
+	}
+	var paymentOrder *domain.PaymentOrder
+	if existing != nil {
+		paymentOrder = existing
+	} else {
+		paymentOrder = &domain.PaymentOrder{
+			OrderID: order.ID, OrderNo: order.OrderNo, UserID: order.UserID,
+			PaymentID: s.paymentID, Provider: "nodeloc", Amount: order.TotalAmount,
+		}
+	}
+	paymentOrder.Description = description
+	paymentOrder.Status = status
+	if result.PaymentURL != "" {
+		paymentOrder.PaymentURL = stringPointer(result.PaymentURL)
 	}
 	if result.TransactionID != "" {
 		paymentOrder.ProviderTransactionID = stringPointer(result.TransactionID)
 	}
-	if result.PaymentURL != "" {
-		paymentOrder.PaymentURL = stringPointer(result.PaymentURL)
-	}
-	if err := s.orders.CreatePaymentOrder(ctx, paymentOrder); err != nil {
+	if err := s.savePaymentOrder(ctx, paymentOrder, existing == nil); err != nil {
 		return nil, fmt.Errorf("save payment order: %w", err)
 	}
 
 	raw := string(result.Raw)
-	transaction := &domain.Transaction{
-		OrderID:               order.ID,
-		OrderNo:               order.OrderNo,
-		Provider:              "nodeloc",
-		ProviderTransactionID: stringPointer(result.TransactionID),
-		Type:                  domain.TransactionTypePayment,
-		Status:                status,
-		Amount:                order.TotalAmount,
-		Currency:              "points",
-		ResponsePayload:       &raw,
+	transaction, err := s.orders.GetLatestTransaction(ctx, order.OrderNo, domain.TransactionTypePayment)
+	if err != nil {
+		return nil, fmt.Errorf("load payment transaction: %w", err)
 	}
-	if err := s.orders.CreateTransaction(ctx, transaction); err != nil {
+	if transaction == nil {
+		transaction = &domain.Transaction{
+			OrderID: order.ID, OrderNo: order.OrderNo, Provider: "nodeloc",
+			Type: domain.TransactionTypePayment, Amount: order.TotalAmount, Currency: "points",
+		}
+	}
+	transaction.Status = status
+	transaction.ProviderTransactionID = stringPointer(result.TransactionID)
+	transaction.ResponsePayload = &raw
+	if transaction.ID != 0 {
+		if err := s.orders.SaveTransaction(ctx, transaction); err != nil {
+			return nil, fmt.Errorf("save payment transaction: %w", err)
+		}
+	} else if err := s.orders.CreateTransaction(ctx, transaction); err != nil {
 		return nil, fmt.Errorf("save payment transaction: %w", err)
 	}
 
 	return &CreatePaymentOutput{PaymentOrder: paymentOrder, Order: order}, nil
 }
 
+func (s *Service) savePaymentOrder(ctx context.Context, paymentOrder *domain.PaymentOrder, isNew bool) error {
+	if isNew {
+		return s.orders.CreatePaymentOrder(ctx, paymentOrder)
+	}
+	return s.orders.SavePaymentOrder(ctx, paymentOrder)
+}
+
+// HandleCallback settles the order behind NodeLoc's signed browser redirect.
+// The redirect is signed with the merchant secret, so a payload that verifies
+// is authoritative: status, amount and fees are read from it and the query API
+// is only a cross-check. Losing the query call (no egress, timeout, provider
+// outage) must not strand a paid order.
 func (s *Service) HandleCallback(ctx context.Context, params map[string]string) (*CallbackResult, error) {
 	if !s.gateway.VerifyCallback(params) {
 		return nil, ErrInvalidCallback
 	}
-	orderNo := first(params, "order_id", "order_no", "external_reference", "out_trade_no")
-	transactionID := first(params, "transaction_id", "trade_no", "id")
-	if orderNo == "" || transactionID == "" {
+	orderNo := first(params, "external_reference", "order_id", "order_no", "out_trade_no")
+	if orderNo == "" {
 		return nil, ErrInvalidInput
 	}
-	paymentOrder, err := s.orders.GetPaymentOrderByOrderNo(ctx, orderNo)
+	transactionID := first(params, "transaction_id", "trade_no", "id")
+
+	// Restarting checkout leaves several payment rows on one order, so the row
+	// the callback names is the one to settle; the old "transaction id must
+	// match the first row" check rejected exactly the newest, real payment.
+	paymentOrder, err := s.paymentForCallback(ctx, orderNo, transactionID)
 	if err != nil {
 		return nil, err
 	}
-	if paymentOrder.ProviderTransactionID != nil && *paymentOrder.ProviderTransactionID != "" && *paymentOrder.ProviderTransactionID != transactionID {
-		return nil, ErrInvalidCallback
+	if transactionID == "" {
+		if paymentOrder.ProviderTransactionID == nil || *paymentOrder.ProviderTransactionID == "" {
+			return nil, ErrInvalidInput
+		}
+		transactionID = *paymentOrder.ProviderTransactionID
 	}
-	query, err := s.gateway.QueryPayment(ctx, transactionID)
-	if err != nil {
-		return nil, fmt.Errorf("verify provider payment: %w", err)
+
+	reported := first(params, "status", "state")
+	if !callbackCompleted(reported) {
+		return nil, fmt.Errorf("%w: provider reported %q", ErrPaymentNotComplete, reported)
 	}
-	if query.OrderID != "" && query.OrderID != orderNo {
-		return nil, ErrInvalidCallback
-	}
-	if query.Amount != 0 && query.Amount != paymentOrder.Amount {
+	if amount := intParam(params, "amount"); amount != 0 && amount != paymentOrder.Amount {
 		return nil, ErrAmountMismatch
 	}
-	if query.Status != domain.StatusSucceeded && query.Status != domain.StatusPaid {
-		return nil, ErrPaymentNotComplete
+	platformFee, merchantPoints := intPtrParam(params, "platform_fee", "fee"), intPtrParam(params, "merchant_points", "merchant_amount")
+
+	if query, queryErr := s.gateway.QueryPayment(ctx, transactionID); queryErr != nil {
+		log.Printf("payment callback %s: provider query unavailable, settling from signed redirect: %v", orderNo, queryErr)
+	} else if query != nil {
+		if query.OrderID != "" && query.OrderID != orderNo {
+			return nil, ErrInvalidCallback
+		}
+		if query.Amount != 0 && query.Amount != paymentOrder.Amount {
+			return nil, ErrAmountMismatch
+		}
+		switch query.Status {
+		case domain.StatusSucceeded, domain.StatusPaid:
+			if query.PlatformFee != nil {
+				platformFee = query.PlatformFee
+			}
+			if query.MerchantPoints != nil {
+				merchantPoints = query.MerchantPoints
+			}
+		case domain.StatusFailed, domain.StatusCancelled, domain.StatusRefunded:
+			return nil, fmt.Errorf("%w: provider query reports %s", ErrPaymentNotComplete, query.Status)
+		}
 	}
 
 	now := time.Now().UTC()
@@ -290,7 +344,7 @@ func (s *Service) HandleCallback(ctx context.Context, params map[string]string) 
 			return nil, fmt.Errorf("settle payment transaction: %w", err)
 		}
 	}
-	order, err := s.orders.MarkOrderPaid(ctx, orderNo, transactionID, query.PlatformFee, query.MerchantPoints)
+	order, err := s.orders.MarkOrderPaid(ctx, orderNo, transactionID, platformFee, merchantPoints)
 	if err != nil {
 		return nil, err
 	}
@@ -303,6 +357,49 @@ func (s *Service) HandleCallback(ctx context.Context, params map[string]string) 
 		Status:        domain.StatusPaid,
 		Fulfillment:   order.FulfillmentStatus,
 	}, nil
+}
+
+func (s *Service) paymentForCallback(ctx context.Context, orderNo, transactionID string) (*domain.PaymentOrder, error) {
+	if transactionID != "" {
+		byTransaction, err := s.orders.GetPaymentOrderByTransactionID(ctx, transactionID)
+		if err == nil && byTransaction != nil {
+			return byTransaction, nil
+		}
+	}
+	return s.orders.GetPaymentOrderByOrderNo(ctx, orderNo)
+}
+
+// callbackCompleted recognises the paid markers NodeLoc uses across its
+// redirect and query payloads; anything else leaves the order pending.
+func callbackCompleted(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "complete", "success", "succeeded", "paid", "trade_success", "1":
+		return true
+	}
+	return false
+}
+
+func intParam(params map[string]string, keys ...string) int {
+	if value := first(params, keys...); value != "" {
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err == nil {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func intPtrParam(params map[string]string, keys ...string) *int {
+	for _, key := range keys {
+		if value, ok := params[key]; ok {
+			parsed, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil {
+				return nil
+			}
+			return &parsed
+		}
+	}
+	return nil
 }
 
 func (s *Service) FulfillOrder(ctx context.Context, orderNo string) (*models.Order, error) {
@@ -394,11 +491,22 @@ func (s *Service) AdminRefundOrder(ctx context.Context, orderNo string) (*models
 	return s.orders.UpdateOrderStatus(ctx, strings.TrimSpace(orderNo), "refunded")
 }
 
-func (s *Service) ListOrders(ctx context.Context, userID uint, limit, offset int) (*OrderList, error) {
+// orderListStatuses are the only ?status= values a buyer may filter by, so a
+// stray query string narrows the list instead of silently returning nothing.
+var orderListStatuses = map[string]bool{
+	"pending": true, "paid": true, "completed": true,
+	"cancelled": true, "refunded": true, "failed": true,
+}
+
+func (s *Service) ListOrders(ctx context.Context, userID uint, limit, offset int, status string) (*OrderList, error) {
 	if userID == 0 {
 		return nil, ErrForbidden
 	}
-	orders, total, err := s.orders.ListOrdersByUser(ctx, userID, limit, offset)
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status != "" && !orderListStatuses[status] {
+		status = ""
+	}
+	orders, total, err := s.orders.ListOrdersByUser(ctx, userID, limit, offset, status)
 	if err != nil {
 		return nil, err
 	}

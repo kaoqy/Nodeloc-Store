@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import PaginationFooter from '../components/PaginationFooter.vue'
 import { deleteProduct, listProducts, updateProduct } from '../api/products'
 import { errorMessage, money, when } from '../utils/format'
 import type { Product } from '../types'
@@ -30,9 +31,14 @@ const filtered = computed(() => {
 })
 
 const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / PageSize)))
+const current = computed(() => Math.min(page.value, totalPages.value))
 const paged = computed(() => {
-  const start = (Math.min(page.value, totalPages.value) - 1) * PageSize
+  const start = (current.value - 1) * PageSize
   return filtered.value.slice(start, start + PageSize)
+})
+const summary = computed(() => {
+  const first = filtered.value.length ? (current.value - 1) * PageSize + 1 : 0
+  return `第 ${first}–${first - 1 + paged.value.length} 个 · 共 ${filtered.value.length} 个商品`
 })
 
 async function load() {
@@ -88,7 +94,9 @@ onMounted(load)
         <input
           v-model="search"
           class="input w-64"
+          type="search"
           placeholder="名称 / slug / 分类"
+          aria-label="搜索商品"
           @input="applyFilters"
         />
         <button
@@ -108,7 +116,7 @@ onMounted(load)
       <RouterLink to="/products/new" class="btn btn-primary btn-sm">+ 新建商品</RouterLink>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <div class="table-container">
       <table>
@@ -125,11 +133,19 @@ onMounted(load)
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading">
-            <td colspan="8"><div class="skeleton h-9" /></td>
-          </tr>
+          <template v-if="loading">
+            <tr v-for="i in 5" :key="`skeleton-${i}`">
+              <td colspan="8"><div class="skeleton h-6" /></td>
+            </tr>
+          </template>
           <tr v-else-if="!paged.length">
-            <td colspan="8" class="py-12 text-center text-sm quiet">还没有商品，右上角创建一个。</td>
+            <td colspan="8">
+              <div class="empty-state">
+                <p class="empty-glyph" aria-hidden="true">◌</p>
+                <p class="empty-title">{{ filtered.length ? '当前页没有商品' : '还没有商品' }}</p>
+                <p class="empty-hint">{{ filtered.length ? '换个筛选条件试试。' : '点击右上角「新建商品」上架第一件数字商品。' }}</p>
+              </div>
+            </td>
           </tr>
           <tr v-for="product in paged" :key="product.id">
             <td>
@@ -190,13 +206,6 @@ onMounted(load)
       </table>
     </div>
 
-    <div class="flex items-center justify-between">
-      <p class="quiet text-xs mono">{{ filtered.length }} 个商品</p>
-      <div class="flex items-center gap-2">
-        <button class="btn btn-secondary btn-sm" :disabled="page <= 1" @click="page--">上一页</button>
-        <span class="text-sm muted mono">{{ page }} / {{ totalPages }}</span>
-        <button class="btn btn-secondary btn-sm" :disabled="page >= totalPages" @click="page++">下一页</button>
-      </div>
-    </div>
+    <PaginationFooter :page="current" :pages="totalPages" :loading="loading" :summary="summary" @change="page = $event" />
   </section>
 </template>

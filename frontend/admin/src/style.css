@@ -16,6 +16,7 @@
   --stroke: rgba(255, 255, 255, 0.09);
   --stroke-hi: rgba(255, 255, 255, 0.16);
   --stroke-quiet: rgba(255, 255, 255, 0.05);
+  --scrim: rgba(4, 5, 7, 0.66);
 
   --text: #eceae6;
   --text-dim: #a3a7ae;
@@ -25,6 +26,7 @@
   --accent-hi: #ff8763;
   --accent-soft: rgba(242, 112, 74, 0.14);
   --accent-line: rgba(242, 112, 74, 0.34);
+  --on-accent: #fffaf7;
 
   --teal: #3ecfb2;
   --teal-soft: rgba(62, 207, 178, 0.13);
@@ -74,6 +76,7 @@ html[data-theme='light'] {
   --stroke: rgba(26, 24, 21, 0.11);
   --stroke-hi: rgba(26, 24, 21, 0.2);
   --stroke-quiet: rgba(26, 24, 21, 0.06);
+  --scrim: rgba(27, 28, 31, 0.34);
 
   --text: #1b1c1f;
   --text-dim: #575b62;
@@ -83,6 +86,7 @@ html[data-theme='light'] {
   --accent-hi: #b8421d;
   --accent-soft: rgba(207, 79, 38, 0.1);
   --accent-line: rgba(207, 79, 38, 0.3);
+  --on-accent: #fff6f2;
 
   --teal: #12897a;
   --teal-soft: rgba(18, 137, 122, 0.1);
@@ -239,7 +243,7 @@ html[data-theme='light'] {
   .btn:active { transform: translateY(1px); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-  .btn-primary { background: var(--accent); color: #fffaf7; box-shadow: var(--shadow-accent); }
+  .btn-primary { background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow-accent); }
   .btn-primary:hover:not(:disabled) { background: var(--accent-hi); }
   .btn-secondary {
     background: var(--surface-hi);
@@ -253,7 +257,8 @@ html[data-theme='light'] {
   .btn-ghost:hover:not(:disabled) { color: var(--text); background: var(--surface-hi); }
   .btn-danger { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
   .btn-danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
-  .btn-sm { padding: 5px 11px; font-size: 12.5px; border-radius: var(--radius-xs); }
+  .btn-sm { padding: 5px 11px; font-size: 12.5px; border-radius: var(--radius-xs); min-height: 32px; }
+  .scrim { background: var(--scrim); }
   .btn-lg { padding: 12px 24px; font-size: 15px; }
 
   /* ── Inputs ── */
@@ -414,6 +419,31 @@ html[data-theme='light'] {
   .alert-info { background: var(--info-soft); color: var(--info); border-color: color-mix(in srgb, var(--info) 30%, transparent); }
   .alert-warning { background: var(--warning-soft); color: var(--warning); border-color: color-mix(in srgb, var(--warning) 30%, transparent); }
 
+  /* ── Empty / modal surfaces ── */
+  .empty-state {
+    padding: 44px 18px;
+    text-align: center;
+    color: var(--text-quiet);
+  }
+  .empty-state p { margin: 0; }
+  .empty-state .empty-glyph { font-size: 20px; letter-spacing: 0.2em; opacity: 0.5; }
+  .empty-state .empty-title { margin-top: 10px !important; font-size: 14px; font-weight: 600; color: var(--text-dim); }
+  .empty-state .empty-hint { margin-top: 5px !important; font-size: 12.5px; }
+
+  .overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: var(--scrim);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    animation: fadeIn 180ms var(--ease) both;
+  }
+
   .spinner {
     width: 16px;
     height: 16px;
@@ -423,6 +453,14 @@ html[data-theme='light'] {
     animation: spin 700ms linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Spinner on a filled accent button: the base border is a translucent mix of
+     the button text colour, so it stays visible in both themes. */
+  .spinner-light {
+    border-color: color-mix(in srgb, var(--on-accent) 40%, transparent);
+    border-top-color: var(--on-accent);
+  }
+
 
   .skeleton {
     background: linear-gradient(90deg, var(--surface-sunken) 25%, var(--surface-hi) 50%, var(--surface-sunken) 75%);

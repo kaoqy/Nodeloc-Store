@@ -1,17 +1,32 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { listOrders } from '../api/payment'
 import { errorMessage } from '../api/client'
-import { fulfillmentStatus, money, orderStatus, when } from '../utils/format'
+import { fulfillmentStatus, money, orderStatus, paymentNotice, when } from '../utils/format'
 import type { Order } from '../types'
 
 const PageSize = 20
 
+/** Statuses the buyer can narrow the list to; must match the server's allow-list. */
+const FILTERS: { key: string; label: string }[] = [
+  { key: '', label: '全部' },
+  { key: 'pending', label: '待支付' },
+  { key: 'paid', label: '已支付' },
+  { key: 'completed', label: '已完成' },
+  { key: 'cancelled', label: '已取消' },
+  { key: 'refunded', label: '已退款' },
+]
+
+const route = useRoute()
+const router = useRouter()
 const orders = ref<Order[]>([])
 const total = ref(0)
 const loading = ref(true)
 const loadingMore = ref(false)
 const error = ref('')
+const status = ref(FILTERS.some((item) => item.key === route.query.status) ? String(route.query.status) : '')
+const notice = computed(() => paymentNotice(typeof route.query.pay === 'string' ? route.query.pay : ''))
 
 async function load(offset: number) {
   if (offset === 0) {
@@ -21,7 +36,7 @@ async function load(offset: number) {
     loadingMore.value = true
   }
   try {
-    const page = await listOrders(PageSize, offset)
+    const page = await listOrders(PageSize, offset, status.value)
     orders.value = offset === 0 ? page.orders : [...orders.value, ...page.orders]
     total.value = page.total ?? orders.value.length
   } catch (e) {
@@ -31,6 +46,14 @@ async function load(offset: number) {
     loading.value = false
     loadingMore.value = false
   }
+}
+
+function choose(next: string) {
+  if (next === status.value) return
+  status.value = next
+  // Keep the filter in the URL so a refresh or a shared link lands on the same list.
+  router.replace({ path: '/orders', query: next ? { status: next } : {} })
+  load(0)
 }
 
 onMounted(() => load(0))
@@ -46,6 +69,22 @@ onMounted(() => load(0))
       <p v-if="!loading && orders.length" class="hint nums whitespace-nowrap">共 {{ total }} 笔</p>
     </header>
 
+    <p v-if="notice" class="alert mb-6" :class="notice.badge" role="status">{{ notice.label }}</p>
+
+    <div class="mb-6 flex flex-wrap gap-2" role="group" aria-label="按订单状态筛选">
+      <button
+        v-for="item in FILTERS"
+        :key="item.key || 'all'"
+        class="chip"
+        :class="{ 'chip-active': status === item.key }"
+        :aria-pressed="status === item.key"
+        :disabled="loading"
+        @click="choose(item.key)"
+      >
+        {{ item.label }}
+      </button>
+    </div>
+
     <div v-if="loading" class="space-y-3">
       <div v-for="i in 4" :key="i" class="card flex items-center gap-4 !py-5">
         <div class="skeleton size-14 !rounded-md" />
@@ -57,7 +96,7 @@ onMounted(() => load(0))
       </div>
     </div>
 
-    <p v-else-if="error && !orders.length" class="alert alert-danger">{{ error }}</p>
+    <p v-else-if="error && !orders.length" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <template v-else>
       <ul class="space-y-3">
@@ -107,7 +146,7 @@ onMounted(() => load(0))
         </li>
       </ul>
 
-      <p v-if="error" class="alert alert-warning mt-4">{{ error }}</p>
+      <p v-if="error" class="alert alert-warning mt-4" role="alert">{{ error }}</p>
 
       <div v-if="orders.length < total" class="mt-6 text-center">
         <button class="btn btn-quiet btn-sm" :disabled="loadingMore" @click="load(orders.length)">
@@ -118,9 +157,12 @@ onMounted(() => load(0))
 
     <div v-if="!loading && !orders.length && !error" class="card py-20 text-center">
       <p class="text-[var(--text-quiet)]" aria-hidden="true">◌</p>
-      <p class="mt-3 font-semibold">还没有订单</p>
-      <p class="mt-1.5 text-sm text-[var(--text-quiet)]">购买支付后，订单与交付内容都会出现在这里。</p>
-      <RouterLink to="/" class="btn btn-primary btn-sm mt-6">去挑选商品</RouterLink>
+      <p class="mt-3 font-semibold">{{ status ? `${orderStatus(status).label}暂无订单` : '还没有订单' }}</p>
+      <p class="mt-1.5 text-sm text-[var(--text-quiet)]">
+        {{ status ? '换个筛选条件看看，其余订单不会消失。' : '购买支付后，订单与交付内容都会出现在这里。' }}
+      </p>
+      <button v-if="status" class="btn btn-secondary btn-sm mt-6" @click="choose('')">查看全部订单</button>
+      <RouterLink v-else to="/" class="btn btn-primary btn-sm mt-6">去挑选商品</RouterLink>
     </div>
   </div>
 </template>

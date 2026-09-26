@@ -109,8 +109,8 @@ onMounted(load)
       </button>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
-    <div v-if="notice" class="alert alert-success">{{ notice }}</div>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+    <div v-if="notice" class="alert alert-success" role="status">{{ notice }}</div>
 
     <div class="grid gap-5 lg:grid-cols-3">
       <div class="card text-center">

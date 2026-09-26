@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getProduct } from '../api/products'
+import ProductCard from '../components/ProductCard.vue'
+import { listProducts, getProduct } from '../api/products'
 import { createOrder, createPayment } from '../api/payment'
 import { errorMessage } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -21,6 +22,7 @@ const note = ref('')
 const loading = ref(true)
 const submitting = ref(false)
 const error = ref('')
+const related = ref<Product[]>([])
 
 const cardStock = computed(() => {
   const item = product.value
@@ -65,9 +67,22 @@ async function purchase() {
   }
 }
 
+async function loadRelated(item: Product) {
+  if (!item.category_id) return
+  try {
+    const all = await listProducts()
+    related.value = all
+      .filter((other) => other.id !== item.id && other.category_id === item.category_id)
+      .slice(0, 3)
+  } catch {
+    related.value = []
+  }
+}
+
 onMounted(async () => {
   try {
     product.value = await getProduct(String(route.params.slug))
+    if (product.value) void loadRelated(product.value)
   } catch (e) {
     error.value = errorMessage(e, '商品加载失败')
   } finally {
@@ -88,7 +103,7 @@ onMounted(async () => {
       <div class="skeleton h-80 w-full !rounded-lg" />
     </div>
 
-    <p v-else-if="!product" class="alert alert-danger max-w-xl">
+    <p v-else-if="!product" class="alert alert-danger max-w-xl" role="alert">
       {{ error || '未找到该商品，它可能已经下架。' }}
     </p>
 
@@ -131,6 +146,16 @@ onMounted(async () => {
             </p>
           </div>
         </div>
+
+        <section v-if="related.length" class="mt-10">
+          <div class="flex items-baseline justify-between gap-3">
+            <h2 class="text-[15px] font-bold">同类推荐</h2>
+            <RouterLink to="/" class="hint transition-colors hover:text-[var(--text)]">查看全部 →</RouterLink>
+          </div>
+          <div class="mt-4 grid gap-5 sm:grid-cols-2">
+            <ProductCard v-for="item in related" :key="item.id" :product="item" />
+          </div>
+        </section>
       </section>
 
       <aside class="card lg:sticky lg:top-24">
@@ -183,10 +208,10 @@ onMounted(async () => {
             <span class="nums accent-text text-2xl font-bold">{{ money(total) }}</span>
           </div>
 
-          <p v-if="error" class="alert alert-danger">{{ error }}</p>
+          <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
           <button class="btn btn-primary btn-lg w-full" type="submit" :disabled="submitting || soldOut">
-            <span v-if="submitting" class="spinner !border-white/40 !border-t-white" />
+            <span v-if="submitting" class="spinner spinner-light" />
             {{ soldOut ? '暂时缺货' : submitting ? '正在跳转支付…' : '立即购买' }}
           </button>
 

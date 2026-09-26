@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import PaginationFooter from '../components/PaginationFooter.vue'
 import { listUsers, toggleActive } from '../api/users'
 import { errorMessage, when } from '../utils/format'
 import type { User } from '../types'
@@ -15,6 +16,7 @@ const offset = ref(0)
 const search = ref('')
 
 const page = computed(() => Math.floor(offset.value / PageSize) + 1)
+const pages = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
 const from = computed(() => (users.value.length ? offset.value + 1 : 0))
 const to = computed(() => offset.value + users.value.length)
 
@@ -47,8 +49,9 @@ function applyFilters() {
   load()
 }
 
-function shift(delta: number) {
-  offset.value = Math.max(0, Math.min(Math.max(total.value - PageSize, 0), offset.value + delta * PageSize))
+function goTo(target: number) {
+  const last = Math.max(0, Math.ceil(total.value / PageSize) - 1)
+  offset.value = Math.min(last, Math.max(0, target - 1)) * PageSize
   load()
 }
 
@@ -72,13 +75,20 @@ onMounted(load)
   <section class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-2">
-        <input v-model="search" class="input w-64" placeholder="用户名 / 邮箱 / 昵称" @keyup.enter="applyFilters" />
+        <input
+          v-model="search"
+          class="input w-64"
+          type="search"
+          placeholder="用户名 / 邮箱 / 昵称"
+          aria-label="搜索用户"
+          @keyup.enter="applyFilters"
+        />
         <button class="btn btn-secondary btn-sm" @click="applyFilters">筛选</button>
       </div>
       <p class="quiet text-xs mono">共 {{ total }} 位用户</p>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <div class="table-container">
       <table>
@@ -95,11 +105,19 @@ onMounted(load)
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading">
-            <td colspan="8"><div class="skeleton h-9" /></td>
-          </tr>
+          <template v-if="loading">
+            <tr v-for="i in 5" :key="`skeleton-${i}`">
+              <td colspan="8"><div class="skeleton h-6" /></td>
+            </tr>
+          </template>
           <tr v-else-if="!users.length">
-            <td colspan="8" class="py-12 text-center text-sm quiet">没有符合条件的用户</td>
+            <td colspan="8">
+              <div class="empty-state">
+                <p class="empty-glyph" aria-hidden="true">◌</p>
+                <p class="empty-title">{{ search.trim() ? '没有符合条件的用户' : '还没有用户' }}</p>
+                <p class="empty-hint">{{ search.trim() ? '换个关键词或清空筛选再试。' : '用户在商店前台注册后会出现在这里。' }}</p>
+              </div>
+            </td>
           </tr>
           <tr v-for="user in users" :key="user.id">
             <td>
@@ -152,13 +170,12 @@ onMounted(load)
       </table>
     </div>
 
-    <div class="flex items-center justify-between">
-      <p class="quiet text-xs mono">第 {{ from }}–{{ to }} 条 · 共 {{ total }} 条</p>
-      <div class="flex items-center gap-2">
-        <button class="btn btn-secondary btn-sm" :disabled="offset <= 0 || loading" @click="shift(-1)">上一页</button>
-        <span class="text-sm muted mono">{{ page }}</span>
-        <button class="btn btn-secondary btn-sm" :disabled="to >= total || loading" @click="shift(1)">下一页</button>
-      </div>
-    </div>
+    <PaginationFooter
+      :page="page"
+      :pages="pages"
+      :loading="loading"
+      :summary="`第 ${from}–${to} 条 · 共 ${total} 条`"
+      @change="goTo"
+    />
   </section>
 </template>

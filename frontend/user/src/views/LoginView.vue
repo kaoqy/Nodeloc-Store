@@ -50,7 +50,7 @@ async function submit() {
       <h1 class="mt-2 text-2xl font-bold">登录</h1>
       <p class="mt-2 text-sm text-[var(--text-dim)]">使用 NodeLoc 账号即可下单，无需重复注册。</p>
 
-      <div v-if="oauthError" class="alert alert-warning mt-6">
+      <div v-if="oauthError" class="alert alert-warning mt-6" role="alert">
         NodeLoc 登录未完成，可能是链接过期或授权被拒绝。你可以重试，或改用账号密码登录。
       </div>
 
@@ -89,7 +89,7 @@ async function submit() {
           />
         </div>
 
-        <p v-if="error" class="alert alert-danger">{{ error }}</p>
+        <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
         <button class="btn btn-secondary w-full" type="submit" :disabled="loading">
           <span v-if="loading" class="spinner !border-t-[var(--text)]" />

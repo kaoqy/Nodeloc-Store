@@ -129,9 +129,9 @@ onMounted(async () => {
         </div>
       </div>
 
-      <p v-if="message" class="alert alert-success mt-5">{{ message }}</p>
-      <p v-if="error" class="alert alert-danger mt-5">{{ error }}</p>
-      <p v-if="!bound && !error" class="alert alert-info mt-5">
+      <p v-if="message" class="alert alert-success mt-5" role="status">{{ message }}</p>
+      <p v-if="error" class="alert alert-danger mt-5" role="alert">{{ error }}</p>
+      <p v-if="!bound && !error" class="alert alert-info mt-5" role="status">
         若该 NodeLoc 账号此前已在本店独立注册过，它将作为另一个账号绑定失败——可先联系管理员合并。
       </p>
     </section>

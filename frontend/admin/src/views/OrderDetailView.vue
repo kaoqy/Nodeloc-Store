@@ -139,8 +139,8 @@ onMounted(load)
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
-    <div v-if="notice" class="alert alert-success">{{ notice }}</div>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+    <div v-if="notice" class="alert alert-success" role="status">{{ notice }}</div>
 
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <div class="card !p-4">
@@ -216,7 +216,7 @@ onMounted(load)
 
     <div
       v-if="showDeliver"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
+      class="overlay" role="dialog" aria-modal="true" aria-label="人工发货"
       @click.self="showDeliver = false"
     >
       <div class="card w-full max-w-lg !p-5">

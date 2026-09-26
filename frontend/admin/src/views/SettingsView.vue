@@ -119,7 +119,7 @@ onMounted(load)
       <div class="flex items-center gap-3">
         <span v-if="dirty" class="badge badge-warning">有未保存的更改</span>
         <button class="btn btn-primary" :disabled="saving || !dirty" @click="save">
-          <span v-if="saving" class="spinner !size-4 !border-t-white/80" />
+          <span v-if="saving" class="spinner spinner-light !size-4" />
           {{ saving ? '正在保存…' : '保存设置' }}
         </button>
       </div>
@@ -254,7 +254,7 @@ onMounted(load)
                 <input id="payment-secret" v-model="settings.payment.secret_key" type="password" class="input mono" placeholder="保持 ******** 则不修改" autocomplete="off" />
               </div>
             </div>
-            <p v-if="paymentIncomplete" class="alert alert-warning">
+            <p v-if="paymentIncomplete" class="alert alert-warning" role="alert">
               支付 ID 与 Secret Key 必须同时填写，否则买家下单后会收到「支付未配置」的提示。
             </p>
             <div class="flex flex-wrap items-center gap-3">

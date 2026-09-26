@@ -26,6 +26,7 @@
   --accent-ink: #1a0d07;
   --accent-soft: rgba(242, 112, 74, 0.14);
   --accent-line: rgba(242, 112, 74, 0.34);
+  --on-accent: #fffaf7;
 
   --teal: #3ecfb2;
   --teal-soft: rgba(62, 207, 178, 0.13);
@@ -85,6 +86,7 @@ html[data-theme='light'] {
   --accent-ink: #fff6f2;
   --accent-soft: rgba(207, 79, 38, 0.1);
   --accent-line: rgba(207, 79, 38, 0.3);
+  --on-accent: #fff6f2;
 
   --teal: #12897a;
   --teal-soft: rgba(18, 137, 122, 0.1);
@@ -413,6 +415,14 @@ html[data-theme='light'] {
     animation: spin 700ms linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Spinner on a filled accent button: the base border is a translucent mix of
+     the button text colour, so it stays visible in both themes. */
+  .spinner-light {
+    border-color: color-mix(in srgb, var(--on-accent) 40%, transparent);
+    border-top-color: var(--on-accent);
+  }
+
 
   .fade-in { animation: fadeIn 320ms var(--ease) both; }
   @keyframes fadeIn {

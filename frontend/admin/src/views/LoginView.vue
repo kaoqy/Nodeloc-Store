@@ -76,10 +76,10 @@ async function submit() {
           />
         </div>
 
-        <p v-if="error" class="alert alert-danger">{{ error }}</p>
+        <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
         <button class="btn btn-primary w-full" type="submit" :disabled="loading">
-          <span v-if="loading" class="spinner !border-t-[#fffaf7]" />
+          <span v-if="loading" class="spinner spinner-light" />
           {{ loading ? '登录中…' : '登录' }}
         </button>
       </form>
