@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { bindOAuth, oauthInitiate, unbindOAuth } from '../api/auth'
 import { errorMessage } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { when } from '../utils/format'
+import { oauthErrorText, when } from '../utils/format'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -60,8 +60,8 @@ onMounted(async () => {
     await router.replace('/login')
     return
   }
-  if (route.query.oauth_error === 'bind') {
-    error.value = 'NodeLoc 授权未完成，链接可能已过期，请重新点击绑定。'
+  if (typeof route.query.oauth_error === 'string') {
+    error.value = oauthErrorText(route.query.oauth_error, '绑定')
     await router.replace({ path: '/profile' })
     return
   }

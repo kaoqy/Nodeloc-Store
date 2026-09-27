@@ -77,10 +77,31 @@ func (n *NodeLocOAuth) AuthorizationURL(state string) (string, error) {
 	params.Set("redirect_uri", n.redirectURI)
 	params.Set("response_type", "code")
 	params.Set("state", state)
-	if n.scopes != "" {
-		params.Set("scope", n.scopes)
+	// openid is mandatory on NodeLoc and cannot be removed from the
+	// application, so sending a scope list without it is always wrong.
+	if scope := normalizeScopes(n.scopes); scope != "" {
+		params.Set("scope", scope)
 	}
 	return n.baseURL + "/oauth-provider/authorize?" + params.Encode(), nil
+}
+
+// normalizeScopes keeps the configured order, drops duplicates and guarantees
+// openid is present.
+func normalizeScopes(scopes string) string {
+	seen := map[string]bool{}
+	ordered := make([]string, 0, 4)
+	for _, field := range strings.Fields(scopes) {
+		field = strings.ToLower(field)
+		if field == "" || seen[field] {
+			continue
+		}
+		seen[field] = true
+		ordered = append(ordered, field)
+	}
+	if !seen["openid"] {
+		ordered = append([]string{"openid"}, ordered...)
+	}
+	return strings.Join(ordered, " ")
 }
 
 // VerifyCallback validates the browser redirect back from NodeLoc.

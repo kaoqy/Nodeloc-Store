@@ -19,6 +19,7 @@ const form = reactive({
   oauth_client_secret: '',
   oauth_redirect_uri: '',
   payment_id: '',
+  payment_token: '',
   payment_secret: '',
   admin_username: '',
   admin_email: '',
@@ -35,7 +36,9 @@ const previewRedirect = computed(() => {
   return `${form.scheme}://${form.domain.trim()}/api/v1/auth/oauth/callback`
 })
 
-const paymentReady = computed(() => form.payment_id.trim() !== '' && form.payment_secret.trim() !== '')
+const paymentReady = computed(
+  () => form.payment_id.trim() !== '' && form.payment_token.trim() !== '' && form.payment_secret.trim() !== '',
+)
 
 function next() {
   error.value = ''
@@ -91,11 +94,12 @@ async function submit() {
         client_id: form.oauth_client_id.trim(),
         client_secret: form.oauth_client_secret.trim(),
         redirect_uri: form.oauth_redirect_uri.trim(),
-        scopes: 'openid profile email',
+        scopes: 'openid profile',
       },
       payment: {
         enabled: paymentReady.value,
         payment_id: form.payment_id.trim(),
+        token: form.payment_token.trim(),
         secret_key: form.payment_secret.trim(),
       },
       admin: {
@@ -252,12 +256,19 @@ async function submit() {
 
           <div class="grid gap-4 sm:grid-cols-2">
             <div>
-              <label class="label" for="payment-id">Payments 支付 ID</label>
-              <input id="payment-id" v-model="form.payment_id" class="input mono" placeholder="例如 12" autocomplete="off" />
+              <label class="label" for="payment-id">Payment ID（payment_id）</label>
+              <input id="payment-id" v-model="form.payment_id" class="input mono" placeholder="pay_xxx" autocomplete="off" />
+              <p class="hint mt-1">写在接口地址里，决定款项进哪个应用。</p>
             </div>
             <div>
-              <label class="label" for="payment-secret">支付 Secret Key</label>
+              <label class="label" for="payment-token">Payment Token（tk_xxx）</label>
+              <input id="payment-token" v-model="form.payment_token" type="password" class="input mono" placeholder="tk_xxx" autocomplete="off" />
+              <p class="hint mt-1">下单时签名用，缺失买家无法付款。</p>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="payment-secret">Secret Key（商户密钥）</label>
               <input id="payment-secret" v-model="form.payment_secret" type="password" class="input mono" placeholder="••••••••" autocomplete="off" />
+              <p class="hint mt-1">原样用于查单签名与回调验签，不要填成 Token。</p>
             </div>
           </div>
           <p class="hint">支付参数可以留空、稍后再填；未填写时买家仍能下单，但无法完成付款。</p>

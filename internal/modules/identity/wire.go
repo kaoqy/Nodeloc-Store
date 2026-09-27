@@ -25,6 +25,7 @@ func Wire(db *gorm.DB, cfg *config.Config) *Module {
 		ClientID:     cfg.NodeLoc.ClientID,
 		ClientSecret: cfg.NodeLoc.ClientSecret,
 		RedirectURI:  cfg.NodeLoc.RedirectURI,
+		Scopes:       cfg.NodeLoc.Scopes,
 	}, nil)
 	if err != nil {
 		panic("identity: failed to create OAuth client: " + err.Error())
@@ -45,6 +46,6 @@ func Wire(db *gorm.DB, cfg *config.Config) *Module {
 		panic("identity: failed to create service: " + err.Error())
 	}
 
-	handler := http.NewHandler(svc, cfg.App.Scheme == "https")
+	handler := http.NewHandler(svc)
 	return &Module{Service: svc, Handler: handler}
 }

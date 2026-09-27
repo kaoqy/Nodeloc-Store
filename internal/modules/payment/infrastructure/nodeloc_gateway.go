@@ -18,20 +18,30 @@ import (
 )
 
 // NodeLocGateway implements contract.PaymentGateway using NodeLoc Payment.
+//
+// NodeLoc hands a merchant three separate credentials and only one of them is
+// interchangeable: the Payment ID (pay_xxx) selects the application in the URL,
+// the Token (tk_xxx) signs 下单/转账, and the Secret Key signs 查单 and verifies
+// the payment callback. The docs are explicit that the token is never used as an
+// HMAC key directly — it is hashed with SHA-256 first — while the secret key is
+// used as issued. Signing an outbound call with the wrong credential is what
+// makes every payment feature fail at once.
 type NodeLocGateway struct {
 	baseURL   string
 	paymentID string
+	token     string
 	secretKey string
 	client    *http.Client
 }
 
-func NewNodeLocGateway(baseURL, paymentID, secretKey string, client *http.Client) *NodeLocGateway {
+func NewNodeLocGateway(baseURL, paymentID, token, secretKey string, client *http.Client) *NodeLocGateway {
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
 	return &NodeLocGateway{
 		baseURL:   strings.TrimRight(baseURL, "/"),
 		paymentID: paymentID,
+		token:     token,
 		secretKey: secretKey,
 		client:    client,
 	}
@@ -43,7 +53,7 @@ func (g *NodeLocGateway) CreatePayment(ctx context.Context, request contract.Cre
 		"description": request.Description,
 		"order_id":    request.OrderID,
 	}
-	body, raw, err := g.post(ctx, "/payment/pay/"+url.PathEscape(g.paymentID)+"/process", params)
+	body, raw, err := g.post(ctx, "/payment/pay/"+url.PathEscape(g.paymentID)+"/process", params, g.tokenKey)
 	if err != nil {
 		return nil, err
 	}
@@ -60,29 +70,31 @@ func (g *NodeLocGateway) QueryPayment(ctx context.Context, transactionID string)
 		return nil, errors.New("transaction_id is required")
 	}
 	params := map[string]string{"transaction_id": transactionID}
-	body, raw, err := g.post(ctx, "/payment/query/"+url.PathEscape(g.paymentID), params)
+	body, raw, err := g.post(ctx, "/payment/query/"+url.PathEscape(g.paymentID), params, g.secretKeyFn)
 	if err != nil {
 		return nil, err
 	}
 	return &contract.QueryPaymentResult{
 		TransactionID: firstNonEmpty(firstString(body, "transaction_id", "trade_no", "id"), transactionID),
-		OrderID:       firstString(body, "order_id", "order_no"),
-		Amount:        firstInt(body, "amount", "total_amount"),
-		Status:        normalizeStatus(firstString(body, "status", "state")),
-		PlatformFee:   optionalInt(body, "platform_fee", "fee"),
+		// 查单 returns our order number as external_reference; order_id is what we
+		// sent when creating the payment, and some releases echo neither.
+		OrderID:        firstString(body, "external_reference", "order_id", "order_no"),
+		Amount:         firstInt(body, "amount", "total_amount"),
+		Status:         normalizeStatus(firstString(body, "status", "state")),
+		PlatformFee:    optionalInt(body, "platform_fee", "fee"),
 		MerchantPoints: optionalInt(body, "merchant_points", "merchant_amount"),
-		Raw:           raw,
+		Raw:            raw,
 	}, nil
 }
 
 func (g *NodeLocGateway) Transfer(ctx context.Context, request contract.TransferRequest) (*contract.TransferResult, error) {
 	params := map[string]string{
-		"to_user_id": request.ToUserID,
+		"to_user_id":  request.ToUserID,
 		"to_username": request.ToUsername,
 		"amount":      strconv.Itoa(request.Amount),
 		"order_id":    request.OrderID,
 	}
-	body, raw, err := g.post(ctx, "/payment/transfer/"+url.PathEscape(g.paymentID), params)
+	body, raw, err := g.post(ctx, "/payment/transfer/"+url.PathEscape(g.paymentID), params, g.tokenKey)
 	if err != nil {
 		return nil, err
 	}
@@ -93,19 +105,36 @@ func (g *NodeLocGateway) Transfer(ctx context.Context, request contract.Transfer
 	}, nil
 }
 
-// VerifyCallback checks the redirect against the merchant secret. Outbound
-// requests sign with SHA-256hex(secret); the callback may arrive signed either
-// way, so shared.VerifyCallback tries both key forms.
+// VerifyCallback checks the redirect against the merchant secret key, which is
+// the credential the docs name for callbacks — the token is not involved here.
 func (g *NodeLocGateway) VerifyCallback(params map[string]string) bool {
 	return shared.VerifyCallback(params, g.secretKey)
 }
 
-func (g *NodeLocGateway) post(ctx context.Context, path string, params map[string]string) (map[string]any, []byte, error) {
+// tokenKey is the HMAC key NodeLoc expects on 下单 and 转账: the SHA-256 hex
+// digest of the tk_xxx token, never the token itself.
+func (g *NodeLocGateway) tokenKey() (string, error) {
+	if strings.TrimSpace(g.token) == "" {
+		return "", fmt.Errorf("%w：未填写 Payment Token（tk_xxx）", domain.ErrPaymentNotConfigured)
+	}
+	return shared.HashedTokenKey(g.token), nil
+}
+
+// secretKeyFn is the HMAC key NodeLoc expects on 查单: the secret key as issued.
+func (g *NodeLocGateway) secretKeyFn() (string, error) {
+	return g.secretKey, nil
+}
+
+func (g *NodeLocGateway) post(ctx context.Context, path string, params map[string]string, keyOf func() (string, error)) (map[string]any, []byte, error) {
 	if g.baseURL == "" || g.paymentID == "" || g.secretKey == "" {
 		return nil, nil, domain.ErrPaymentNotConfigured
 	}
+	key, err := keyOf()
+	if err != nil {
+		return nil, nil, err
+	}
 
-	params["signature"] = shared.SignWithHashedToken(params, g.secretKey)
+	params["signature"] = shared.Sign(params, key)
 	values := url.Values{}
 	for key, value := range params {
 		values.Set(key, value)

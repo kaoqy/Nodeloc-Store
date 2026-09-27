@@ -82,7 +82,9 @@ sudo mysql -e "
 | 应用名称 | 你的商店名 |
 | 网站地址 | `https://你的域名` |
 | 回调地址 | `https://你的域名/api/v1/auth/oauth/callback` |
-| 权限范围 | 勾选 `openid`（必选）、`profile`、`email`（需审核） |
+| 权限范围 | 勾选 `openid`（必选，无法取消）、`profile`、`email`（需 NodeLoc 官方审核） |
+
+商店侧的 Scope 在后台设置里填（默认 `openid profile`）：留空或漏写 `openid` 时商店会自动补上，因为 NodeLoc 要求授权请求必须带它；只有申请到 `email` 审核后才把它加进去，否则拿不到邮箱。
 
 保存后记录 **Client ID** 和 **Client Secret**（只显示一次）。
 
@@ -96,7 +98,19 @@ sudo mysql -e "
 | 网站地址 | `https://你的域名` |
 | 回调地址 | `https://你的域名/api/v1/payment/callback` |
 
-保存后记录 **Payment ID** 和 **Secret Key**（只显示一次）。
+保存后记录 **三项凭据**（NodeLoc 只在创建时完整显示一次）：
+
+| 凭据 | 样子 | 商店里填哪 | 用来做什么 |
+|---|---|---|---|
+| Payment ID | `pay_xxx` | 后台设置 · Payment ID | 只标识应用，出现在下单/查单的 URL 路径里，不参与签名 |
+| Payment Token | `tk_xxx` | 后台设置 · Payment Token | 签 **下单 / 转账**：HMAC 密钥是 `hex(SHA256(tk_xxx))`，官方文档明确要求不能拿 token 原文当密钥 |
+| Secret Key | 商户密钥 | 后台设置 · Secret Key | 签 **查单**、验 **回调**：按原文参与 HMAC，不做任何哈希 |
+
+三项都要填。缺 Payment Token 时商店直接拒绝下单并提示「支付还没有配置好」，不会拿错的密钥去签名、也不会让买家付了款却对不上账。
+
+**签名规则（出站与回调同一套）**：去掉 `signature`，其余参数（含值为空的参数）按 key 的 ASCII 升序拼成 `k1=v1&k2=v2…`，UTF-8 编码后做 HMAC-SHA256，输出小写十六进制。
+
+> 后台的「退款」也真的把钱退回去：商店调用 `POST /payment/transfer/{payment_id}`（Payment Token 签名，收款方取买家绑定的 NodeLoc 账号），NodeLoc 受理之后才把订单标成已退款。买家是邮箱注册、没绑 NodeLoc 时，商店会直接拒绝并提示人工处理，不会假装已经退款。
 
 #### 2.3 回调接口一览（与代码路由一致）
 
@@ -104,11 +118,13 @@ sudo mysql -e "
 |---|---|---|---|---|
 | OAuth2 登录回调 | `GET` | `/api/v1/auth/oauth/callback` | NodeLoc OAuth 授权后浏览器跳转 | 校验 `state` + 换 token → 302 回商店前端 `/oauth/callback`（token 放 URL fragment，不落日志）；AJAX 请求则直接返回 JSON |
 | 支付结果回调 | `GET` | `/api/v1/payment/callback` | NodeLoc 支付完成后浏览器跳转 | HMAC-SHA256 验签 → 幂等履约发卡 → 302 到 `/orders/{订单号}` |
-| 支付结果回调 | `POST` | `/api/v1/payment/callback` | 服务端推送式通知 | 同上验签与履约，返回 `{"success":true}` |
+| 支付结果回调 | `POST` | `/api/v1/payment/callback` | 兼容路由，NodeLoc 本身不会调 | 同上验签与履约，返回 `{"success":true}` |
 | 买家查单 | `POST` | `/api/v1/payment/orders/{订单号}/reconcile` | 商店前台「我已支付，去确认」 | 用商户密钥主动向 NodeLoc 查询该单 → 已付则当场入账发卡，返回最新订单 |
 | 商家查单 | `POST` | `/api/v1/admin/orders/{订单号}/reconcile` | 后台订单详情的「查单对账」 | 同上，管理员可对任意待支付订单执行 |
 
-> 回调验签失败时商店不会直接判定「没付款」：签名候选（原密钥与 SHA-256 十六进制密钥、含空参与不含空参）全部不匹配后，会自动用商户密钥调用 NodeLoc 的查询接口核实这一单，NodeLoc 记为已付就当场入账并发卡。也就是说，**买家已付款但回调签名对不上时不需要再付一次**；后台设置里填错 Secret Key 时，这条路径同样会把订单核对出来。
+> NodeLoc Payments 的 HMAC 接口**只有浏览器跳转式回调**，付款完成后没有任何服务端推送（IPN）通知商店。因此到账不能只押在那一次 302 上：买家关页面、签名对不上、回调丢失，都会由「主动查单」这条路径补回来——前台的确认按钮、订单页的自动轮询，以及后台的查单对账，走的都是 NodeLoc 的查询接口。
+
+> 回调验签失败时商店不会直接判定「没付款」：先用商户密钥按「含空参」和「去掉空参」两种拼法各验一次，仍不匹配就自动调用 NodeLoc 的查询接口核实这一单，NodeLoc 记为已付就当场入账并发卡。也就是说，**买家已付款但回调签名对不上时不需要再付一次**；后台设置里填错 Secret Key 时，这条路径同样会把订单核对出来。
 
 > 两个地址都要**逐字**填进 NodeLoc 控制台（含 `/api/v1` 前缀），并与你商店初始化时填的域名完全一致；初始化向导和后台设置页的回调地址留空即自动生成，输入框占位符显示的就是完整地址，照抄到 NodeLoc 即可。
 > 前端还有 `/oauth/callback`、`/orders` 等路由属于商店自己的页面，**不要**填到 NodeLoc 的回调地址里。
@@ -191,12 +207,12 @@ sudo openresty -t && sudo openresty -s reload
 浏览器访问 `http://IP:8080`（配好域名后访问 `https://你的域名`），未初始化时会自动跳到管理后台的初始化向导 `/admin/setup`，三步完成：
 
 1. **站点与数据库** — 商店名称、访问域名、数据库驱动（默认 SQLite；选 MySQL 时填 Step 1 的连接信息）
-2. **NodeLoc 集成** — OAuth 的 Client ID / Secret（必填）+ 支付的 Payment ID / Secret Key（可稍后在设置中补填）
+2. **NodeLoc 集成** — OAuth 的 Client ID / Secret（必填）+ 支付的 Payment ID / Payment Token / Secret Key（三项可稍后在设置中补填，缺任意一项商店不会开始收款）
 3. **管理员账号** — 创建首个管理员，保存后直接进入后台登录
 
 > 提交时如果数据库连不通，会显示错误提示让你重填，**不会破坏配置**。
 > **保存即生效**，不用重启容器；无需编辑任何 yml / ini 配置文件。
-> 之后随时可在后台 **设置** 页修改，密钥以 `********` 掩码显示、保持掩码即不修改，还可一键测试 OAuth 与支付网关连通性。
+> 之后随时可在后台 **设置** 页修改：密钥以 `********` 掩码显示，**保持掩码即不修改**，把输入框清空保存则真的删除该凭据（清空 Client Secret 会被校验拦下，不会让你锁死登录）。OAuth 与支付网关各有连通性测试按钮，支付测试就是按文档对 NodeLoc 的查单接口签一次名。
 
 ### Step 6 · 验证支付
 
@@ -272,8 +288,9 @@ Nodeloc-Store/
 |---|---|
 | 容器起不来 / 端口不通 | `docker logs nodeloc-store` 看报错；确认宿主端口映射是 `8080:8080`（旧文档的 5000 已废弃） |
 | 向导卡在数据库步骤 | SQLite 时确认 `./data` 卷可写；外部 MariaDB 时确认容器能解析 DB 主机名（同网络或远程 IP）、端口开放、用户对库有权限 |
-| 回调签名验证失败 | 后台 **设置** 里重新填 Payment ID / Secret Key（与 NodeLoc 控制台一致）；已付款的订单商店会自动向 NodeLoc 查单核实并入账，无需重复付款 |
-| OAuth 登录失败 | NodeLoc 应用里的回调地址必须是 `https://你的域名/api/v1/auth/oauth/callback`，与设置页显示的完全一致 |
+| 下单报「支付还没有配置好」 | 后台 **设置** 的 Payment ID / **Payment Token** / Secret Key 三项必须都填，且与 NodeLoc 控制台逐字一致（Token 是 `tk_xxx`，不是 Secret Key）；填好后点「测试支付网关」，它会按文档真签一次查单请求 |
+| 回调签名验证失败 | 回调用的是 **Secret Key 原文**（不是 Token 的哈希）；重新填对之后，已付款的订单商店会自动向 NodeLoc 查单核实并入账，无需重复付款 |
+| OAuth 登录未完成 | 登录页会把原因写清楚：**授权被拒绝**（用户在 NodeLoc 点了拒绝）/ **链接已过期**（回调没带上本浏览器的 `state`，常见于复制链接、隔了很久再打开、或 Cookie 被拦）/ **授权校验失败**（换 token 或取 userinfo 出错，多半是 Client Secret、回调地址或 Scope 不对）/ **服务商异常**（NodeLoc 本身报错）。前两类重试即可；最后一类核对后台设置 |
 | 邮件没拿到 | NodeLoc OAuth `email` scope 需审核通过；未通过时 token 只有 `openid` |
 | 卡密一直没发货 | Admin → 日志 中 `payment.stock_warning` 条目，确认有可用卡密 |
 | 重启后丢失初始化状态 | `./data` 没挂载持久卷，按 Step 3 补上 `-v "$PWD/data:/app/data"` 重新起 |

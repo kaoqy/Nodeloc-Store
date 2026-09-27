@@ -19,6 +19,7 @@ import (
 	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/system"
 )
 
@@ -62,6 +63,15 @@ func main() {
 	var live *container.Container
 	var liveMu sync.Mutex
 
+	auditor := audit.NewRecorder(func() *application.Service {
+		liveMu.Lock()
+		defer liveMu.Unlock()
+		if live == nil {
+			return nil
+		}
+		return live.Audit.Service
+	})
+
 	rebuild := func() error {
 		cfg, err := config.Load("")
 		if err != nil {
@@ -82,7 +92,7 @@ func main() {
 		if err != nil {
 			return err
 		}
-		router := buildFullRouter(ctn, sysSvc, dataDir)
+		router := buildFullRouter(ctn, sysSvc, dataDir, auditor)
 
 		liveMu.Lock()
 		old := live
@@ -182,10 +192,10 @@ func buildBootstrapRouter(sysSvc *system.Service, dataDir string) *gin.Engine {
 	return router
 }
 
-func buildFullRouter(ctn *container.Container, sysSvc *system.Service, dataDir string) *gin.Engine {
+func buildFullRouter(ctn *container.Container, sysSvc *system.Service, dataDir string, auditor *audit.Recorder) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
-	router.Use(middleware.AdminAudit(audit.NewRecorder(ctn.Audit.Service)))
+	router.Use(middleware.AdminAudit(auditor))
 	router.GET("/api/health", healthHandler)
 
 	cfg := ctn.Config

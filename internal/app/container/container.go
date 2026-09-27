@@ -70,11 +70,13 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 			return nil, err
 		}
 		return &models.User{
-			Base:     models.Base{ID: user.ID},
-			Username: user.Username,
-			IsActive: user.IsActive,
-			IsAdmin:  user.IsAdmin,
-			Role:     user.Role,
+			Base:          models.Base{ID: user.ID},
+			Username:      user.Username,
+			IsActive:      user.IsActive,
+			IsAdmin:       user.IsAdmin,
+			Role:          user.Role,
+			OAuthUID:      user.OAuthUID,
+			OAuthUsername: user.OAuthUsername,
 		}, nil
 	}
 	paymentMod, err := payment.Wire(db, cfg, identityFind)

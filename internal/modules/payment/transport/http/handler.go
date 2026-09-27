@@ -402,10 +402,14 @@ func writeError(c *gin.Context, err error) {
 		errors.Is(err, domain.ErrPaymentOrderNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, domain.ErrInsufficientStock), errors.Is(err, domain.ErrNotPayable),
-		errors.Is(err, application.ErrPaymentUnsettled):
+		errors.Is(err, application.ErrPaymentUnsettled), errors.Is(err, application.ErrRefundRecipientUnknown):
 		status = http.StatusConflict
 	case errors.Is(err, domain.ErrPaymentNotConfigured):
-		status = http.StatusServiceUnavailable
+		// The detail names the missing credential, which is for the shop owner
+		// to read in the log; the buyer only needs to know to try later.
+		log.Printf("checkout refused, payment not configured: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "商店的 NodeLoc 支付还没有配置好，请稍后再试或联系店家。"})
+		return
 	case strings.Contains(strings.ToLower(err.Error()), "not found"):
 		status = http.StatusNotFound
 	}

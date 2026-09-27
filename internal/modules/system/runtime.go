@@ -39,6 +39,9 @@ type OAuthConfig struct {
 type PaymentConfig struct {
 	Enabled   bool   `json:"enabled"`
 	PaymentID string `json:"payment_id"`
+	// Token (tk_xxx) signs 下单/转账 requests; SecretKey signs 查单 and
+	// verifies the payment callback. They are two different credentials.
+	Token     string `json:"token"`
 	SecretKey string `json:"secret_key"`
 }
 
@@ -65,7 +68,7 @@ func Default() *RuntimeConfig {
 		OAuth: OAuthConfig{
 			Enabled: true,
 			BaseURL: "https://www.nodeloc.com",
-			Scopes:  "openid profile email",
+			Scopes:  "openid profile",
 		},
 		Payment:  PaymentConfig{Enabled: true},
 		Features: FeaturesConfig{RegistrationEnabled: true},
@@ -148,6 +151,9 @@ func (r *RuntimeConfig) ApplyTo(cfg *config.Config) {
 	}
 	if r.Payment.PaymentID != "" {
 		cfg.NodeLoc.PaymentID = r.Payment.PaymentID
+	}
+	if r.Payment.Token != "" {
+		cfg.NodeLoc.PaymentToken = r.Payment.Token
 	}
 	if r.Payment.SecretKey != "" {
 		cfg.NodeLoc.PaymentSecret = r.Payment.SecretKey

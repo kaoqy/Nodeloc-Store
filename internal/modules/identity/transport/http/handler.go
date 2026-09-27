@@ -24,12 +24,26 @@ const (
 )
 
 type Handler struct {
-	service      *application.Service
-	secureCookie bool
+	service *application.Service
 }
 
-func NewHandler(service *application.Service, secureCookie bool) *Handler {
-	return &Handler{service: service, secureCookie: secureCookie}
+func NewHandler(service *application.Service) *Handler {
+	return &Handler{service: service}
+}
+
+// cookieSecure marks the OAuth state cookie Secure only when this request
+// really arrived over TLS. Reading the configured scheme instead is what caused
+// "登录未完成，可能是链接过期": a store reached over plain http (LAN, or a
+// container port without TLS) keeps the default https setting, the browser then
+// silently drops the cookie and the callback can never match its state.
+func (h *Handler) cookieSecure(c *gin.Context) bool {
+	if c.Request != nil && c.Request.TLS != nil {
+		return true
+	}
+	if c.GetHeader("X-Forwarded-Proto") == "https" || c.GetHeader("X-Forwarded-Ssl") == "on" {
+		return true
+	}
+	return false
 }
 
 func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig) {
@@ -208,7 +222,7 @@ func (h *Handler) Login(c *gin.Context) {
 }
 
 func (h *Handler) Logout(c *gin.Context) {
-	c.SetCookie(oauthStateCookie, "", -1, "/", "", h.secureCookie, true)
+	c.SetCookie(oauthStateCookie, "", -1, "/", "", h.cookieSecure(c), true)
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }
 
@@ -219,13 +233,13 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 		return
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(oauthStateCookie, state, int((10 * time.Minute).Seconds()), "/api/v1/auth", "", h.secureCookie, true)
+	c.SetCookie(oauthStateCookie, state, int((10 * time.Minute).Seconds()), "/api/v1/auth", "", h.cookieSecure(c), true)
 	// A bind intent tells the callback to hand the code back to the signed-in
 	// SPA instead of logging the NodeLoc identity in.
 	if c.Query("bind") == "true" {
-		c.SetCookie(oauthBindCookie, "1", int((10 * time.Minute).Seconds()), "/api/v1/auth", "", h.secureCookie, true)
+		c.SetCookie(oauthBindCookie, "1", int((10 * time.Minute).Seconds()), "/api/v1/auth", "", h.cookieSecure(c), true)
 	} else {
-		c.SetCookie(oauthBindCookie, "", -1, "/api/v1/auth", "", h.secureCookie, true)
+		c.SetCookie(oauthBindCookie, "", -1, "/api/v1/auth", "", h.cookieSecure(c), true)
 	}
 	if c.Query("redirect") == "true" {
 		c.Redirect(http.StatusFound, redirectURL)
@@ -239,17 +253,34 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	if value, err := c.Cookie(oauthBindCookie); err == nil && value != "" {
 		binding = true
 	}
-	c.SetCookie(oauthBindCookie, "", -1, "/api/v1/auth", "", h.secureCookie, true)
+	c.SetCookie(oauthBindCookie, "", -1, "/api/v1/auth", "", h.cookieSecure(c), true)
 
-	stateCookie, err := c.Cookie(oauthStateCookie)
-	if err != nil || stateCookie == "" || c.Query("state") == "" || stateCookie != c.Query("state") {
-		h.oauthFailure(c, domain.ErrInvalidCredentials, binding)
+	// NodeLoc answers a rejected authorization with error + error_description +
+	// state and no code. Without this branch that reason only showed up as a
+	// generic "链接过期" on the login page.
+	if providerError := strings.TrimSpace(c.Query("error")); providerError != "" {
+		log.Printf("nodeloc oauth: the provider refused the authorization: error=%s description=%q",
+			providerError, strings.TrimSpace(c.Query("error_description")))
+		h.oauthFailure(c, "denied", domain.ErrInvalidCredentials, binding)
+		return
+	}
+
+	stateCookie, cookieErr := c.Cookie(oauthStateCookie)
+	switch {
+	case cookieErr != nil || stateCookie == "":
+		log.Printf("nodeloc oauth: no state cookie on the callback, so the round trip was interrupted (state_in_redirect=%v)",
+			c.Query("state") != "")
+		h.oauthFailure(c, "expired", domain.ErrInvalidCredentials, binding)
+		return
+	case c.Query("state") == "" || stateCookie != c.Query("state"):
+		log.Printf("nodeloc oauth: state mismatch between cookie and callback query")
+		h.oauthFailure(c, "state", domain.ErrInvalidCredentials, binding)
 		return
 	}
 	if binding {
 		// The SPA redeems the code against POST /auth/bind-oauth with its own
 		// bearer token; fragments never reach a server or log.
-		c.SetCookie(oauthStateCookie, "", -1, "/api/v1/auth", "", h.secureCookie, true)
+		c.SetCookie(oauthStateCookie, "", -1, "/api/v1/auth", "", h.cookieSecure(c), true)
 		fragment := url.Values{}
 		fragment.Set("bind_code", c.Query("code"))
 		fragment.Set("state", c.Query("state"))
@@ -259,10 +290,11 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	params := queryParams(c)
 	result, err := h.service.OAuthLogin(c.Request.Context(), c.Query("code"), params)
 	if err != nil {
-		h.oauthFailure(c, err, false)
+		log.Printf("nodeloc oauth: the code exchange failed: %v", err)
+		h.oauthFailure(c, "provider", err, false)
 		return
 	}
-	c.SetCookie(oauthStateCookie, "", -1, "/api/v1/auth", "", h.secureCookie, true)
+	c.SetCookie(oauthStateCookie, "", -1, "/api/v1/auth", "", h.cookieSecure(c), true)
 	// XHR clients (SPA) get JSON; browser navigations are bounced back to the
 	// SPA callback page with the token in the URL fragment (never logged).
 	if acceptsJSON(c) {
@@ -276,16 +308,17 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 
 // oauthFailure answers the callback: JSON for the SPA, otherwise a redirect so
 // a browser that NodeLoc bounced back here never sees a bare error document.
-func (h *Handler) oauthFailure(c *gin.Context, err error, binding bool) {
+// The reason code travels to the SPA so the copy can name the actual cause.
+func (h *Handler) oauthFailure(c *gin.Context, reason string, err error, binding bool) {
 	if acceptsJSON(c) {
 		writeError(c, err)
 		return
 	}
 	if binding {
-		c.Redirect(http.StatusFound, "/profile?oauth_error=bind")
+		c.Redirect(http.StatusFound, "/profile?oauth_error="+reason)
 		return
 	}
-	c.Redirect(http.StatusFound, "/login?oauth_error=1")
+	c.Redirect(http.StatusFound, "/login?oauth_error="+reason)
 }
 
 func acceptsJSON(c *gin.Context) bool {

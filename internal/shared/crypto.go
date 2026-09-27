@@ -99,18 +99,23 @@ func Sign(params map[string]string, secret string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// SignWithHashedToken signs using SHA256(secret) as the HMAC key (NodeLoc outgoing).
-func SignWithHashedToken(params map[string]string, secret string) string {
-	tokenHash := sha256.Sum256([]byte(secret))
-	return Sign(params, hex.EncodeToString(tokenHash[:]))
+// HashedTokenKey returns the HMAC key NodeLoc expects for outbound 下单 and
+// 转账 requests: the lowercase hex SHA-256 digest of the tk_xxx token. The docs
+// warn explicitly against using the token itself as the key.
+func HashedTokenKey(token string) string {
+	tokenHash := sha256.Sum256([]byte(strings.TrimSpace(token)))
+	return hex.EncodeToString(tokenHash[:])
 }
 
-// VerifyCallback verifies a NodeLoc callback signature.
+// VerifyCallback verifies a NodeLoc payment callback signature.
 //
-// NodeLoc releases differ in two ways that both read as "signature mismatch" if
-// only one form is accepted: the HMAC key is either the secret as issued or its
-// SHA-256 hex, and empty-valued parameters are sometimes left out of the signed
-// string. Every combination is tried, so a genuinely signed redirect settles.
+// The documented rule is: drop `signature`, sort the remaining keys in ASCII
+// order, join them as `key=value` with `&`, and HMAC-SHA256 that string with the
+// merchant secret key used as issued — the hashed-token key belongs to outbound
+// 下单/转账 only. A parameter that is present but empty is still part of the
+// signed string, so the compact form is tried second rather than first: it
+// exists for providers that strip empty values, and guessing it first would
+// reject a correctly signed redirect.
 func VerifyCallback(params map[string]string, secret string) bool {
 	provided := strings.TrimSpace(params["signature"])
 	if provided == "" {
@@ -122,13 +127,8 @@ func VerifyCallback(params map[string]string, secret string) bool {
 			unsigned[key] = value
 		}
 	}
-
-	tokenHash := sha256.Sum256([]byte(secret))
-	keys := []string{secret, hex.EncodeToString(tokenHash[:])}
-	for _, key := range keys {
-		if matches(Sign(unsigned, key), provided) {
-			return true
-		}
+	if matches(Sign(unsigned, secret), provided) {
+		return true
 	}
 
 	compact := make(map[string]string, len(unsigned))
@@ -140,12 +140,7 @@ func VerifyCallback(params map[string]string, secret string) bool {
 	if len(compact) == len(unsigned) {
 		return false
 	}
-	for _, key := range keys {
-		if matches(Sign(compact, key), provided) {
-			return true
-		}
-	}
-	return false
+	return matches(Sign(compact, secret), provided)
 }
 
 // matches compares two hex signatures without leaking the expected value.

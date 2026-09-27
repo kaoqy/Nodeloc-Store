@@ -259,6 +259,7 @@ export interface RuntimeSettings {
   payment: {
     enabled: boolean
     payment_id: string
+    token: string
     secret_key: string
   }
   features: { enabled_registration: boolean }

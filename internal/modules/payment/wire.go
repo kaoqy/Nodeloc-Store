@@ -33,10 +33,19 @@ func (u *userLookup) FindByID(ctx context.Context, id uint) (*contract.UserInfo,
 		return nil, nil
 	}
 	return &contract.UserInfo{
-		ID:       user.ID,
-		Username: user.Username,
-		IsActive: user.IsActive,
+		ID:            user.ID,
+		Username:      user.Username,
+		IsActive:      user.IsActive,
+		OAuthUID:      derefString(user.OAuthUID),
+		OAuthUsername: derefString(user.OAuthUsername),
 	}, nil
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // Wire constructs the payment module from shared dependencies.
@@ -50,6 +59,7 @@ func Wire(db *gorm.DB, cfg *config.Config, identityFind func(ctx context.Context
 	gateway := infrastructure.NewNodeLocGateway(
 		cfg.NodeLoc.BaseURL,
 		cfg.NodeLoc.PaymentID,
+		cfg.NodeLoc.PaymentToken,
 		cfg.NodeLoc.PaymentSecret,
 		nil,
 	)

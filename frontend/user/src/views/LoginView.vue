@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { oauthInitiate } from '../api/auth'
 import { errorMessage } from '../api/client'
+import { oauthErrorText } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 import { useSiteStore } from '../stores/site'
 
@@ -20,7 +21,7 @@ const redirect = computed(() =>
   typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/') ? route.query.redirect : '/'
 )
 
-const oauthError = computed(() => typeof route.query.oauth_error === 'string')
+const oauthError = computed(() => (typeof route.query.oauth_error === 'string' ? route.query.oauth_error : ''))
 
 function startOAuth() {
   // The provider round-trips through the backend, so carry the destination here.
@@ -51,7 +52,7 @@ async function submit() {
       <p class="mt-2 text-sm text-[var(--text-dim)]">使用 NodeLoc 账号即可下单，无需重复注册。</p>
 
       <div v-if="oauthError" class="alert alert-warning mt-6" role="alert">
-        NodeLoc 登录未完成，可能是链接过期或授权被拒绝。你可以重试，或改用账号密码登录。
+        {{ oauthErrorText(oauthError) }}
       </div>
 
       <button class="btn btn-primary btn-lg mt-7 w-full" type="button" @click="startOAuth">

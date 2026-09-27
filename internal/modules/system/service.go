@@ -178,6 +178,7 @@ func (s *Service) runInstall(req InstallRequest) (*gorm.DB, error) {
 	req.OAuth.ClientID = strings.TrimSpace(req.OAuth.ClientID)
 	req.OAuth.ClientSecret = strings.TrimSpace(req.OAuth.ClientSecret)
 	req.Payment.PaymentID = strings.TrimSpace(req.Payment.PaymentID)
+	req.Payment.Token = strings.TrimSpace(req.Payment.Token)
 	req.Payment.SecretKey = strings.TrimSpace(req.Payment.SecretKey)
 	req.Admin.Username = strings.TrimSpace(req.Admin.Username)
 	req.Admin.Email = strings.ToLower(strings.TrimSpace(req.Admin.Email))
@@ -223,7 +224,7 @@ func (s *Service) runInstall(req InstallRequest) (*gorm.DB, error) {
 		Theme:    req.Theme,
 	}
 	rt.OAuth.Enabled = true
-	rt.Payment.Enabled = req.Payment.PaymentID != "" && req.Payment.SecretKey != ""
+	rt.Payment.Enabled = req.Payment.PaymentID != "" && req.Payment.Token != "" && req.Payment.SecretKey != ""
 	rt.MergeDefaults()
 	rt.OAuth.RedirectURI = strings.TrimSpace(rt.OAuth.RedirectURI)
 	if rt.OAuth.RedirectURI == "" {
@@ -361,6 +362,7 @@ func (s *Service) GetSettings() (map[string]any, error) {
 	}
 	view := *rt
 	view.OAuth.ClientSecret = maskSecret(view.OAuth.ClientSecret)
+	view.Payment.Token = maskSecret(view.Payment.Token)
 	view.Payment.SecretKey = maskSecret(view.Payment.SecretKey)
 	return map[string]any{"settings": view}, nil
 }
@@ -393,13 +395,23 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	next.OAuth.RedirectURI = strings.TrimSpace(next.OAuth.RedirectURI)
 	next.OAuth.Scopes = strings.TrimSpace(next.OAuth.Scopes)
 	next.Payment.PaymentID = strings.TrimSpace(next.Payment.PaymentID)
+	next.Payment.Token = strings.TrimSpace(next.Payment.Token)
+	next.Payment.SecretKey = strings.TrimSpace(next.Payment.SecretKey)
 
-	if next.OAuth.ClientSecret == "" || next.OAuth.ClientSecret == Redacted {
+	// The SPA echoes the mask placeholder for a secret it did not touch; only that
+	// placeholder preserves the stored value. An emptied field is a real clearing.
+	if next.OAuth.ClientSecret == Redacted {
 		next.OAuth.ClientSecret = existing.OAuth.ClientSecret
 	}
-	if next.Payment.SecretKey == "" || next.Payment.SecretKey == Redacted {
+	if next.Payment.Token == Redacted {
+		next.Payment.Token = existing.Payment.Token
+	}
+	if next.Payment.SecretKey == Redacted {
 		next.Payment.SecretKey = existing.Payment.SecretKey
 	}
+	// The token is not part of this gate: a payment that cannot sign 下单 must
+	// surface the gateway's actionable error instead of quietly flipping the
+	// admin's own switch off.
 	next.Payment.Enabled = next.Payment.Enabled && next.Payment.PaymentID != "" && next.Payment.SecretKey != ""
 	next.MergeDefaults()
 	if next.App.Domain == "" {

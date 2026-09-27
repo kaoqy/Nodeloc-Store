@@ -39,6 +39,9 @@ type UserInfo struct {
 	ID       uint
 	Username string
 	IsActive bool
+	// NodeLoc identity, needed to send a refund back to the right account.
+	OAuthUID      string
+	OAuthUsername string
 }
 
 // PaymentGateway defines the NodeLoc payment provider operations. The concrete

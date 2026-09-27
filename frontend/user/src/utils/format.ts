@@ -83,3 +83,20 @@ export function paymentNotice(code?: string | null): StatusMeta | null {
   if (!code) return null
   return PAYMENT_NOTICE[code] || PAYMENT_NOTICE.error
 }
+
+const OAUTH_ERROR: Record<string, string> = {
+  denied: 'NodeLoc 说这次授权被拒绝了：可能是你点了取消，或应用没有获得申请的权限。',
+  expired: '登录链接已失效：发起登录后超过 10 分钟没完成，或浏览器没有把校验凭证带回来。',
+  state: '回调与你发起的登录不是同一次，已拒绝写入登录态。',
+  provider: 'NodeLoc 没有受理这次授权（code 换取 token 失败），通常是 Client ID/Secret 或重定向白名单不匹配。',
+}
+
+/**
+ * oauthErrorText turns the reason the server put on ?oauth_error= into copy.
+ * The server names the cause it actually saw, so this never guesses.
+ */
+export function oauthErrorText(reason?: string | null, action = '登录'): string {
+  const detail = reason ? OAUTH_ERROR[reason] : ''
+  if (!detail) return `NodeLoc ${action}未完成，可能是链接过期或授权被拒绝。你可以重试，或改用账号密码${action}。`
+  return `${detail}你可以重新${action}，或改用账号密码${action}。`
+}

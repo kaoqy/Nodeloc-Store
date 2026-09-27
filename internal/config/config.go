@@ -48,6 +48,9 @@ type NodeLocConfig struct {
 	RedirectURI  string `mapstructure:"redirect_uri"`
 	Scopes       string `mapstructure:"scopes"`
 	PaymentID    string `mapstructure:"payment_id"`
+	// PaymentToken (tk_xxx) signs outbound create-payment and transfer calls.
+	PaymentToken string `mapstructure:"payment_token"`
+	// PaymentSecret is the merchant key: it signs 查单 and verifies callbacks.
 	PaymentSecret string `mapstructure:"payment_secret"`
 }
 
@@ -101,7 +104,9 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("jwt.access_ttl", 7200)
 	v.SetDefault("jwt.refresh_ttl", 604800)
 	v.SetDefault("nodeloc.base_url", "https://www.nodeloc.com")
-	v.SetDefault("nodeloc.scopes", "openid profile email")
+	// openid is mandatory on NodeLoc; email is opt-in because the scope needs
+	// staff approval on the application.
+	v.SetDefault("nodeloc.scopes", "openid profile")
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")
 

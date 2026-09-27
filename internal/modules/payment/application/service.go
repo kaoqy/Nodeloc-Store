@@ -23,6 +23,9 @@ var (
 	ErrAmountMismatch     = errors.New("payment amount does not match order")
 	ErrPaymentNotComplete = errors.New("payment is not complete")
 	ErrPaymentUnsettled   = errors.New("provider has no completed payment for this order")
+	// ErrRefundRecipientUnknown reaches the back office verbatim, so it names
+	// what the admin can actually do next.
+	ErrRefundRecipientUnknown = errors.New("该买家没有绑定 NodeLoc 账号，积分无从退回；请先在订单详情里人工处理")
 )
 
 // maxOrderQuantity bounds a single storefront order so one buyer cannot drain
@@ -632,8 +635,30 @@ func (s *Service) AdminDeliverOrder(ctx context.Context, orderNo string, content
 	return s.orders.SetOrderDeliveryContent(ctx, strings.TrimSpace(orderNo), content)
 }
 
+// AdminRefundOrder moves the points back through NodeLoc before the shop calls
+// the order refunded. Marking it locally only would tell the buyer their money
+// is on the way while NodeLoc still shows it as spent.
 func (s *Service) AdminRefundOrder(ctx context.Context, orderNo string) (*models.Order, error) {
-	return s.orders.UpdateOrderStatus(ctx, strings.TrimSpace(orderNo), "refunded")
+	orderNo = strings.TrimSpace(orderNo)
+	order, err := s.orders.GetOrderByNo(ctx, orderNo)
+	if err != nil {
+		return nil, err
+	}
+	user, err := s.users.FindByID(ctx, order.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup refund recipient: %w", err)
+	}
+	if user == nil || (user.OAuthUID == "" && user.OAuthUsername == "") {
+		return nil, ErrRefundRecipientUnknown
+	}
+	if _, err := s.Refund(ctx, RefundInput{
+		OrderNo:    orderNo,
+		ToUserID:   user.OAuthUID,
+		ToUsername: user.OAuthUsername,
+	}); err != nil {
+		return nil, err
+	}
+	return s.orders.GetOrderByNo(ctx, orderNo)
 }
 
 // orderListStatuses are the only ?status= values a buyer may filter by, so a

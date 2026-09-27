@@ -19,7 +19,7 @@ const snapshot = ref('')
 const settings = reactive<RuntimeSettings>({
   app: { site_name: '', site_slogan: '', site_description: '', site_logo: '', scheme: 'https', domain: '' },
   oauth: { enabled: true, base_url: '', client_id: '', client_secret: '', redirect_uri: '', scopes: '' },
-  payment: { enabled: true, payment_id: '', secret_key: '' },
+  payment: { enabled: true, payment_id: '', token: '', secret_key: '' },
   features: { enabled_registration: true },
   theme: { theme_primary: '#f2704a', default_locale: 'zh-CN' },
 })
@@ -31,7 +31,12 @@ const redirectPreview = computed(() => {
   if (!settings.app.domain.trim()) return '填写域名后自动生成'
   return `${settings.app.scheme}://${settings.app.domain.trim()}/api/v1/auth/oauth/callback`
 })
-const paymentIncomplete = computed(() => !settings.payment.payment_id.trim() || settings.payment.secret_key.trim() === '')
+const paymentIncomplete = computed(
+  () =>
+    !settings.payment.payment_id.trim() ||
+    settings.payment.token.trim() === '' ||
+    settings.payment.secret_key.trim() === '',
+)
 
 async function load() {
   loading.value = true
@@ -213,6 +218,14 @@ onMounted(load)
               <input id="oauth-redirect" v-model="settings.oauth.redirect_uri" class="input mono" :placeholder="redirectPreview" />
               <p class="hint mt-1">留空则自动生成：<span class="mono">{{ redirectPreview }}</span></p>
             </div>
+            <div>
+              <label class="label" for="oauth-scopes">授权范围 scope</label>
+              <input id="oauth-scopes" v-model="settings.oauth.scopes" class="input mono" placeholder="openid profile" />
+              <p class="hint mt-1">
+                必须包含 <span class="mono">openid</span>（NodeLoc 强制，缺失会被自动补上）。
+                <span class="mono">email</span> 需要 NodeLoc 管理员审批，应用没获批时填写会导致授权被拒。
+              </p>
+            </div>
             <div class="flex flex-wrap items-center gap-3">
               <button class="btn btn-secondary btn-sm" type="button" :disabled="testingOAuth" @click="runOAuthTest">
                 {{ testingOAuth ? '测试中…' : '测试 OAuth 配置' }}
@@ -246,16 +259,23 @@ onMounted(load)
           <div class="space-y-4">
             <div class="grid gap-4 sm:grid-cols-2">
               <div>
-                <label class="label" for="payment-id">支付 ID（payment_id）</label>
-                <input id="payment-id" v-model="settings.payment.payment_id" class="input mono" placeholder="例如 12" />
+                <label class="label" for="payment-id">Payment ID（payment_id）</label>
+                <input id="payment-id" v-model="settings.payment.payment_id" class="input mono" placeholder="pay_xxx" />
+                <p class="hint mt-1">写在接口地址里，决定款项进哪个应用。</p>
               </div>
               <div>
-                <label class="label" for="payment-secret">Secret Key</label>
+                <label class="label" for="payment-token">Payment Token（tk_xxx）</label>
+                <input id="payment-token" v-model="settings.payment.token" type="password" class="input mono" placeholder="tk_xxx；保持 ******** 则不修改" autocomplete="off" />
+                <p class="hint mt-1">买家下单时用它签名（SHA-256 后再作 HMAC 密钥），缺失就无法创建支付。</p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="payment-secret">Secret Key（商户密钥）</label>
                 <input id="payment-secret" v-model="settings.payment.secret_key" type="password" class="input mono" placeholder="保持 ******** 则不修改" autocomplete="off" />
+                <p class="hint mt-1">原样用于查单签名与回调验签，不要填成 Token。</p>
               </div>
             </div>
             <p v-if="paymentIncomplete" class="alert alert-warning" role="alert">
-              支付 ID 与 Secret Key 必须同时填写，否则买家下单后会收到「支付未配置」的提示。
+              三项都要填写：Payment ID 决定收款应用，Payment Token 用于下单，Secret Key 用于查单和回调验签。缺任何一项，买家下单都会失败。
             </p>
             <div class="flex flex-wrap items-center gap-3">
               <button class="btn btn-secondary btn-sm" type="button" :disabled="testingPayment" @click="runPaymentTest">

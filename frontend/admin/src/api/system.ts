@@ -52,7 +52,7 @@ export interface InstallPayload {
     redirect_uri?: string
     scopes?: string
   }
-  payment: { enabled: boolean; payment_id: string; secret_key: string }
+  payment: { enabled: boolean; payment_id: string; token: string; secret_key: string }
   admin: { username: string; email?: string; password: string }
   features: { enabled_registration: boolean }
   theme: { theme_primary: string; default_locale: string }
