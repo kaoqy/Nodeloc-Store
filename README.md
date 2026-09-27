@@ -119,8 +119,10 @@ sudo mysql -e "
 | OAuth2 登录回调 | `GET` | `/api/v1/auth/oauth/callback` | NodeLoc OAuth 授权后浏览器跳转 | 校验 `state` + 换 token → 302 回商店前端 `/oauth/callback`（token 放 URL fragment，不落日志）；AJAX 请求则直接返回 JSON |
 | 支付结果回调 | `GET` | `/api/v1/payment/callback` | NodeLoc 支付完成后浏览器跳转 | HMAC-SHA256 验签 → 幂等履约发卡 → 302 到 `/orders/{订单号}` |
 | 支付结果回调 | `POST` | `/api/v1/payment/callback` | 兼容路由，NodeLoc 本身不会调 | 同上验签与履约，返回 `{"success":true}` |
-| 买家查单 | `POST` | `/api/v1/payment/orders/{订单号}/reconcile` | 商店前台「我已支付，去确认」 | 用商户密钥主动向 NodeLoc 查询该单 → 已付则当场入账发卡，返回最新订单 |
+| 买家查单 | `POST` | `/api/v1/payment/orders/{订单号}/reconcile` | 商店前台「我已支付，去确认」 | 用商户密钥主动向 NodeLoc 查询该单 → 已付则当场入账发卡，返回结构化结果（`settled` / `provider_status` / `retryable` / `checked_at`） |
 | 商家查单 | `POST` | `/api/v1/admin/orders/{订单号}/reconcile` | 后台订单详情的「查单对账」 | 同上，管理员可对任意待支付订单执行 |
+| 批量查单 | `POST` | `/api/v1/admin/reconcile/pending` | 后台订单列表的「批量查单对账」 | 一次问完所有「已拿到 NodeLoc 交易号却仍显示待支付」的订单（每批 20 笔），返回逐笔原因 |
+| 待交付队列 | `GET` | `/api/v1/admin/orders?attention=undelivered` | 后台「需处理交付」筛选 | 列出已收款但还没发货/待人工/待补货的订单；该参数会取代 `status` 筛选 |
 
 > NodeLoc Payments 的 HMAC 接口**只有浏览器跳转式回调**，付款完成后没有任何服务端推送（IPN）通知商店。因此到账不能只押在那一次 302 上：买家关页面、签名对不上、回调丢失，都会由「主动查单」这条路径补回来——前台的确认按钮、订单页的自动轮询，以及后台的查单对账，走的都是 NodeLoc 的查询接口。
 
@@ -128,6 +130,43 @@ sudo mysql -e "
 
 > 两个地址都要**逐字**填进 NodeLoc 控制台（含 `/api/v1` 前缀），并与你商店初始化时填的域名完全一致；初始化向导和后台设置页的回调地址留空即自动生成，输入框占位符显示的就是完整地址，照抄到 NodeLoc 即可。
 > 前端还有 `/oauth/callback`、`/orders` 等路由属于商店自己的页面，**不要**填到 NodeLoc 的回调地址里。
+
+#### 2.4 支付结果确认与错误码
+
+所有支付类接口出错时返回同一个结构，前端只按 `code` 分支，不猜 HTTP 状态：
+
+```json
+{ "error": true, "code": "unsettled", "message": "NodeLoc 还没有这单的到账记录…", "retryable": true, "detail": "…" }
+```
+
+`detail` 是 NodeLoc 自己的措辞，可能包含凭据与内部状态，**只在 `/api/v1/admin/...` 路径上返回**；商店前台永远收不到这个字段。`retryable` 为真表示稍后再查一次就可能变好（联系不上 NodeLoc、尚未到账），为假则要点别的按钮或找店家（金额不符、交易号归属别的订单、没配好支付）。
+
+| `code` | HTTP | 含义 | 买家该怎么做 |
+|---|---|---|---|
+| `invalid_input` | 400 | 参数不合法 | 检查后重新提交 |
+| `forbidden` | 403 | 订单不属于当前账号 | 换登录身份 |
+| `amount_mismatch` | 400 | NodeLoc 记录的金额与本单不一致 | 停止自动入账，联系店家核对 |
+| `foreign_transaction` | 409 | NodeLoc 把这笔交易归属到其他订单 | 联系店家核实 |
+| `callback_invalid` | 422 | 回调未通过验签（商店已自动查单核实） | 等页面刷新或再点确认 |
+| `no_transaction` | 409 | 商店还没拿到这单的交易号 | 点「继续支付」重新发起 |
+| `unsettled` | 409 | NodeLoc 暂无到账记录（可重试） | 已扣款请稍候再查 |
+| `not_complete` | 409 | NodeLoc 回报支付未完成（可重试） | 继续付款或稍后再查 |
+| `refund_recipient_unknown` | 409 | 买家未绑定 NodeLoc 账号，无法原路退款 | 转人工处理 |
+| `not_configured` | 503 | 三项支付凭据没填齐 | 店家去后台设置 |
+| `provider_unreachable` | 502 | 联系不上 NodeLoc（可重试） | 稍后再查一次 |
+| `provider_rejected` | 502 | NodeLoc 拒绝签名请求，多为凭据不匹配 | 店家核对 Payment Token |
+| `not_found` | 404 | 订单/记录不存在 | 回列表页 |
+| `product_unavailable` | 404 | 商品已下架 | 换商品 |
+| `insufficient_stock` | 409 | 卡密库存不足 | 等店家补货，补货后自动交付 |
+| `not_payable` | 409 | 本单当前不可支付或已交付 | 刷新订单 |
+| `internal` | 500 | 未预期的后端错误 | 重试或联系店家 |
+
+**两条后台自愈循环**（`maintenanceLoop`，启动 20 秒后跑第一轮，之后每 3 分钟一次）：
+
+1. **自动查单**：挑出「已拿到 NodeLoc 交易号、却仍显示待支付、且已放置超过 10 分钟」的订单（每轮 10 笔）向 NodeLoc 查询，已付则当场入账。买家关掉付款页不再回来，钱也不会卡在待支付。10 分钟的门槛是为了不抢正在轮询的付款页。
+2. **交付重试**：挑出 `paid` / `completed` 但履约状态仍是 `pending` / `waiting_stock`、且付款已超过 1 分钟的订单（每轮 50 笔）重新发货。导入补货卡密后，之前卡在「等待补货」的订单会自动交付；已绑给本单的卡密会被直接复用，不会重复占库存。
+
+因此后台的「需处理交付」队列（`?attention=undelivered`）只应包含自动重试搞不定、需要人来做的部分：人工发货、以及 NodeLoc 尚未确认到账的单子。
 
 ### Step 3 · 启动商店（Docker）
 
@@ -292,7 +331,8 @@ Nodeloc-Store/
 | 回调签名验证失败 | 回调用的是 **Secret Key 原文**（不是 Token 的哈希）；重新填对之后，已付款的订单商店会自动向 NodeLoc 查单核实并入账，无需重复付款 |
 | OAuth 登录未完成 | 登录页会把原因写清楚：**授权被拒绝**（用户在 NodeLoc 点了拒绝）/ **链接已过期**（回调没带上本浏览器的 `state`，常见于复制链接、隔了很久再打开、或 Cookie 被拦）/ **授权校验失败**（换 token 或取 userinfo 出错，多半是 Client Secret、回调地址或 Scope 不对）/ **服务商异常**（NodeLoc 本身报错）。前两类重试即可；最后一类核对后台设置 |
 | 邮件没拿到 | NodeLoc OAuth `email` scope 需审核通过；未通过时 token 只有 `openid` |
-| 卡密一直没发货 | Admin → 日志 中 `payment.stock_warning` 条目，确认有可用卡密 |
+| 前台确认支付结果不通过 | 页面会给出具体原因码（见 2.4）：`unsettled` / `provider_unreachable` 属可重试，稍后再查即可；`no_transaction` 表示这单根本没到 NodeLoc，要点「继续支付」重新发起；`amount_mismatch` / `foreign_transaction` 会停止自动入账，只能店家核对。后台日志里同一笔会带上 NodeLoc 的原文 |
+| 卡密一直没发货 | 先看后台订单列表的「需处理交付」队列：`waiting_stock` 会在补货后由 3 分钟一轮的自动重试释放，`manual_pending` 需要店家点「标记已发货」；再查 Admin → 日志 的 `payment.stock_warning`，确认有可用卡密 |
 | 重启后丢失初始化状态 | `./data` 没挂载持久卷，按 Step 3 补上 `-v "$PWD/data:/app/data"` 重新起 |
 | 上传图片 413 | OpenResty 的 `client_max_body_size` 与应用一致（默认 8M） |
 

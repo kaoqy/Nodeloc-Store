@@ -82,18 +82,43 @@ export function errorMessage(error: unknown, fallback = '请求失败，请稍�
 }
 
 /**
- * 查单失败时服务端返回的是给运维看的英文原因，管理员需要的是下一步做什么。
+ * 查单失败时，服务端除了给管理员看的原因（NodeLoc 的原话）还带一个 code，
+ * 这里把两者合起来：先说要做什么，再附上服务商自己的说法。
  */
+const RECONCILE_HINT: Record<string, string> = {
+  no_transaction: '商店没有这单的 NodeLoc 交易号，无法代为查询：让买家重新发起支付，或核对下单是否真的到达 NodeLoc。',
+  unsettled: 'NodeLoc 还没有这笔付款的到账记录，买家可能并未付款；确认已付后再查一次。',
+  amount_mismatch: 'NodeLoc 记录的金额与本单不一致，商店已拒绝自动入账，请人工核对后处理。',
+  foreign_transaction: 'NodeLoc 把这笔交易归属到了别的订单，商店已拒绝自动入账，请人工核对。',
+  provider_rejected: 'NodeLoc 拒绝了这次请求，通常是 Payment ID / Token / Secret Key 与后台填写的不一致，请到 设置 用「测试支付网关」复核。',
+  provider_unreachable: '暂时联系不上 NodeLoc，可能是服务商或出口网络问题，稍后重查。',
+  not_configured: '商店的支付还没配置完整（Payment ID / Token / Secret Key 三项），请先到 设置 补齐。',
+  not_found: '订单或支付记录已不存在，无法查询。',
+}
+
+const PROVIDER_STATUS: Record<string, string> = {
+  pending: '处理中',
+  failed: '失败',
+  cancelled: '已取消',
+  refunded: '已退款',
+  expired: '已超时',
+  closed: '已关闭',
+}
+
+/** providerStatus names what NodeLoc recorded for a payment, in Chinese. */
+export function providerStatus(status?: string): string {
+  if (!status) return '未知状态'
+  return PROVIDER_STATUS[status] || status
+}
+
+export function errorCode(error: unknown): string {
+  const data = (error as { response?: { data?: { code?: string } } })?.response?.data
+  return data?.code ?? ''
+}
+
 export function reconcileMessage(error: unknown): string {
-  switch ((error as { response?: { status?: number } })?.response?.status) {
-    case 404:
-    case 409:
-      return 'NodeLoc 还没有这单的到账记录（未付款、已超时或查询失败）。确认买家已付款后再查一次。'
-    case 400:
-      return 'NodeLoc 记录的金额与本单不一致，商店已拒绝自动入账，请人工核对。'
-    case 401:
-      return 'NodeLoc 把这笔交易归属到了其他订单，商店已拒绝自动入账，请人工核对。'
-    default:
-      return '无法向 NodeLoc 查询这单，请稍后重试，或到 设置 核对 Payment ID / Secret Key。'
-  }
+  const detail = errorMessage(error, '')
+  const hint = RECONCILE_HINT[errorCode(error)]
+  if (!hint) return detail || '无法向 NodeLoc 查询这单，请稍后重试，或到 设置 核对 Payment ID / Secret Key。'
+  return detail ? `${hint}（NodeLoc：${detail}）` : hint
 }

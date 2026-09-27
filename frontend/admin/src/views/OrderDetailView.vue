@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { cancelOrder, deliverOrder, fulfillOrder, getOrder, reconcileOrder, refundOrder } from '../api/orders'
-import { errorMessage, fulfillmentStatus, money, orderStatus, reconcileMessage, when } from '../utils/format'
+import { errorMessage, fulfillmentStatus, money, orderStatus, providerStatus, reconcileMessage, when } from '../utils/format'
 import type { Order } from '../types'
 
 const route = useRoute()
@@ -73,6 +73,27 @@ async function submitDelivery() {
   showDeliver.value = false
 }
 
+/**
+ * 查单对账。NodeLoc 答「还没到账」不是错误而是结果，所以这里分开说：确认到账、
+ * 还是服务商记为失败/取消（那种单子不会自己变好）。
+ */
+async function reconcile() {
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const result = await reconcileOrder(orderNo.value)
+    order.value = result.order
+    notice.value = result.settled
+      ? `已查单：NodeLoc 确认到账${result.order.delivery_content ? '，交付内容已写入本单' : '，交付已进入队列'}。`
+      : `已向 NodeLoc 查询：这笔付款记为「${providerStatus(result.provider_status)}」，商店未入账。${result.retryable ? '可在买家确认后再次查询。' : '这单不会自动到账，请人工处理。'}`
+  } catch (err) {
+    error.value = reconcileMessage(err)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function copyContent() {
   const content = order.value?.delivery_content || ''
   if (!content) return
@@ -117,7 +138,7 @@ onMounted(load)
           v-if="order.status === 'pending'"
           class="btn btn-primary btn-sm"
           :disabled="busy"
-          @click="run(() => reconcileOrder(orderNo), '已查单：NodeLoc 确认到账并完成交付', reconcileMessage)"
+          @click="reconcile"
         >
           查单对账
         </button>

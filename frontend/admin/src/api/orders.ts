@@ -26,5 +26,35 @@ export const fulfillOrder = (orderNo: string) =>
   client.post<{ data: Order }>(`/admin/orders/${orderNo}/fulfill`).then((r) => r.data.data)
 
 // 查单：让服务端拿这单去问 NodeLoc，已付就直接置为已支付并走发货流程。
+// 「尚未到账」不是错误，而是 result.settled === false，所以两者要分开看。
+export interface ReconcileResult {
+  order: Order
+  settled: boolean
+  provider_status?: string
+  retryable: boolean
+  checked_at: string
+}
+
 export const reconcileOrder = (orderNo: string) =>
-  client.post<{ data: Order }>(`/admin/orders/${orderNo}/reconcile`).then((r) => r.data.data)
+  client.post<ReconcileResult>(`/admin/orders/${orderNo}/reconcile`).then((r) => r.data)
+
+// 批量查单对账：一次问完所有仍显示待支付、但已经拿到 NodeLoc 交易号的订单，
+// 买家关页面、回调丢失的单子不用再一笔一笔手点。
+export interface ReconcileItem {
+  order_no: string
+  settled: boolean
+  provider_status?: string
+  code?: string
+  message?: string
+  detail?: string
+}
+
+export interface ReconcileReport {
+  checked_at: string
+  checked: number
+  settled: number
+  items: ReconcileItem[]
+}
+
+export const reconcilePendingOrders = () =>
+  client.post<ReconcileReport>('/admin/reconcile/pending').then((r) => r.data)

@@ -23,6 +23,14 @@ var (
 	ErrAmountMismatch     = errors.New("payment amount does not match order")
 	ErrPaymentNotComplete = errors.New("payment is not complete")
 	ErrPaymentUnsettled   = errors.New("provider has no completed payment for this order")
+	// ErrNoProviderTransaction means the store never recorded a NodeLoc
+	// transaction id for this order, so 查单 has nothing to ask about. It is a
+	// different problem from "the provider says unpaid" and needs a different
+	// next step from the buyer (start the payment again).
+	ErrNoProviderTransaction = errors.New("store has no NodeLoc transaction id for this order")
+	// ErrForeignTransaction refuses to settle a transaction the provider names
+	// for some other order.
+	ErrForeignTransaction = errors.New("provider transaction belongs to another order")
 	// ErrRefundRecipientUnknown reaches the back office verbatim, so it names
 	// what the admin can actually do next.
 	ErrRefundRecipientUnknown = errors.New("该买家没有绑定 NodeLoc 账号，积分无从退回；请先在订单详情里人工处理")
@@ -64,6 +72,18 @@ type CallbackResult struct {
 	TransactionID string `json:"transaction_id"`
 	Status        string `json:"status"`
 	Fulfillment   string `json:"fulfillment_status"`
+}
+
+// ReconcileResult is what a 查单 established. "Provider says unpaid" is a normal
+// answer rather than a failure, so it comes back here instead of as an error:
+// the storefront can then say what the buyer should do next — keep waiting, pay
+// again, or contact the shop — instead of one generic retry message.
+type ReconcileResult struct {
+	Order          *models.Order `json:"order"`
+	Settled        bool          `json:"settled"`
+	ProviderStatus string        `json:"provider_status,omitempty"`
+	Retryable      bool          `json:"retryable"`
+	CheckedAt      time.Time     `json:"checked_at"`
 }
 
 type OrderList struct {
@@ -247,7 +267,12 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 		}
 	}
 	transaction.Status = status
-	transaction.ProviderTransactionID = stringPointer(result.TransactionID)
+	// provider_transaction_id is unique, and a checkout whose response carried no
+	// id would store an empty one — so two such orders would collide on the index
+	// and the second payment attempt would fail with a database error.
+	if result.TransactionID != "" {
+		transaction.ProviderTransactionID = stringPointer(result.TransactionID)
+	}
 	transaction.ResponsePayload = &raw
 	if transaction.ID != 0 {
 		if err := s.orders.SaveTransaction(ctx, transaction); err != nil {
@@ -357,13 +382,17 @@ func (s *Service) HandleCallbackSets(ctx context.Context, sets []map[string]stri
 
 	orderNo := first(sets[0], "external_reference", "order_id", "order_no", "out_trade_no")
 	transactionID := first(sets[0], "transaction_id", "trade_no", "id")
-	order, err := s.reconcile(ctx, orderNo, transactionID, 0)
+	result, err := s.reconcile(ctx, orderNo, transactionID, 0)
 	if err != nil {
 		log.Printf("payment callback %s: no signature candidate verified and the provider query did not settle it: %v", orderNo, err)
-		return nil, ErrInvalidCallback
+		return nil, err
+	}
+	if !result.Settled {
+		log.Printf("payment callback %s: no signature candidate verified and NodeLoc reports the payment as %s", orderNo, result.ProviderStatus)
+		return nil, fmt.Errorf("%w: provider query reports %s", ErrPaymentUnsettled, result.ProviderStatus)
 	}
 	log.Printf("payment callback %s: settled from provider query after every signature candidate failed", orderNo)
-	return newCallbackResult(order), nil
+	return newCallbackResult(result.Order), nil
 }
 
 // settle writes the provider's confirmation onto the payment rows, marks the
@@ -397,7 +426,14 @@ func (s *Service) settle(ctx context.Context, orderNo string, paymentOrder *doma
 		return nil, err
 	}
 	if err := s.fulfillment.Fulfill(ctx, order); err != nil {
-		return nil, fmt.Errorf("fulfill paid order: %w", err)
+		// NodeLoc has confirmed the money by now. Returning this error told the
+		// buyer the payment could not be checked — the one message that makes
+		// people pay twice — so the order stays paid, the note explains the wait,
+		// and the delivery worker retries it.
+		log.Printf("payment settle %s: paid, delivery failed and was queued for retry: %v", orderNo, err)
+		if noteErr := s.orders.MarkOrderDeliveryPending(ctx, orderNo, "支付已确认，商品交付遇到一点问题，商店会自动重试，通常几分钟内送达。"); noteErr != nil {
+			log.Printf("payment settle %s: could not note the delivery retry: %v", orderNo, noteErr)
+		}
 	}
 	fresh, err := s.orders.GetOrderByNo(ctx, orderNo)
 	if err != nil {
@@ -411,11 +447,11 @@ func (s *Service) settle(ctx context.Context, orderNo string, paymentOrder *doma
 // provider recorded for a local order, and a completed payment is settled and
 // delivered on the spot. userID 0 means an operator, who may reconcile any
 // order.
-func (s *Service) ReconcileOrder(ctx context.Context, orderNo string, userID uint) (*models.Order, error) {
+func (s *Service) ReconcileOrder(ctx context.Context, orderNo string, userID uint) (*ReconcileResult, error) {
 	return s.reconcile(ctx, orderNo, "", userID)
 }
 
-func (s *Service) reconcile(ctx context.Context, orderNo, hintedTransactionID string, userID uint) (*models.Order, error) {
+func (s *Service) reconcile(ctx context.Context, orderNo, hintedTransactionID string, userID uint) (*ReconcileResult, error) {
 	orderNo = strings.TrimSpace(orderNo)
 	if orderNo == "" {
 		return nil, ErrInvalidInput
@@ -430,51 +466,82 @@ func (s *Service) reconcile(ctx context.Context, orderNo, hintedTransactionID st
 	switch order.Status {
 	case "pending":
 	case "paid", "completed":
-		return order, nil
+		// Already settled here: re-running 查单 is how the storefront refreshes,
+		// so report the order as settled instead of asking the provider again.
+		return &ReconcileResult{Order: order, Settled: true, CheckedAt: time.Now().UTC()}, nil
 	default:
 		return nil, fmt.Errorf("%w: order status is %s", ErrPaymentUnsettled, order.Status)
 	}
 
 	paymentOrder, err := s.orders.GetPaymentOrderByOrderNo(ctx, orderNo)
 	if err != nil {
+		if errors.Is(err, domain.ErrPaymentOrderNotFound) {
+			return nil, ErrNoProviderTransaction
+		}
 		return nil, err
 	}
 
-	// Our own payment row is the primary candidate; an id that only appears in
-	// the request is accepted solely when the provider echoes this order back,
-	// so a guessed transaction id can never settle someone else's order.
+	// Our own payment row is the primary candidate; an id that only arrives with
+	// the request is accepted solely when the provider echoes this order back, so
+	// a guessed transaction id can never settle someone else's order.
 	candidates := []queryCandidate{{transaction: derefString(paymentOrder.ProviderTransactionID), owned: true}}
 	if hinted := strings.TrimSpace(hintedTransactionID); hinted != "" && hinted != candidates[0].transaction {
 		candidates = append(candidates, queryCandidate{transaction: hinted})
 	}
 
-	var lastErr error = ErrPaymentUnsettled
 	for _, candidate := range candidates {
 		if candidate.transaction == "" {
 			continue
 		}
 		query, queryErr := s.gateway.QueryPayment(ctx, candidate.transaction)
 		if queryErr != nil {
-			lastErr = queryErr
+			if candidate.owned {
+				// Whether NodeLoc is unreachable or refusing the shop's
+				// credentials decides what the buyer is told, so do not mask it
+				// behind a hint that was never ours to begin with.
+				return nil, queryErr
+			}
 			continue
 		}
-		if query == nil || (!candidate.owned && query.OrderID != orderNo) {
-			continue
+		if query == nil {
+			return nil, fmt.Errorf("%w: NodeLoc returned an unreadable query result", domain.ErrProviderUnreachable)
 		}
 		if query.OrderID != "" && query.OrderID != orderNo {
-			return nil, ErrInvalidCallback
-		}
-		if !providerCompleted(query.Status) {
-			lastErr = fmt.Errorf("%w: provider query reports %s", ErrPaymentUnsettled, query.Status)
+			if candidate.owned {
+				return nil, ErrForeignTransaction
+			}
 			continue
+		}
+		checkedAt := time.Now().UTC()
+		if !providerCompleted(query.Status) {
+			return &ReconcileResult{
+				Order: order,
+				// A payment NodeLoc already failed will not settle later; one still
+				// open is worth another look, which is what drives the retry copy.
+				ProviderStatus: query.Status,
+				Retryable:      !providerFailed(query.Status),
+				CheckedAt:      checkedAt,
+			}, nil
 		}
 		if query.Amount != 0 && query.Amount != paymentOrder.Amount {
 			return nil, ErrAmountMismatch
 		}
 		log.Printf("payment reconcile %s: provider confirmed %s as paid", orderNo, candidate.transaction)
-		return s.settle(ctx, orderNo, paymentOrder, candidate.transaction, query.PlatformFee, query.MerchantPoints)
+		settled, err := s.settle(ctx, orderNo, paymentOrder, candidate.transaction, query.PlatformFee, query.MerchantPoints)
+		if err != nil {
+			return nil, err
+		}
+		return &ReconcileResult{
+			Order:          settled,
+			Settled:        settled.Status != "pending",
+			ProviderStatus: query.Status,
+			CheckedAt:      checkedAt,
+		}, nil
 	}
-	return nil, lastErr
+
+	// Nothing to ask about: the store never got a transaction id for this order,
+	// so the buyer has to start the payment again rather than keep polling.
+	return nil, ErrNoProviderTransaction
 }
 
 type queryCandidate struct {
@@ -486,6 +553,16 @@ type queryCandidate struct {
 func providerCompleted(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case domain.StatusSucceeded, domain.StatusPaid:
+		return true
+	}
+	return false
+}
+
+// providerFailed is the terminal counterpart: NodeLoc will never mark this
+// payment paid, so "check again later" would be a lie.
+func providerFailed(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case domain.StatusFailed, domain.StatusCancelled, domain.StatusRefunded, "expired", "closed", "timeout":
 		return true
 	}
 	return false
@@ -561,6 +638,114 @@ func (s *Service) FulfillOrder(ctx context.Context, orderNo string) (*models.Ord
 	return s.orders.GetOrderByNo(ctx, order.OrderNo)
 }
 
+// deliveryRetryLimit bounds one background sweep so a long backlog cannot pin
+// the loop on a cold database.
+const deliveryRetryLimit = 50
+
+// RetryPendingDeliveries hands orders that NodeLoc confirmed as paid but that
+// never finished delivery back to the fulfillment store — automatic card
+// delivery, the manual queue, and stock that arrived after 等待补货. It returns
+// how many orders moved on.
+func (s *Service) RetryPendingDeliveries(ctx context.Context) (int, error) {
+	pending, err := s.orders.ListUndeliveredPaidOrders(ctx, deliveryRetryLimit)
+	if err != nil {
+		return 0, err
+	}
+	delivered := 0
+	for i := range pending {
+		order := pending[i]
+		if err := s.fulfillment.Fulfill(ctx, &order); err != nil {
+			log.Printf("delivery retry %s: still undelivered: %v", order.OrderNo, err)
+			continue
+		}
+		if order.FulfillmentStatus == "delivered" || order.FulfillmentStatus == "completed" ||
+			order.FulfillmentStatus == "manual_pending" || order.FulfillmentStatus == "waiting_stock" {
+			delivered++
+		}
+	}
+	return delivered, nil
+}
+
+// reconcileBatchLimit caps one 批量查单 sweep; the admin runs it again for more.
+const reconcileBatchLimit = 20
+
+// The background sweep is deliberately smaller and older: it exists to catch
+// abandoned checkouts, not to poll NodeLoc over orders whose buyer is watching.
+const (
+	autoReconcileLimit  = 10
+	autoReconcileMinAge = 10 * time.Minute
+)
+
+type ReconcileItem struct {
+	OrderNo        string `json:"order_no"`
+	Settled        bool   `json:"settled"`
+	ProviderStatus string `json:"provider_status,omitempty"`
+	Code           string `json:"code,omitempty"`
+	Message        string `json:"message,omitempty"`
+	Detail         string `json:"detail,omitempty"`
+}
+
+type ReconcileReport struct {
+	CheckedAt time.Time       `json:"checked_at"`
+	Checked   int             `json:"checked"`
+	Settled   int             `json:"settled"`
+	Items     []ReconcileItem `json:"items"`
+}
+
+// AdminReconcilePending is the back-office sweep: every order still marked
+// 待支付 that carries a NodeLoc transaction id gets asked about right now.
+func (s *Service) AdminReconcilePending(ctx context.Context) (*ReconcileReport, error) {
+	return s.reconcilePending(ctx, reconcileBatchLimit, 0)
+}
+
+// AutoReconcilePending runs the same sweep in the background, which is what
+// settles an order whose browser redirect never came back without anyone
+// pressing a button. The age floor keeps an open checkout page out of it — that
+// page already polls the provider on the buyer's behalf.
+func (s *Service) AutoReconcilePending(ctx context.Context) (*ReconcileReport, error) {
+	return s.reconcilePending(ctx, autoReconcileLimit, autoReconcileMinAge)
+}
+
+func (s *Service) reconcilePending(ctx context.Context, limit int, minAge time.Duration) (*ReconcileReport, error) {
+	candidates, err := s.orders.ListReconcilableOrders(ctx, limit, minAge)
+	if err != nil {
+		return nil, err
+	}
+	report := &ReconcileReport{CheckedAt: time.Now().UTC(), Checked: len(candidates), Items: make([]ReconcileItem, 0, len(candidates))}
+	var firstErr string
+	for _, order := range candidates {
+		item := ReconcileItem{OrderNo: order.OrderNo}
+		result, reconcileErr := s.reconcile(ctx, order.OrderNo, "", 0)
+		switch {
+		case reconcileErr != nil:
+			failure := Classify(reconcileErr)
+			item.Code = failure.Code
+			item.Message = failure.Message
+			item.Detail = failure.Detail
+			if firstErr == "" {
+				firstErr = fmt.Sprintf("%s: %v", failure.Code, reconcileErr)
+			}
+		case result.Settled:
+			item.Settled = true
+			item.ProviderStatus = result.ProviderStatus
+			report.Settled++
+		default:
+			item.ProviderStatus = result.ProviderStatus
+		}
+		report.Items = append(report.Items, item)
+	}
+	// One summary line per sweep: a provider outage would otherwise log a line
+	// for every open order, every few minutes.
+	if report.Checked > 0 {
+		if firstErr != "" {
+			log.Printf("payment auto-reconcile: checked %d, settled %d, first failure %s", report.Checked, report.Settled, firstErr)
+		} else if report.Settled > 0 {
+			log.Printf("payment auto-reconcile: checked %d, settled %d", report.Checked, report.Settled)
+		}
+	}
+	return report, nil
+}
+
 func (s *Service) Refund(ctx context.Context, input RefundInput) (*contract.TransferResult, error) {
 	input.OrderNo = strings.TrimSpace(input.OrderNo)
 	if input.OrderNo == "" || (strings.TrimSpace(input.ToUserID) == "" && strings.TrimSpace(input.ToUsername) == "") {
@@ -619,8 +804,14 @@ func (s *Service) AdminGetOrder(ctx context.Context, orderNo string) (*models.Or
 	return order, nil
 }
 
-func (s *Service) AdminListOrders(ctx context.Context, limit, offset int, status, search string, buyerID uint) (*OrderList, error) {
-	orders, total, err := s.orders.ListAllOrders(ctx, limit, offset, status, search, buyerID)
+// AdminListOrders lists orders for the back office. attention="undelivered"
+// swaps the status filter for "paid but still owed a delivery", the queue that
+// needs a person once the automatic retries have had their turns.
+func (s *Service) AdminListOrders(ctx context.Context, limit, offset int, status, search string, buyerID uint, attention string) (*OrderList, error) {
+	if attention != "" && attention != "undelivered" {
+		return nil, fmt.Errorf("%w: unknown attention filter %q", ErrInvalidInput, attention)
+	}
+	orders, total, err := s.orders.ListAllOrders(ctx, limit, offset, status, search, buyerID, attention)
 	if err != nil {
 		return nil, err
 	}

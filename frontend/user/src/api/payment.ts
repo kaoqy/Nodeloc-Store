@@ -1,5 +1,14 @@
-import client, { errorStatus } from './client'
+import client, { errorCode, errorMessage, errorRetryable } from './client'
 import type { Order, PaymentOrder } from '../types'
+
+/** What one 查单 established: the order, and whether NodeLoc confirmed it paid. */
+export interface ReconcileResult {
+  order: Order
+  settled: boolean
+  provider_status?: string
+  retryable: boolean
+  checked_at: string
+}
 
 export interface CreateOrderPayload {
   slug: string
@@ -29,26 +38,25 @@ export async function getOrder(orderNo: string): Promise<Order> {
 /**
  * 查单：让服务端向 NodeLoc 确认这单的支付结果，已付则立即入账并交付。
  * 回调没能到达商店时（签名不一致、浏览器中途关闭）靠它兜底。
+ * 「尚未到账」是正常的回答而不是错误，所以看 settled 而不是只看有没有抛异常。
  */
-export async function reconcileOrder(orderNo: string): Promise<Order> {
-  const { data } = await client.post<{ order: Order }>(`/payment/orders/${orderNo}/reconcile`)
-  return data.order
+export async function reconcileOrder(orderNo: string): Promise<ReconcileResult> {
+  const { data } = await client.post<ReconcileResult>(`/payment/orders/${orderNo}/reconcile`)
+  return data
 }
 
 /**
- * 查单的失败原因在服务端是英文技术文案，这里换成买家能照着做的提示。
+ * 查单失败的买家文案。服务端已经按 code 给出了能照着做的中文原因，这里只兜住
+ * 服务端没说话的情况（例如反向代理直接回了 HTML），绝不再把状态码猜成文案。
  */
 export function reconcileMessage(error: unknown): string {
-  switch (errorStatus(error)) {
-    case 404:
-    case 409:
-      return 'NodeLoc 暂时没有这单的到账记录。请确认付款已完成，稍后再查一次，或联系店家。'
-    case 400:
-      return 'NodeLoc 记录的金额与本单不一致，商店已暂停自动入账，请联系店家核对。'
-    default:
-      // 例如 NodeLoc 查询接口本身报错：原文是给运维看的，买家只需要知道可以重试。
-      return '暂时无法向 NodeLoc 确认支付结果，请稍后再查一次。'
-  }
+  return errorMessage(error, '暂时无法向 NodeLoc 确认支付结果，商店会自动重试，你也可以稍后再查一次。')
+}
+
+/** Whether the buyer can usefully press 再查一次, or should wait for the shop. */
+export function reconcileRetryable(error: unknown): boolean {
+  if (errorCode(error) === 'no_transaction') return false
+  return errorRetryable(error)
 }
 
 export async function listOrders(limit = 50, offset = 0, status = '', q = '') {

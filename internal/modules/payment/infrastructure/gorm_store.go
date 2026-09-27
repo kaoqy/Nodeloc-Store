@@ -198,6 +198,58 @@ func (s *GormStore) MarkOrderPaid(ctx context.Context, orderNo, transactionID st
 	return &paid, err
 }
 
+// MarkOrderDeliveryPending records that the payment is confirmed while delivery
+// did not complete, so the buyer sees why the content is missing and the
+// background sweep retries. An order that already delivered is never rewritten.
+func (s *GormStore) MarkOrderDeliveryPending(ctx context.Context, orderNo, note string) error {
+	return s.db.WithContext(ctx).Model(&models.Order{}).
+		Where("order_no = ? AND fulfillment_status NOT IN ?", strings.TrimSpace(orderNo), []string{"delivered", "completed"}).
+		Updates(map[string]any{"fulfillment_status": "pending", "delivery_note": note}).Error
+}
+
+// ListUndeliveredPaidOrders returns paid orders still owed a delivery: those
+// whose automatic delivery never ran, and those parked in 等待补货 that a later
+// card import should have released. The money is already captured in both, so
+// what is retried is the delivery, whatever the order row went on to say.
+func (s *GormStore) ListUndeliveredPaidOrders(ctx context.Context, limit int) ([]models.Order, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	orders := make([]models.Order, 0, limit)
+	err := s.db.WithContext(ctx).Model(&models.Order{}).
+		Where("status IN ? AND fulfillment_status IN ?", []string{"paid", "completed"}, []string{"pending", "waiting_stock"}).
+		Where("paid_at IS NOT NULL AND paid_at <= ?", time.Now().UTC().Add(-time.Minute)).
+		Preload("Product").
+		Order("paid_at ASC, id ASC").
+		Limit(limit).
+		Find(&orders).Error
+	return orders, err
+}
+
+// ListReconcilableOrders returns orders the store still calls 待支付 but which do
+// carry a NodeLoc transaction id — the set a lost browser redirect can strand,
+// and the one 批量查单 can settle.
+func (s *GormStore) ListReconcilableOrders(ctx context.Context, limit int, minAge time.Duration) ([]models.Order, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	withTransaction := s.db.Model(&domain.PaymentOrder{}).
+		Select("order_id").
+		Where("provider_transaction_id IS NOT NULL AND provider_transaction_id <> ''")
+	query := s.db.WithContext(ctx).Model(&models.Order{}).
+		Where("status = ? AND id IN (?)", "pending", withTransaction)
+	if minAge > 0 {
+		query = query.Where("created_at <= ?", time.Now().UTC().Add(-minAge))
+	}
+	orders := make([]models.Order, 0, limit)
+	err := query.
+		Preload("Product").
+		Order("created_at DESC, id DESC").
+		Limit(limit).
+		Find(&orders).Error
+	return orders, err
+}
+
 func (s *GormStore) MarkOrderRefunded(ctx context.Context, orderNo string) error {
 	result := s.db.WithContext(ctx).Model(&models.Order{}).
 		Where("order_no = ?", strings.TrimSpace(orderNo)).
@@ -211,7 +263,7 @@ func (s *GormStore) MarkOrderRefunded(ctx context.Context, orderNo string) error
 	return nil
 }
 
-func (s *GormStore) ListAllOrders(ctx context.Context, limit, offset int, status, search string, buyerID uint) ([]models.Order, int64, error) {
+func (s *GormStore) ListAllOrders(ctx context.Context, limit, offset int, status, search string, buyerID uint, attention string) ([]models.Order, int64, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -223,7 +275,12 @@ func (s *GormStore) ListAllOrders(ctx context.Context, limit, offset int, status
 	}
 
 	query := s.db.WithContext(ctx).Model(&models.Order{})
-	if status != "" {
+	if attention == "undelivered" {
+		// The money is in; only the goods are missing. manual_pending counts here
+		// too, because 人工发货 queued and never done is the shop owner's job.
+		query = query.Where("status IN ? AND fulfillment_status IN ?",
+			[]string{"paid", "completed"}, []string{"pending", "manual_pending", "waiting_stock"})
+	} else if status != "" {
 		query = query.Where("status = ?", status)
 	}
 	if buyerID != 0 {
@@ -322,20 +379,46 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 			return nil
 		}
 
+		// Each order carries one delivery record per kind of delivery. The retry
+		// sweep calls Fulfill every few minutes, so inserting per attempt would
+		// bury the order's history in identical rows; update in place instead.
+		record := func(deliveryType, status string, note *string, content *string, completedAt *time.Time) error {
+			updates := map[string]any{"status": status, "updated_at": time.Now().UTC()}
+			if note != nil {
+				updates["note"] = *note
+			}
+			if content != nil {
+				updates["content"] = *content
+			}
+			if completedAt != nil {
+				updates["completed_at"] = *completedAt
+			}
+			result := tx.Model(&models.DeliveryRecord{}).
+				Where("order_id = ? AND delivery_type = ?", current.ID, deliveryType).
+				Updates(updates)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected > 0 {
+				return nil
+			}
+			return tx.Create(&models.DeliveryRecord{
+				OrderID:      current.ID,
+				Sequence:     1,
+				DeliveryType: deliveryType,
+				Status:       status,
+				Content:      content,
+				Note:         note,
+				CompletedAt:  completedAt,
+			}).Error
+		}
+
 		// A missing product row (deleted after checkout) is treated as manual so
 		// payment is never dropped on the floor.
 		if current.Product == nil || !current.Product.AutoDeliver || current.Product.ProductType != "card" {
 			now := time.Now().UTC()
 			note := "本单需要商家人工发货，处理结果会同步到订单中。"
-			record := models.DeliveryRecord{
-				OrderID:      current.ID,
-				Sequence:     1,
-				DeliveryType: "manual",
-				Status:       "pending",
-				Note:         &note,
-				CompletedAt:  nil,
-			}
-			if err := tx.Create(&record).Error; err != nil {
+			if err := record("manual", "pending", &note, nil, nil); err != nil {
 				return err
 			}
 			if err := tx.Model(&current).Updates(map[string]any{
@@ -348,22 +431,29 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 			return tx.Preload("Product").Preload("Records").First(order, current.ID).Error
 		}
 
+		// Cards already bound to this order were taken for it, so a retry hands
+		// those back out rather than pulling fresh ones and selling the same
+		// order twice over. Only the remainder comes out of available stock, and
+		// only that remainder is subtracted from the product's count.
 		var cards []models.Card
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("product_id = ? AND status = ?", current.ProductID, "available").
+			Where("order_id = ? AND product_id = ?", current.ID, current.ProductID).
 			Order("id ASC").Limit(current.Quantity).Find(&cards).Error; err != nil {
 			return err
 		}
+		reused := len(cards)
+		if need := current.Quantity - reused; need > 0 {
+			var fresh []models.Card
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("product_id = ? AND status = ?", current.ProductID, "available").
+				Order("id ASC").Limit(need).Find(&fresh).Error; err != nil {
+				return err
+			}
+			cards = append(cards, fresh...)
+		}
 		if len(cards) < current.Quantity {
 			note := "支付已完成，卡密库存不足，补货后会自动交付。"
-			record := models.DeliveryRecord{
-				OrderID:      current.ID,
-				Sequence:     1,
-				DeliveryType: "card",
-				Status:       "waiting_stock",
-				Note:         &note,
-			}
-			if err := tx.Create(&record).Error; err != nil {
+			if err := record("card", "waiting_stock", &note, nil, nil); err != nil {
 				return err
 			}
 			if err := tx.Model(&current).Updates(map[string]any{
@@ -395,20 +485,14 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 			return err
 		}
 
-		if err := tx.Model(&models.Product{}).Where("id = ?", current.ProductID).
-			UpdateColumn("stock_count", gorm.Expr("CASE WHEN stock_count >= ? THEN stock_count - ? ELSE 0 END", current.Quantity, current.Quantity)).Error; err != nil {
-			return err
+		if taken := current.Quantity - reused; taken > 0 {
+			if err := tx.Model(&models.Product{}).Where("id = ?", current.ProductID).
+				UpdateColumn("stock_count", gorm.Expr("CASE WHEN stock_count >= ? THEN stock_count - ? ELSE 0 END", taken, taken)).Error; err != nil {
+				return err
+			}
 		}
 
-		record := models.DeliveryRecord{
-			OrderID:      current.ID,
-			Sequence:     1,
-			DeliveryType: "card",
-			Status:       "completed",
-			Content:      &deliveryContent,
-			CompletedAt:  &now,
-		}
-		if err := tx.Create(&record).Error; err != nil {
+		if err := record("card", "completed", nil, &deliveryContent, &now); err != nil {
 			return err
 		}
 

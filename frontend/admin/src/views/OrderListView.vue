@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import PaginationFooter from '../components/PaginationFooter.vue'
-import { listOrders } from '../api/orders'
-import { errorMessage, fulfillmentStatus, money, orderStatus, when } from '../utils/format'
+import { listOrders, reconcilePendingOrders, type ReconcileReport } from '../api/orders'
+import { errorMessage, fulfillmentStatus, money, orderStatus, providerStatus, when } from '../utils/format'
 import type { Order } from '../types'
 
 const PageSize = 20
@@ -32,7 +32,7 @@ const statuses = [
 ]
 
 const filtered = computed(
-  () => Boolean(search.value.trim() || statusFilter.value || buyerId.value),
+  () => Boolean(search.value.trim() || statusFilter.value || buyerId.value || needAttention.value),
 )
 
 async function load() {
@@ -45,6 +45,7 @@ async function load() {
       status: statusFilter.value || undefined,
       q: search.value.trim() || undefined,
       user_id: buyerId.value || undefined,
+      attention: needAttention.value ? 'undelivered' : undefined,
     })
     orders.value = result.data
     total.value = result.total
@@ -58,6 +59,39 @@ async function load() {
 function applyFilters() {
   offset.value = 0
   load()
+}
+
+const reconciling = ref(false)
+const reconcileReport = ref<ReconcileReport | null>(null)
+const notice = ref('')
+// 「需处理交付」：钱已到账、东西还没出去的单子。自动重试每几分钟跑一次，这里
+// 是给店家看剩下那些确实需要人推一把的（人工发货、补货）。
+const needAttention = ref(false)
+const reconcileIssues = computed(() =>
+  (reconcileReport.value?.items ?? []).filter((item) => !item.settled),
+)
+
+/**
+ * 批量查单对账：买家关掉付款页、回调没回来时，这些单子会一直挂着「待支付」。
+ * 一次问完 NodeLoc，已付的当场入账，剩下的逐条给出原因。
+ */
+async function reconcilePending() {
+  if (reconciling.value) return
+  reconciling.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const report = await reconcilePendingOrders()
+    reconcileReport.value = report
+    notice.value = report.checked
+      ? `已向 NodeLoc 核实 ${report.checked} 笔待支付订单，${report.settled} 笔确认到账并补发。`
+      : '没有需要核实的订单：待支付订单里还没有拿到 NodeLoc 交易号的。'
+    if (report.settled) await load()
+  } catch (err) {
+    error.value = errorMessage(err, '批量查单失败')
+  } finally {
+    reconciling.value = false
+  }
 }
 
 /** Focus the list on one buyer; the order rows link here by user id. */
@@ -81,10 +115,24 @@ function goTo(target: number) {
 }
 
 const route = useRoute()
+const router = useRouter()
+
+/** Keep the attention filter in the URL so the dashboard can deep-link to it. */
+function toggleAttention() {
+  needAttention.value = !needAttention.value
+  offset.value = 0
+  const next: Record<string, string> = {}
+  if (statusFilter.value) next.status = statusFilter.value
+  if (needAttention.value) next.attention = 'undelivered'
+  if (buyerId.value) next.user = String(buyerId.value)
+  void router.replace({ path: '/orders', query: next })
+  load()
+}
 
 onMounted(() => {
   const status = route.query.status
   if (typeof status === 'string') statusFilter.value = status
+  if (route.query.attention === 'undelivered') needAttention.value = true
   const user = route.query.user
   if (typeof user === 'string' && /^\d+$/.test(user)) buyerId.value = Number(user)
   load()
@@ -103,16 +151,56 @@ onMounted(() => {
           aria-label="搜索订单"
           @keyup.enter="applyFilters"
         />
-        <select v-model="statusFilter" class="input w-32" aria-label="按订单状态筛选" @change="applyFilters">
+        <select v-model="statusFilter" class="input w-32" aria-label="按订单状态筛选" :disabled="needAttention" @change="applyFilters">
           <option value="">全部状态</option>
           <option v-for="item in statuses" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
         <button class="btn btn-secondary btn-sm" @click="applyFilters">筛选</button>
+        <button
+          class="chip"
+          :class="{ 'chip-active': needAttention }"
+          :aria-pressed="needAttention"
+          title="已收款但还没发货/待人工/待补货的订单"
+          @click="toggleAttention"
+        >
+          需处理交付
+        </button>
       </div>
-      <RouterLink to="/orders?status=pending" class="quiet text-xs">只看待支付 →</RouterLink>
+      <div class="flex flex-wrap items-center gap-2">
+        <button class="btn btn-secondary btn-sm" :disabled="reconciling" @click="reconcilePending">
+          <span v-if="reconciling" class="spinner" />
+          {{ reconciling ? '正在向 NodeLoc 核实…' : '批量查单对账' }}
+        </button>
+        <RouterLink to="/orders?status=pending" class="quiet text-xs">只看待支付 →</RouterLink>
+      </div>
     </div>
 
+    <p v-if="needAttention" class="alert alert-info" role="status">
+      正在只看「已收款但未交付」的订单（含人工发货与等待补货），状态筛选暂不生效。商店每几分钟会自动重试交付，这里列出仍需要人推一把的。
+      <button class="btn btn-quiet btn-sm ml-2" @click="toggleAttention">查看全部订单</button>
+    </p>
+
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+    <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
+
+    <div v-if="reconcileIssues.length" class="card space-y-2">
+      <p class="text-sm font-semibold">以下 {{ reconcileIssues.length }} 笔仍未到账</p>
+      <p class="hint">
+        商店每 3 分钟会自动向 NodeLoc 核实一次超过 10 分钟的待支付订单，无需守着点。
+        <RouterLink to="/orders?attention=undelivered" class="accent-text underline-offset-2 hover:underline">
+          查看已收款未交付 →
+        </RouterLink>
+      </p>
+      <ul class="space-y-1.5">
+        <li v-for="item in reconcileIssues" :key="item.order_no" class="flex flex-wrap items-center gap-2 text-sm">
+          <RouterLink :to="`/orders/${item.order_no}`" class="mono accent-text underline-offset-2 hover:underline">
+            {{ item.order_no }}
+          </RouterLink>
+          <span v-if="item.provider_status" class="badge badge-neutral">{{ providerStatus(item.provider_status) }}</span>
+          <span v-if="item.detail || item.message" class="quiet text-xs">{{ item.detail || item.message }}</span>
+        </li>
+      </ul>
+    </div>
 
     <div v-if="buyerId" class="flex flex-wrap items-center gap-2">
       <span class="chip chip-active">
@@ -148,9 +236,9 @@ onMounted(() => {
             <td colspan="8">
               <div class="empty-state">
                 <p class="empty-glyph" aria-hidden="true">◌</p>
-                <p class="empty-title">{{ filtered ? '没有符合条件的订单' : '还没有订单' }}</p>
+                <p class="empty-title">{{ needAttention ? '没有待交付的订单' : filtered ? '没有符合条件的订单' : '还没有订单' }}</p>
                 <p class="empty-hint">
-                  {{ filtered ? '换个关键词或选择全部状态。' : '买家在前台下单后会出现在这里。' }}
+                  {{ needAttention ? '已收款的订单都已交付，商店还会每几分钟自动重试失败的那几笔。' : filtered ? '换个关键词或选择全部状态。' : '买家在前台下单后会出现在这里。' }}
                 </p>
               </div>
             </td>

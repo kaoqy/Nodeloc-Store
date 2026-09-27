@@ -31,6 +31,11 @@ const reconcileNote = ref('')
 const status = ref(FILTERS.some((item) => item.key === route.query.status) ? String(route.query.status) : '')
 const notice = computed(() => paymentNotice(typeof route.query.pay === 'string' ? route.query.pay : ''))
 const pending = computed(() => orders.value.filter((item) => item.status === 'pending'))
+// A pending order that got as far as NodeLoc has a transaction id, and only then
+// can 查单 say anything about it. The rest were never opened for payment, so
+// sending the buyer to 继续支付 is the only useful action.
+const awaitingConfirm = computed(() => pending.value.filter((item) => item.transaction_id))
+const unstarted = computed(() => pending.value.filter((item) => !item.transaction_id))
 
 async function load(offset: number) {
   if (offset === 0) {
@@ -57,26 +62,31 @@ function search() {
 }
 
 /**
- * 查单：把列表里仍显示待支付的订单交给服务端逐个核实，NodeLoc 已记为已付的
- * 当场入账。回跳丢失时这是唯一的自救入口，不需要用户重新付款。
+ * 查单：把列表里已发起支付却仍显示待支付的订单交给服务端逐个核实，NodeLoc 已
+ * 记为已付的当场入账。回跳丢失时这是唯一的自救入口，不需要用户重新付款。
  */
 async function reconcilePending() {
-  if (reconciling.value || !pending.value.length) return
+  const queue = awaitingConfirm.value
+  if (reconciling.value || !queue.length) return
   reconciling.value = true
   reconcileNote.value = '正在向 NodeLoc 核实…'
   let settled = 0
+  let checked = 0
   let failure = ''
-  for (const item of pending.value) {
+  for (const item of queue) {
     try {
-      const fresh = await reconcileOrder(item.order_no)
-      if (fresh.status !== 'pending') settled += 1
+      const result = await reconcileOrder(item.order_no)
+      checked += 1
+      if (result.settled) settled += 1
     } catch (e) {
+      checked += 1
       failure = reconcileMessage(e)
     }
+    reconcileNote.value = `正在向 NodeLoc 核实…（${checked}/${queue.length}）`
   }
   reconcileNote.value = settled
-    ? `已确认 ${settled} 笔订单到账。`
-    : failure || 'NodeLoc 暂无这些订单的到账记录，稍后会自动重试。'
+    ? `已确认 ${settled} 笔订单到账${unstarted.value.length ? '，另有未付款订单见下方' : ''}。`
+    : failure || 'NodeLoc 暂无这些订单的到账记录，商店会每隔几分钟自动再核实一次。'
   reconciling.value = false
   await load(0)
 }
@@ -107,16 +117,22 @@ onMounted(() => load(0))
 
     <p v-if="notice" class="alert mb-4" :class="notice.badge" role="status">{{ notice.label }}</p>
 
-    <div v-if="pending.length" class="alert alert-warning mb-6 flex flex-wrap items-center gap-3" role="status">
+    <div v-if="awaitingConfirm.length" class="alert alert-warning mb-4 flex flex-wrap items-center gap-3" role="status">
       <span class="flex-1">
-        {{ notice ? '列表里有' : '有' }} {{ pending.length }} 笔仍显示待支付，可以让商店向 NodeLoc 查一次单。
+        {{ notice ? '列表里有' : '有' }} {{ awaitingConfirm.length }} 笔已发起支付但还没确认到账。
+        商店每几分钟会向 NodeLoc 自动核实一次，也可以立刻查一次；已扣款请勿重复付款。
       </span>
       <button class="btn btn-secondary btn-sm shrink-0" :disabled="reconciling" @click="reconcilePending">
         <span v-if="reconciling" class="spinner" />
         {{ reconciling ? '核实中…' : '核实支付结果' }}
       </button>
     </div>
-    <p v-if="reconcileNote" class="hint -mt-4 mb-5" role="status">{{ reconcileNote }}</p>
+    <p v-if="reconcileNote" class="hint -mt-2 mb-5" role="status">{{ reconcileNote }}</p>
+
+    <p v-if="unstarted.length && !reconciling" class="alert alert-info mb-4" role="status">
+      另有 {{ unstarted.length }} 笔订单尚未在 NodeLoc 生成交易，付款后才会开始核实。
+      点开订单选「继续支付」即可。
+    </p>
 
     <div class="mb-4 flex flex-wrap items-center gap-2">
       <input
@@ -187,10 +203,13 @@ onMounted(() => load(0))
               <p class="mono mt-1 truncate text-xs text-[var(--text-quiet)]">{{ order.order_no }}</p>
               <p class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--text-quiet)]">
                 <span class="nums">{{ when(order.created_at) }}</span>
-                <span v-if="order.status === 'pending' || order.fulfillment_status === 'waiting_stock'" class="badge" :class="orderStatus(order.status).badge">
-                  {{ orderStatus(order.status).label }}
+                <!-- The right-hand badge already carries the order status, so the
+                     row says only what that badge cannot: how far an unpaid order
+                     actually got, or how delivery is going once it is paid. -->
+                <span v-if="order.status === 'pending'" class="badge" :class="order.transaction_id ? 'badge-warning' : 'badge-neutral'">
+                  {{ order.transaction_id ? '已发起支付 · 待核实' : '尚未付款' }}
                 </span>
-                <span v-else class="badge" :class="fulfillmentStatus(order.fulfillment_status, order.status).badge">
+                <span v-else-if="order.fulfillment_status !== 'delivered' && order.fulfillment_status !== 'completed'" class="badge" :class="fulfillmentStatus(order.fulfillment_status, order.status).badge">
                   {{ fulfillmentStatus(order.fulfillment_status, order.status).label }}
                 </span>
               </p>

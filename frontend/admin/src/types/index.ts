@@ -145,6 +145,8 @@ export interface PageParams {
   status?: string
   q?: string
   user_id?: number
+  /** "undelivered": paid orders still owed a delivery, regardless of status. */
+  attention?: string
 }
 
 export interface Page<T> {

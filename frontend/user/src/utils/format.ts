@@ -72,6 +72,18 @@ const PAYMENT_NOTICE: Record<string, StatusMeta> = {
     label: '没有找到对应的订单，本单暂未入账。请重新下单支付，或联系店家核实。',
     badge: 'alert-warning',
   },
+  unsettled: {
+    label: 'NodeLoc 回报本单尚未到账。商店会自动继续核实，已扣款请稍候，不必重复付款。',
+    badge: 'alert-warning',
+  },
+  unreachable: {
+    label: '暂时联系不上 NodeLoc 的支付服务，商店会自动重试核实，请稍候，不必重复付款。',
+    badge: 'alert-warning',
+  },
+  rejected: {
+    label: 'NodeLoc 拒绝了商店的支付请求，本单暂未入账。这通常是店家的支付配置问题，请联系处理。',
+    badge: 'alert-danger',
+  },
   error: {
     label: '支付结果处理失败，本单暂未入账。请稍后重试或联系店家。',
     badge: 'alert-danger',
@@ -82,6 +94,21 @@ const PAYMENT_NOTICE: Record<string, StatusMeta> = {
 export function paymentNotice(code?: string | null): StatusMeta | null {
   if (!code) return null
   return PAYMENT_NOTICE[code] || PAYMENT_NOTICE.error
+}
+
+const PROVIDER_STATUS: Record<string, string> = {
+  pending: '处理中',
+  failed: '失败',
+  cancelled: '已取消',
+  refunded: '已退款',
+  expired: '已超时',
+  closed: '已关闭',
+}
+
+/** providerStatus names what NodeLoc recorded for the payment, in Chinese. */
+export function providerStatus(status?: string): string {
+  if (!status) return '未知状态'
+  return PROVIDER_STATUS[status] || status
 }
 
 const OAUTH_ERROR: Record<string, string> = {

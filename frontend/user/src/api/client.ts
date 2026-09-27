@@ -33,6 +33,22 @@ export function errorStatus(error: unknown): number | undefined {
   return axios.isAxiosError(error) ? error.response?.status : undefined
 }
 
+/**
+ * Machine-readable reason the API attached to a failure. Status codes alone
+ * could not tell "NodeLoc has not seen this payment yet" apart from "the shop
+ * never got a transaction id", which are different next steps for a buyer.
+ */
+export function errorCode(error: unknown): string {
+  const data = (axios.isAxiosError(error) ? error.response?.data : undefined) as { code?: string } | undefined
+  return data?.code ?? ''
+}
+
+/** Whether retrying the same call can plausibly succeed (a provider outage will, bad credentials will not). */
+export function errorRetryable(error: unknown): boolean {
+  const data = (axios.isAxiosError(error) ? error.response?.data : undefined) as { retryable?: boolean } | undefined
+  return data?.retryable === true
+}
+
 /** A human-readable reason for a failed request, preferring the API's own text. */
 export function errorMessage(error: unknown, fallback = '操作失败，请稍后重试'): string {
   if (axios.isAxiosError(error)) {

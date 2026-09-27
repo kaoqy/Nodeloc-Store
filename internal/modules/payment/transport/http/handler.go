@@ -60,6 +60,11 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	adminOrders.POST("/:order_no/fulfill", h.AdminFulfillOrder)
 	adminOrders.POST("/:order_no/reconcile", h.AdminReconcileOrder)
 
+	// A separate group because /orders/:order_no/... already owns that segment.
+	adminReconcile := router.Group("/api/v1/admin/reconcile")
+	adminReconcile.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin(accounts))
+	adminReconcile.POST("/pending", h.AdminReconcilePending)
+
 	// NodeLoc notifies via a browser GET redirect (signature-verified); POST is
 	// accepted as well for server-push style integrations.
 	router.GET("/api/v1/payment/callback", h.Callback)
@@ -165,6 +170,12 @@ func callbackErrorCode(err error) string {
 		return "amount"
 	case errors.Is(err, application.ErrPaymentNotComplete):
 		return "pending"
+	case errors.Is(err, application.ErrPaymentUnsettled), errors.Is(err, application.ErrNoProviderTransaction):
+		return "unsettled"
+	case errors.Is(err, domain.ErrProviderUnreachable):
+		return "unreachable"
+	case errors.Is(err, domain.ErrProviderRejected):
+		return "rejected"
 	case errors.Is(err, domain.ErrOrderNotFound), errors.Is(err, domain.ErrPaymentOrderNotFound):
 		return "unknown_order"
 	default:
@@ -248,19 +259,20 @@ func (h *Handler) ListOrders(c *gin.Context) {
 
 // ReconcileOrder asks NodeLoc what it recorded for the order's payment and
 // settles it here when the provider says it went through. Buyers use it after a
-// redirect that never reached the store.
+// redirect that never reached the store; "still unpaid" comes back as a normal
+// answer, not an error, so the storefront can say what to do next.
 func (h *Handler) ReconcileOrder(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	order, err := h.service.ReconcileOrder(c.Request.Context(), c.Param("order_no"), userID)
+	result, err := h.service.ReconcileOrder(c.Request.Context(), c.Param("order_no"), userID)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"order": order})
+	c.JSON(http.StatusOK, result)
 }
 
 // callbackParamSets returns the payload variants to verify. ParseForm rewrites
@@ -387,33 +399,25 @@ func parseNonNegativeInt(value string) (int, error) {
 }
 
 func writeError(c *gin.Context, err error) {
-	status := http.StatusInternalServerError
-	switch {
-	case errors.Is(err, application.ErrInvalidInput),
-		errors.Is(err, application.ErrAmountMismatch),
-		errors.Is(err, application.ErrPaymentNotComplete):
-		status = http.StatusBadRequest
-	case errors.Is(err, application.ErrInvalidCallback):
-		status = http.StatusUnauthorized
-	case errors.Is(err, application.ErrForbidden):
-		status = http.StatusForbidden
-	case errors.Is(err, domain.ErrProductNotPurchasable),
-		errors.Is(err, domain.ErrOrderNotFound),
-		errors.Is(err, domain.ErrPaymentOrderNotFound):
-		status = http.StatusNotFound
-	case errors.Is(err, domain.ErrInsufficientStock), errors.Is(err, domain.ErrNotPayable),
-		errors.Is(err, application.ErrPaymentUnsettled), errors.Is(err, application.ErrRefundRecipientUnknown):
-		status = http.StatusConflict
-	case errors.Is(err, domain.ErrPaymentNotConfigured):
-		// The detail names the missing credential, which is for the shop owner
-		// to read in the log; the buyer only needs to know to try later.
-		log.Printf("checkout refused, payment not configured: %v", err)
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "商店的 NodeLoc 支付还没有配置好，请稍后再试或联系店家。"})
-		return
-	case strings.Contains(strings.ToLower(err.Error()), "not found"):
-		status = http.StatusNotFound
+	failure := application.Classify(err)
+	if failure.Code == "not_configured" || failure.Code == "internal" {
+		// The technical reason names the missing credential or the failing
+		// query; it belongs in the log, and on an admin route in the response.
+		log.Printf("%s %s: %v", c.Request.Method, c.Request.URL.Path, err)
 	}
-	c.JSON(status, gin.H{"error": err.Error()})
+	body := gin.H{"error": failure.Message, "code": failure.Code, "retryable": failure.Retryable}
+	if isAdminRoute(c) && failure.Detail != "" {
+		body["error"] = failure.Detail
+		body["detail"] = failure.Detail
+	}
+	c.JSON(failure.Status, body)
+}
+
+// isAdminRoute marks the back office, where the shop owner is the reader: the
+// storefront gets buyer-safe copy while the admin panel sees NodeLoc's own
+// words, which are what make a credential problem fixable.
+func isAdminRoute(c *gin.Context) bool {
+	return strings.HasPrefix(c.Request.URL.Path, "/api/v1/admin/")
 }
 
 // ── Admin Order Handlers ───────────────────────────────────────────
@@ -439,7 +443,7 @@ func (h *Handler) AdminListOrders(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.AdminListOrders(c.Request.Context(), limit, offset, status, c.Query("q"), uint(buyerID))
+	result, err := h.service.AdminListOrders(c.Request.Context(), limit, offset, status, c.Query("q"), uint(buyerID), c.Query("attention"))
 	if err != nil {
 		writeError(c, err)
 		return
@@ -531,10 +535,22 @@ func (h *Handler) AdminFulfillOrder(c *gin.Context) {
 // AdminReconcileOrder is the back-office 查单 button: settle an order the
 // provider already marks as paid without waiting for the buyer's browser.
 func (h *Handler) AdminReconcileOrder(c *gin.Context) {
-	order, err := h.service.ReconcileOrder(c.Request.Context(), c.Param("order_no"), 0)
+	result, err := h.service.ReconcileOrder(c.Request.Context(), c.Param("order_no"), 0)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": order})
+	c.JSON(http.StatusOK, result)
+}
+
+// AdminReconcilePending runs 查单 over every order the store still calls 待支付
+// but which has a NodeLoc transaction id — the cleanup after a batch of lost
+// redirects, which no buyer thinks to press the button for.
+func (h *Handler) AdminReconcilePending(c *gin.Context) {
+	report, err := h.service.AdminReconcilePending(c.Request.Context())
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, report)
 }

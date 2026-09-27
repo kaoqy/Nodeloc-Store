@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { createPayment, getOrder, reconcileMessage, reconcileOrder } from '../api/payment'
+import { createPayment, getOrder, reconcileMessage, reconcileOrder, reconcileRetryable } from '../api/payment'
 import { errorMessage } from '../api/client'
-import { fulfillmentStatus, money, orderStatus, paymentNotice, when } from '../utils/format'
+import { fulfillmentStatus, money, orderStatus, paymentNotice, providerStatus, when } from '../utils/format'
 import type { Order } from '../types'
 
 const route = useRoute()
@@ -17,8 +17,17 @@ const copied = ref(false)
 const copiedNo = ref(false)
 const confirming = ref(false)
 const confirmNote = ref('')
+// Whether pressing 再查一次 can plausibly change the answer. "NodeLoc has not
+// seen it yet" and "the provider is down" yes; "the shop has no transaction id"
+// no, and saying so stops the button encouraging pointless clicks.
+const confirmRetryable = ref(false)
+const checkedAt = ref('')
+// Whether the page is quietly reloading for delivery, so the empty delivery box
+// can say so instead of looking like a dead end.
+const deliveryPolling = ref(false)
 const notice = computed(() => paymentNotice(typeof route.query.pay === 'string' ? route.query.pay : ''))
 let settleTimer: number | undefined
+let deliveryTimer: number | undefined
 
 const isPaid = computed(() => {
   const status = order.value?.status ?? ''
@@ -29,6 +38,8 @@ const delivered = computed(() => {
   const current = order.value
   return Boolean(current?.delivery_content) || current?.fulfillment_status === 'delivered' || current?.fulfillment_status === 'completed'
 })
+
+const awaitingDelivery = computed(() => isPaid.value && !delivered.value && order.value?.status !== 'refunded')
 
 async function load() {
   loading.value = true
@@ -51,23 +62,35 @@ async function confirmPayment(silent = false): Promise<boolean> {
   if (!current || confirming.value) return false
   confirming.value = true
   if (!silent) confirmNote.value = '正在向 NodeLoc 确认支付结果…'
-  let settled = false
   try {
-    const fresh = await reconcileOrder(current.order_no)
-    settled = fresh.status !== 'pending'
-    order.value = fresh
-    if (settled) {
-      confirmNote.value = '支付已确认，交付结果见下方。'
+    const result = await reconcileOrder(current.order_no)
+    order.value = result.order
+    checkedAt.value = result.checked_at
+    if (result.settled) {
+      confirmRetryable.value = false
+      confirmNote.value = result.order.delivery_content ? '支付已确认，交付内容见下方。' : '支付已确认，商品正在交付。'
       void router.replace({ query: { ...route.query, pay: 'ok' } })
-    } else if (!silent) {
-      confirmNote.value = 'NodeLoc 还没有这单的到账记录。若已扣款请稍候再试，或联系店家。'
+      stopSettleWatch()
+      watchDelivery()
+      return true
     }
+    // NodeLoc answered and this is not a paid payment yet.
+    confirmRetryable.value = result.retryable
+    if (!result.retryable) stopSettleWatch()
+    if (!silent) {
+      confirmNote.value = result.retryable
+        ? 'NodeLoc 还没有这笔付款的到账记录。已扣款的话请稍候，商店会持续核实，你也可以手动再查一次。'
+        : `NodeLoc 把这笔付款记为「${providerStatus(result.provider_status)}」，不会自动入账，请联系店家核实。`
+    }
+    return false
   } catch (e) {
+    confirmRetryable.value = reconcileRetryable(e)
+    if (!confirmRetryable.value) stopSettleWatch()
     if (!silent) confirmNote.value = reconcileMessage(e)
+    return false
   } finally {
     confirming.value = false
   }
-  return settled
 }
 
 async function pay() {
@@ -117,11 +140,24 @@ onMounted(async () => {
     if (await confirmPayment()) return
   }
   watchSettlement()
+  watchDelivery()
 })
 
 onUnmounted(() => {
-  if (settleTimer) window.clearInterval(settleTimer)
+  stopSettleWatch()
+  stopDeliveryWatch()
 })
+
+function stopSettleWatch() {
+  if (settleTimer) window.clearInterval(settleTimer)
+  settleTimer = undefined
+}
+
+function stopDeliveryWatch() {
+  if (deliveryTimer) window.clearInterval(deliveryTimer)
+  deliveryTimer = undefined
+  deliveryPolling.value = false
+}
 
 function watchSettlement() {
   // NodeLoc can notify server-side a moment after the browser lands here, so an
@@ -131,15 +167,32 @@ function watchSettlement() {
   settleTimer = window.setInterval(async () => {
     waited += 8
     if (await confirmPayment(true)) {
-      if (settleTimer) window.clearInterval(settleTimer)
-      settleTimer = undefined
+      stopSettleWatch()
       return
     }
-    if (waited >= 120) {
-      if (settleTimer) window.clearInterval(settleTimer)
-      settleTimer = undefined
-    }
+    if (waited >= 120) stopSettleWatch()
   }, 8000)
+}
+
+function watchDelivery() {
+  // Payment settled but the card content has not landed yet: the shop retries
+  // delivery on its own, so the page just refreshes until it shows.
+  stopDeliveryWatch()
+  if (!awaitingDelivery.value) return
+  let waited = 0
+  deliveryPolling.value = true
+  deliveryTimer = window.setInterval(async () => {
+    waited += 6
+    await load()
+    if (delivered.value || waited >= 120) stopDeliveryWatch()
+  }, 6000)
+}
+
+async function refreshDelivery() {
+  stopDeliveryWatch()
+  await load()
+  confirmNote.value = delivered.value ? '交付内容已刷新。' : '还没有送达，商店正在自动重试，请稍候。'
+  watchDelivery()
 }
 </script>
 
@@ -224,16 +277,28 @@ function watchSettlement() {
           </button>
           <RouterLink to="/" class="btn btn-quiet btn-sm">返回挑选</RouterLink>
         </div>
-        <div
-          v-else-if="!delivered && (order.status === 'paid' || order.status === 'completed')"
-          class="mt-5 flex flex-wrap items-center gap-3"
-        >
+        <div v-else-if="awaitingDelivery" class="mt-5 flex flex-wrap items-center gap-3">
           <p class="flex-1 text-sm text-[var(--text-dim)]">
-            支付已完成，交付通常几秒内到达；人工交付会进入商家队列。
+            <span v-if="order.fulfillment_status === 'waiting_stock'">卡密库存已临时售罄，补货后商店会自动为你交付。</span>
+            <span v-else-if="order.fulfillment_status === 'manual_pending'">商家正在人工交付，完成后这里会显示结果与说明。</span>
+            <span v-else>支付已完成，交付通常几秒内到达，本页会自动刷新。</span>
           </p>
-          <button class="btn btn-quiet btn-sm" @click="load">刷新状态</button>
+          <button class="btn btn-quiet btn-sm" :disabled="loading" @click="refreshDelivery">
+            {{ loading ? '刷新中…' : '立即刷新交付' }}
+          </button>
         </div>
-        <p v-if="confirmNote" class="hint mt-4" role="status">{{ confirmNote }}</p>
+        <p v-if="confirmNote" class="hint mt-4 flex flex-wrap items-center gap-2" role="status">
+          <span>{{ confirmNote }}</span>
+          <button
+            v-if="confirmRetryable && order.status === 'pending'"
+            class="btn btn-quiet btn-sm"
+            :disabled="confirming"
+            @click="confirmPayment()"
+          >
+            {{ confirming ? '核实中…' : '再查一次' }}
+          </button>
+          <span v-if="checkedAt" class="nums">上次核实 {{ when(checkedAt) }}</span>
+        </p>
       </section>
 
       <!-- Delivery -->
@@ -260,11 +325,11 @@ function watchSettlement() {
 
         <div v-else class="card-quiet mt-4 text-sm text-[var(--text-dim)]">
           <template v-if="order.status === 'pending'">支付成功后即可查看交付内容。</template>
-          <template v-else-if="order.fulfillment_status === 'waiting_stock'">
-            卡密库存已临时售罄，补货后商家会立即为你发货。
-          </template>
-          <template v-else-if="order.fulfillment_status === 'manual_pending'">
-            商家正在人工交付，完成后这里会显示结果与说明。
+          <template v-else-if="awaitingDelivery">
+            <span class="inline-flex items-center gap-2">
+              <span v-if="deliveryPolling" class="spinner" aria-hidden="true" />
+              尚未送达{{ deliveryPolling ? '，本页正在自动刷新' : '' }}。进度见上方提示。
+            </span>
           </template>
           <template v-else-if="order.status === 'refunded'">款项已退回，本单不再交付。</template>
           <template v-else-if="order.status === 'cancelled' || order.status === 'failed'">
@@ -287,12 +352,14 @@ function watchSettlement() {
             <p class="text-sm font-medium">下单成功</p>
             <p class="hint nums mt-0.5">{{ when(order.created_at) }}</p>
           </div>
-          <div class="timeline-item" :class="order.paid_at ? 'timeline-done' : 'timeline-active'">
-            <p class="text-sm font-medium">支付完成</p>
+          <!-- A closed order never reached these steps, so it must not be drawn
+               with a live dot on them: only 待支付 is waiting, and 已退款 is done. -->
+          <div class="timeline-item" :class="order.paid_at ? 'timeline-done' : order.status === 'pending' ? 'timeline-active' : ''">
+            <p class="text-sm font-medium">{{ order.status === 'refunded' ? '款项已退回' : '支付完成' }}</p>
             <p class="hint nums mt-0.5">{{ when(order.paid_at) }}</p>
           </div>
-          <div class="timeline-item" :class="delivered ? 'timeline-done' : ''">
-            <p class="text-sm font-medium">商品交付</p>
+          <div class="timeline-item" :class="delivered ? 'timeline-done' : awaitingDelivery ? 'timeline-active' : ''">
+            <p class="text-sm font-medium">{{ order.fulfillment_status === 'manual_pending' ? '商家人工交付中' : '商品交付' }}</p>
             <p class="hint nums mt-0.5">{{ when(order.delivered_at) }}</p>
           </div>
         </div>

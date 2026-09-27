@@ -142,31 +142,34 @@ func (g *NodeLocGateway) post(ctx context.Context, path string, params map[strin
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+path, strings.NewReader(values.Encode()))
 	if err != nil {
-		return nil, nil, fmt.Errorf("build NodeLoc request: %w", err)
+		return nil, nil, fmt.Errorf("%w: build NodeLoc request: %v", domain.ErrProviderUnreachable, err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("NodeLoc request failed: %w", err)
+		return nil, nil, fmt.Errorf("%w: %v", domain.ErrProviderUnreachable, err)
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
-		return nil, nil, fmt.Errorf("read NodeLoc response: %w", err)
+		return nil, nil, fmt.Errorf("%w: read NodeLoc response: %v", domain.ErrProviderUnreachable, err)
+	}
+	if resp.StatusCode >= 500 {
+		return nil, raw, fmt.Errorf("%w: NodeLoc returned HTTP %d: %s", domain.ErrProviderUnreachable, resp.StatusCode, summarize(raw))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, raw, fmt.Errorf("NodeLoc returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		return nil, raw, fmt.Errorf("%w: NodeLoc returned HTTP %d: %s", domain.ErrProviderRejected, resp.StatusCode, summarize(raw))
 	}
 
 	var envelope map[string]any
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return nil, raw, fmt.Errorf("decode NodeLoc response: %w", err)
+		return nil, raw, fmt.Errorf("%w: decode NodeLoc response: %v", domain.ErrProviderUnreachable, err)
 	}
 	if success, ok := envelope["success"].(bool); ok && !success {
-		return nil, raw, errors.New(firstNonEmpty(firstString(envelope, "message", "error", "detail"), "NodeLoc operation failed"))
+		return nil, raw, fmt.Errorf("%w: %s", domain.ErrProviderRejected, firstNonEmpty(firstString(envelope, "message", "error", "detail"), "NodeLoc operation failed"))
 	}
 	if data, ok := envelope["data"].(map[string]any); ok {
 		for key, value := range envelope {
@@ -177,6 +180,20 @@ func (g *NodeLocGateway) post(ctx context.Context, path string, params map[strin
 		return data, raw, nil
 	}
 	return envelope, raw, nil
+}
+
+// summarize keeps a provider body short enough to log and to show a shop owner,
+// and strips the whitespace that makes a raw dump unreadable in a toast.
+func summarize(body []byte) string {
+	text := strings.Join(strings.Fields(string(body)), " ")
+	const limit = 240
+	if len(text) > limit {
+		return text[:limit] + "…"
+	}
+	if text == "" {
+		return "empty response"
+	}
+	return text
 }
 
 func firstString(values map[string]any, keys ...string) string {

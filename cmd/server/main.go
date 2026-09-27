@@ -20,6 +20,7 @@ import (
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit/application"
+	paymentapp "github.com/kaoqy/Nodeloc-Store/internal/modules/payment/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/system"
 )
 
@@ -129,10 +130,27 @@ func main() {
 		}
 	}()
 
+	// One background loop keeps payments honest without a person: it asks
+	// NodeLoc about orders a lost browser redirect left at 待支付, and retries
+	// delivery for orders already paid. It resolves the live container on every
+	// pass because saving settings rebuilds it and closes the old database.
+	stopMaintenance := make(chan struct{})
+	go func() {
+		maintenanceLoop(stopMaintenance, func() *paymentapp.Service {
+			liveMu.Lock()
+			defer liveMu.Unlock()
+			if live == nil {
+				return nil
+			}
+			return live.Payment.Service
+		})
+	}()
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("Shutting down server...")
+	close(stopMaintenance)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -140,6 +158,46 @@ func main() {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 	log.Println("Server exited")
+}
+
+// maintenanceLoop keeps payment state self-healing: 查单 for orders the store
+// still calls 待支付 (a lost redirect must not cost a buyer their goods), and a
+// delivery retry for orders already paid. The first pass runs shortly after
+// start-up so a crash that dropped a delivery is fixed without waiting; after
+// that it runs every few minutes, which stays far below any sane rate limit on
+// the provider side.
+func maintenanceLoop(stop <-chan struct{}, resolve func() *paymentapp.Service) {
+	sweep := func() {
+		svc := resolve()
+		if svc == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if _, err := svc.AutoReconcilePending(ctx); err != nil {
+			log.Printf("payment maintenance: provider check failed: %v", err)
+		}
+		if moved, err := svc.RetryPendingDeliveries(ctx); err != nil {
+			log.Printf("delivery retry sweep: %v", err)
+		} else if moved > 0 {
+			log.Printf("delivery retry sweep: delivered %d order(s)", moved)
+		}
+	}
+
+	first := time.NewTimer(20 * time.Second)
+	defer first.Stop()
+	ticker := time.NewTicker(3 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-first.C:
+			sweep()
+		case <-ticker.C:
+			sweep()
+		}
+	}
 }
 
 func currentPort(bootPath string, fallback int) int {
