@@ -3,31 +3,34 @@ import type { RouteLocationNormalized } from 'vue-router'
 import { isUninitialized } from '../api/system'
 import { useAuthStore } from '../stores/auth'
 import { beginNavigation, endNavigation } from '../utils/progress'
+import { setPageTitle } from '../utils/identity'
 
 // meta.permission is the screen's entry ticket, expressed in the same
 // "resource:action" vocabulary the Casbin policies use. It only decides what a
 // staff member can reach from the navigation — the API checks every call again,
 // so a hidden page is never the only thing standing between them and a write.
+// meta.title is this screen's own words on the browser tab, in front of the shop
+// name; it names the detail screens too, which the sidebar never lists.
 const routes = [
-  { path: '/setup', component: () => import('../views/SetupView.vue'), meta: { public: true } },
-  { path: '/login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
-  { path: '/', component: () => import('../views/DashboardView.vue'), meta: { permission: 'stats:view' } },
-  { path: '/products', component: () => import('../views/ProductListView.vue'), meta: { permission: 'products:view' } },
-  { path: '/products/new', component: () => import('../views/ProductFormView.vue'), meta: { permission: 'products:manage' } },
-  { path: '/products/:id/edit', component: () => import('../views/ProductFormView.vue'), meta: { permission: 'products:manage' } },
-  { path: '/cards', component: () => import('../views/CardListView.vue'), meta: { permission: 'cards:view' } },
-  { path: '/cards/:id', component: () => import('../views/CardListView.vue'), meta: { permission: 'cards:view' } },
-  { path: '/orders', component: () => import('../views/OrderListView.vue'), meta: { permission: 'orders:view' } },
-  { path: '/orders/:orderNo', component: () => import('../views/OrderDetailView.vue'), meta: { permission: 'orders:view' } },
-  { path: '/users', component: () => import('../views/UserListView.vue'), meta: { permission: 'users:view' } },
-  { path: '/users/:id', component: () => import('../views/UserDetailView.vue'), meta: { permission: 'users:view' } },
-  { path: '/categories', component: () => import('../views/CategoryListView.vue'), meta: { permission: 'categories:view' } },
-  { path: '/coupons', component: () => import('../views/CouponListView.vue'), meta: { permission: 'coupons:view' } },
-  { path: '/notifications', component: () => import('../views/NotificationView.vue'), meta: { permission: 'notifications:view' } },
-  { path: '/logs', component: () => import('../views/LogListView.vue'), meta: { permission: 'logs:view' } },
-  { path: '/settings', component: () => import('../views/SettingsView.vue'), meta: { permission: 'settings:view' } },
-  { path: '/roles', component: () => import('../views/RoleListView.vue'), meta: { permission: 'roles:view' } },
-  { path: '/forbidden', component: () => import('../views/ForbiddenView.vue'), meta: { staffOnly: true } },
+  { path: '/setup', component: () => import('../views/SetupView.vue'), meta: { public: true, title: '初始化' } },
+  { path: '/login', component: () => import('../views/LoginView.vue'), meta: { public: true, title: '登录' } },
+  { path: '/', component: () => import('../views/DashboardView.vue'), meta: { permission: 'stats:view', title: '仪表盘' } },
+  { path: '/products', component: () => import('../views/ProductListView.vue'), meta: { permission: 'products:view', title: '商品管理' } },
+  { path: '/products/new', component: () => import('../views/ProductFormView.vue'), meta: { permission: 'products:manage', title: '新建商品' } },
+  { path: '/products/:id/edit', component: () => import('../views/ProductFormView.vue'), meta: { permission: 'products:manage', title: '编辑商品' } },
+  { path: '/cards', component: () => import('../views/CardListView.vue'), meta: { permission: 'cards:view', title: '卡密管理' } },
+  { path: '/cards/:id', component: () => import('../views/CardListView.vue'), meta: { permission: 'cards:view', title: '卡密管理' } },
+  { path: '/orders', component: () => import('../views/OrderListView.vue'), meta: { permission: 'orders:view', title: '订单管理' } },
+  { path: '/orders/:orderNo', component: () => import('../views/OrderDetailView.vue'), meta: { permission: 'orders:view', title: '订单详情' } },
+  { path: '/users', component: () => import('../views/UserListView.vue'), meta: { permission: 'users:view', title: '用户管理' } },
+  { path: '/users/:id', component: () => import('../views/UserDetailView.vue'), meta: { permission: 'users:view', title: '用户详情' } },
+  { path: '/categories', component: () => import('../views/CategoryListView.vue'), meta: { permission: 'categories:view', title: '分类管理' } },
+  { path: '/coupons', component: () => import('../views/CouponListView.vue'), meta: { permission: 'coupons:view', title: '优惠券' } },
+  { path: '/notifications', component: () => import('../views/NotificationView.vue'), meta: { permission: 'notifications:view', title: '通知中心' } },
+  { path: '/logs', component: () => import('../views/LogListView.vue'), meta: { permission: 'logs:view', title: '审计日志' } },
+  { path: '/settings', component: () => import('../views/SettingsView.vue'), meta: { permission: 'settings:view', title: '系统设置' } },
+  { path: '/roles', component: () => import('../views/RoleListView.vue'), meta: { permission: 'roles:view', title: '角色权限' } },
+  { path: '/forbidden', component: () => import('../views/ForbiddenView.vue'), meta: { staffOnly: true, title: '无访问权限' } },
 ]
 
 const router = createRouter({ history: createWebHistory(import.meta.env.BASE_URL), routes })
@@ -46,9 +49,10 @@ router.onError((error, to) => {
 
 router.beforeEach(() => beginNavigation())
 
-router.afterEach(() => {
+router.afterEach((to) => {
   endNavigation()
   sessionStorage.removeItem('chunk-reload')
+  setPageTitle(typeof to.meta.title === 'string' ? to.meta.title : '')
 })
 
 function landing(permissions: string[], isSuper: boolean): string {

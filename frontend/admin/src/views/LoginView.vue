@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { errorMessage } from '../utils/format'
+import { shopInitials, shopLogo, shopName } from '../utils/identity'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 
@@ -46,8 +47,9 @@ async function submit() {
     </button>
 
     <div class="rise-in">
-      <div class="brand-mark mb-6">N</div>
-      <p class="eyebrow">Nodeloc Store</p>
+      <img v-if="shopLogo" :src="shopLogo" :alt="shopName" class="brand-mark mb-6 object-cover" />
+      <div v-else class="brand-mark mb-6">{{ shopInitials }}</div>
+      <p class="eyebrow">{{ shopName }}</p>
       <h1 class="mt-2 text-2xl font-bold">管理后台登录</h1>
       <p class="mt-2 text-sm muted">仅店铺成员（管理员、运营、客服）可进入，普通用户请在商店前台浏览下单。</p>
 

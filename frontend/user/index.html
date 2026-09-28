@@ -15,6 +15,10 @@
         localStorage.getItem('store-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
       var brand = localStorage.getItem('store-brand');
       if (brand && /^#[0-9a-f]{6}$/i.test(brand)) root.style.setProperty('--brand', brand);
+      // Same trick for the tab: a shop called 网卡小店 should not open as
+      // "Nodeloc Store" and then rename itself once the request lands.
+      var shop = localStorage.getItem('store-name');
+      if (shop) document.title = shop;
     </script>
     <style>
       /* Boot splash: the JS bundle and the first route chunk are the only thing

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { shopInitials, shopLogo, shopName } from '../utils/identity'
 
 defineProps<{ open: boolean }>()
 defineEmits(['close'])
@@ -75,9 +76,10 @@ const numbered = computed(() => {
     ]"
   >
     <RouterLink to="/" class="flex h-[68px] items-center gap-3 border-b border-[var(--stroke)] px-5" @click="$emit('close')">
-      <span class="brand-mark">N</span>
+      <img v-if="shopLogo" :src="shopLogo" :alt="shopName" class="brand-mark object-cover" />
+      <span v-else class="brand-mark">{{ shopInitials }}</span>
       <span class="min-w-0">
-        <span class="block truncate text-[14px] font-semibold">Nodeloc Store</span>
+        <span class="block truncate text-[14px] font-semibold">{{ shopName }}</span>
         <span class="hint block truncate">管理后台</span>
       </span>
     </RouterLink>

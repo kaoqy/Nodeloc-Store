@@ -7,6 +7,7 @@ import { createOrder, createPayment } from '../api/payment'
 import { errorMessage } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useSiteStore } from '../stores/site'
+import { setPageTitle } from '../utils/identity'
 import { money } from '../utils/format'
 import type { CouponQuote, Product } from '../types'
 
@@ -120,6 +121,8 @@ async function loadRelated(item: Product) {
 onMounted(async () => {
   try {
     product.value = await getProduct(String(route.params.slug))
+    // The tab says which goods the visitor is reading about, not just which shop.
+    setPageTitle(product.value?.name)
     if (product.value) void loadRelated(product.value)
   } catch (e) {
     error.value = errorMessage(e, '商品加载失败')

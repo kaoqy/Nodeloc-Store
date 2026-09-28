@@ -5,6 +5,7 @@ import { getRuntimeSettings, saveRuntimeSettings, testOAuth, testPayment } from 
 import type { FooterLink, RuntimeSettings } from '../types'
 import { errorMessage } from '../utils/format'
 import { applyBrand } from '../utils/brand'
+import { applyShopIdentity } from '../utils/identity'
 
 type Probe = { ok: boolean; text: string }
 
@@ -136,6 +137,9 @@ async function save() {
     // wears the new colour before it has asked the API anything.
     savedBrand.value = settings.theme.theme_primary
     applyBrand(savedBrand.value)
+    // Renaming the shop renames its browser tabs and its door plate, here and
+    // in the storefront.
+    applyShopIdentity(settings.app.site_name, settings.app.site_logo)
     message.value = '已保存，运行时配置已重建并立即生效'
     messageType.value = 'ok'
   } catch (err) {

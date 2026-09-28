@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { beginNavigation, endNavigation } from '../utils/progress'
+import { setPageTitle } from '../utils/identity'
 import HomeView from '../views/HomeView.vue'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
@@ -9,17 +10,20 @@ import OrderDetailView from '../views/OrderDetailView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import OAuthCallbackView from '../views/OAuthCallbackView.vue'
 
+// meta.title is the words this page puts in front of the shop's name on the
+// browser tab. The two detail screens leave it out and set it themselves once
+// they know which product or order the visitor opened.
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'home', component: HomeView },
-    { path: '/login', name: 'login', component: LoginView, meta: { guestOnly: true } },
-    { path: '/register', name: 'register', component: RegisterView, meta: { guestOnly: true } },
+    { path: '/login', name: 'login', component: LoginView, meta: { guestOnly: true, title: '登录' } },
+    { path: '/register', name: 'register', component: RegisterView, meta: { guestOnly: true, title: '注册' } },
     { path: '/products/:slug', name: 'product-detail', component: ProductDetailView },
-    { path: '/orders', name: 'orders', component: OrderListView, meta: { requiresAuth: true } },
+    { path: '/orders', name: 'orders', component: OrderListView, meta: { requiresAuth: true, title: '我的订单' } },
     { path: '/orders/:orderNo', name: 'order-detail', component: OrderDetailView, meta: { requiresAuth: true } },
-    { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true } },
-    { path: '/oauth/callback', name: 'oauth-callback', component: OAuthCallbackView },
+    { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true, title: '个人中心' } },
+    { path: '/oauth/callback', name: 'oauth-callback', component: OAuthCallbackView, meta: { title: '登录中' } },
   ],
   scrollBehavior: () => ({ top: 0 }),
 })
@@ -35,6 +39,11 @@ router.beforeEach((to) => {
   }
 })
 
-router.afterEach(() => endNavigation())
+router.afterEach((to) => {
+  endNavigation()
+  // Navigating clears the previous page's words: a product name that outlives
+  // its own route would sit on the tab until the next reload.
+  setPageTitle(typeof to.meta.title === 'string' ? to.meta.title : '')
+})
 
 export default router

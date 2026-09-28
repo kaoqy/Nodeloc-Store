@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createPayment, getOrder, reconcileMessage, reconcileOrder, reconcileRetryable } from '../api/payment'
 import { errorMessage } from '../api/client'
+import { setPageTitle } from '../utils/identity'
 import { fulfillmentStatus, money, orderStatus, paymentNotice, providerStatus, when } from '../utils/format'
 import type { Order } from '../types'
 
@@ -44,6 +45,9 @@ const awaitingDelivery = computed(() => isPaid.value && !delivered.value && orde
 async function load() {
   loading.value = true
   error.value = ''
+  // The order number is in the address already, so the tab can name this order
+  // before the request comes back — and it still does if 查单 repeats.
+  setPageTitle(`订单 ${String(route.params.orderNo)}`)
   try {
     order.value = await getOrder(String(route.params.orderNo))
   } catch (e) {

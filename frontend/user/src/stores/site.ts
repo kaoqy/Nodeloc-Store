@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { siteStatus } from '../api/system'
 import { applyBrand } from '../utils/brand'
+import { applyShopIdentity } from '../utils/identity'
 import type { FooterLink } from '../types'
 
 export const useSiteStore = defineStore('site', () => {
@@ -45,6 +46,9 @@ export const useSiteStore = defineStore('site', () => {
       // on <html lang>, which is what screen readers and CJK font fallback read.
       applyBrand(status.theme?.primary)
       if (status.theme?.locale) document.documentElement.lang = status.theme.locale
+      // The name and the summary are what the browser tab and a search result
+      // show, so they travel with the site identity rather than the page body.
+      applyShopIdentity(status.app?.name, status.app?.description)
     } catch {
       // The status endpoint is optional; the storefront still works without it.
     }

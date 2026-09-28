@@ -1,11 +1,12 @@
 import client from './client'
 import { applyBrand } from '../utils/brand'
+import { applyShopIdentity } from '../utils/identity'
 import type { DashboardStats, RuntimeSettings } from '../types'
 
 export interface SystemStatus {
   initialized: boolean
   version: string
-  app?: { name: string }
+  app?: { name: string; logo?: string }
   theme?: { primary?: string }
 }
 
@@ -16,8 +17,9 @@ export async function fetchStatus(): Promise<SystemStatus> {
   if (!res.ok) throw new Error(`status ${res.status}`)
   const status = (await res.json()) as SystemStatus
   // The router guard reads this before the first view renders, which makes it
-  // the earliest place the back office can learn the shop's own colour.
+  // the earliest place the back office can learn the shop's own colour and name.
   applyBrand(status.theme?.primary)
+  applyShopIdentity(status.app?.name, status.app?.logo)
   return status
 }
 
