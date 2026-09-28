@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/auth'
 import { getRuntimeSettings, saveRuntimeSettings, testOAuth, testPayment } from '../api/system'
 import type { FooterLink, RuntimeSettings } from '../types'
 import { errorMessage } from '../utils/format'
+import { applyBrand } from '../utils/brand'
 
 type Probe = { ok: boolean; text: string }
 
@@ -86,6 +87,16 @@ watch(
   },
 )
 
+// The picker repaints this page while it is being dragged. persist=false keeps
+// an unsaved preview out of the shared storage key, which is what the
+// storefront's boot splash reads; only a saved colour is allowed to claim that.
+watch(
+  () => settings.theme.theme_primary,
+  (value) => applyBrand(value, false),
+)
+
+const savedBrand = ref(settings.theme.theme_primary)
+
 function linkTargetValid(url: string) {
   const value = url.trim()
   if (!value) return false
@@ -105,6 +116,8 @@ async function load() {
     Object.assign(settings.theme, result.theme)
     stockThreshold.value = String(settings.features.stock_alert_threshold ?? 5)
     snapshot.value = JSON.stringify(settings)
+    // Remembered as the colour on file, so a save that fails can put it back.
+    savedBrand.value = settings.theme.theme_primary
   } catch (err) {
     message.value = errorMessage(err, '加载配置失败')
     messageType.value = 'err'
@@ -119,9 +132,17 @@ async function save() {
   try {
     await saveRuntimeSettings(JSON.parse(JSON.stringify(settings)))
     snapshot.value = JSON.stringify(settings)
+    // Committing writes the shared key, so even the storefront's boot splash
+    // wears the new colour before it has asked the API anything.
+    savedBrand.value = settings.theme.theme_primary
+    applyBrand(savedBrand.value)
     message.value = '已保存，运行时配置已重建并立即生效'
     messageType.value = 'ok'
   } catch (err) {
+    // The saved colour is still the truth, so the page puts on it again. The
+    // picker keeps the rejected choice: the save usually fails for a different
+    // field, and making the owner re-pick a hex would only lose their work.
+    applyBrand(savedBrand.value, false)
     message.value = errorMessage(err, '保存失败')
     messageType.value = 'err'
   } finally {
@@ -507,6 +528,9 @@ onMounted(load)
               <div>
                 <label class="label mb-0" for="theme-primary">主题色</label>
                 <p class="hint mt-0.5 mono">{{ settings.theme.theme_primary }}</p>
+                <p class="hint mt-1">
+                  前台、后台与登录页的按钮、链接、徽标都会跟着变色。拖动即可预览，保存后才对买家生效。
+                </p>
               </div>
               <input id="theme-primary" v-model="settings.theme.theme_primary" type="color" class="h-9 w-16 cursor-pointer rounded-lg border border-[var(--stroke)] bg-transparent" />
             </div>
@@ -517,6 +541,9 @@ onMounted(load)
                 <option value="zh-TW">繁體中文</option>
                 <option value="en">English</option>
               </select>
+              <p class="hint mt-1.5">
+                写进前台页面的 lang 属性：读屏软件与中日韩字形回退会跟着变，后台界面本身仍是简体中文。
+              </p>
             </div>
           </div>
         </div>

@@ -21,11 +21,15 @@
   --text-dim: #a3a7ae;
   --text-quiet: #6f747c;
 
-  --accent: #f2704a;
-  --accent-hi: #ff8763;
-  --accent-ink: #1a0d07;
-  --accent-soft: rgba(242, 112, 74, 0.14);
-  --accent-line: rgba(242, 112, 74, 0.34);
+  /* --brand is the shop's own colour, painted at runtime from 后台设置 · 外观.
+     Every accent token below mixes from it, so one hex recolours buttons,
+     focus rings, badges and the ambient glow without a rebuild. */
+  --brand: #f2704a;
+  --accent: var(--brand);
+  --accent-hi: color-mix(in srgb, var(--brand) 84%, white);
+  --accent-ink: color-mix(in srgb, var(--brand) 12%, black);
+  --accent-soft: color-mix(in srgb, var(--brand) 14%, transparent);
+  --accent-line: color-mix(in srgb, var(--brand) 34%, transparent);
   --on-accent: #fffaf7;
 
   --teal: #3ecfb2;
@@ -49,7 +53,7 @@
   --shadow-sm: 0 6px 18px -8px rgba(0, 0, 0, 0.55);
   --shadow-md: 0 18px 40px -18px rgba(0, 0, 0, 0.7);
   --shadow-lg: 0 30px 70px -28px rgba(0, 0, 0, 0.8);
-  --shadow-accent: 0 10px 26px -12px rgba(242, 112, 74, 0.55);
+  --shadow-accent: 0 10px 26px -12px color-mix(in srgb, var(--brand) 55%, transparent);
 
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --spring: cubic-bezier(0.32, 0.72, 0.24, 1);
@@ -60,7 +64,7 @@
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
   --grid-line: rgba(255, 255, 255, 0.028);
-  --glow: radial-gradient(48rem 32rem at 82% -6rem, rgba(242, 112, 74, 0.16), transparent 70%);
+  --glow: radial-gradient(48rem 32rem at 82% -6rem, color-mix(in srgb, var(--brand) 16%, transparent), transparent 70%);
 }
 
 html[data-theme='light'] {
@@ -81,11 +85,13 @@ html[data-theme='light'] {
   --text-dim: #575b62;
   --text-quiet: #8b8f97;
 
-  --accent: #cf4f26;
-  --accent-hi: #b8421d;
+  /* Light surfaces need the brand pressed deeper to hold contrast; hover goes
+     one step further down, mirroring how dark mode lifts it. */
+  --accent: color-mix(in srgb, var(--brand) 78%, #2b0f04);
+  --accent-hi: color-mix(in srgb, var(--brand) 62%, #2b0f04);
   --accent-ink: #fff6f2;
-  --accent-soft: rgba(207, 79, 38, 0.1);
-  --accent-line: rgba(207, 79, 38, 0.3);
+  --accent-soft: color-mix(in srgb, var(--brand) 10%, transparent);
+  --accent-line: color-mix(in srgb, var(--brand) 30%, transparent);
   --on-accent: #fff6f2;
 
   --teal: #12897a;
@@ -103,10 +109,10 @@ html[data-theme='light'] {
   --shadow-sm: 0 6px 18px -10px rgba(24, 22, 20, 0.16);
   --shadow-md: 0 18px 40px -22px rgba(24, 22, 20, 0.22);
   --shadow-lg: 0 30px 70px -34px rgba(24, 22, 20, 0.3);
-  --shadow-accent: 0 10px 26px -14px rgba(207, 79, 38, 0.4);
+  --shadow-accent: 0 10px 26px -14px color-mix(in srgb, var(--brand) 40%, transparent);
 
   --grid-line: rgba(26, 24, 21, 0.045);
-  --glow: radial-gradient(48rem 32rem at 82% -6rem, rgba(207, 79, 38, 0.1), transparent 70%);
+  --glow: radial-gradient(48rem 32rem at 82% -6rem, color-mix(in srgb, var(--brand) 10%, transparent), transparent 70%);
 }
 
 /* ── Base ───────────────────────────────────────────────────── */
@@ -218,7 +224,7 @@ html[data-theme='light'] {
   .btn:active { transform: translateY(1px); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-  .btn-primary { background: var(--accent); color: #fffaf7; box-shadow: var(--shadow-accent); }
+  .btn-primary { background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow-accent); }
   .btn-primary:hover:not(:disabled) { background: var(--accent-hi); }
   .btn-secondary {
     background: var(--surface-hi);
@@ -341,8 +347,8 @@ html[data-theme='light'] {
     width: 34px;
     height: 34px;
     border-radius: 10px;
-    background: linear-gradient(150deg, var(--accent-hi), var(--accent) 60%, #c8481f);
-    color: #fff;
+    background: linear-gradient(150deg, var(--accent-hi), var(--accent) 60%, color-mix(in srgb, var(--brand) 72%, #2b0f04));
+    color: var(--on-accent);
     font-weight: 800;
     font-size: 15px;
     box-shadow: var(--shadow-accent);

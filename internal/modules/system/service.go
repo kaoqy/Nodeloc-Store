@@ -112,6 +112,11 @@ func (s *Service) Status() map[string]any {
 				"checkin":      rt.Features.CheckinEnabled(),
 				"coupons":      rt.Features.CouponsEnabled(),
 			}
+			// Both SPAs recolour from this: style.css derives every accent token
+			// from --brand, so one hex repaints buttons, focus rings and glow.
+			// The locale only labels the storefront, whose own copy stays
+			// Simplified in the back office.
+			status["theme"] = map[string]any{"primary": rt.Theme.Primary, "locale": rt.Theme.Locale}
 		}
 		status["app"] = app
 	}
@@ -241,6 +246,9 @@ func (s *Service) runInstall(req InstallRequest) (*gorm.DB, error) {
 	rt.OAuth.Enabled = true
 	rt.Payment.Enabled = req.Payment.PaymentID != "" && req.Payment.Token != "" && req.Payment.SecretKey != ""
 	rt.MergeDefaults()
+	// The wizard's fields are as user-typed as the settings page's, so they go
+	// through the same bounds and colour checks before they are stored.
+	rt.Normalize()
 	rt.OAuth.RedirectURI = strings.TrimSpace(rt.OAuth.RedirectURI)
 	if rt.OAuth.RedirectURI == "" {
 		rt.OAuth.RedirectURI = rt.RedirectURI()
@@ -405,7 +413,8 @@ func (s *Service) RoleHeadcounts() (map[string]int64, error) {
 	return counts, nil
 }
 
-func (s *Service) claimInstalling() bool {	s.mu.Lock()
+func (s *Service) claimInstalling() bool {
+	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.installing {
 		return false

@@ -20,6 +20,7 @@
 - 🎁 **用户运营** — 每日签到、连续签到奖励、积分流水、站点公告与客服信息；个人中心可改昵称/简介/联系邮箱、从 NodeLoc 同步头像、绑定或换绑 NodeLoc 身份
 - 📊 **Admin 后台** — 概览看板（趋势图、订单结构、热销商品、买家排行、库存预警、优惠码成效、卡密健康、买家活跃）、商品/卡密/订单/用户/通知管理、操作审计日志、退款
 - 🧭 **店招与页脚** — 后台直接编辑商店名称、Logo、公告、页脚文案与最多 8 条页脚链接，保存后前台立即生效
+- 🎨 **商店主题** — 「外观」里的一个主题色会同时染色前台、后台与登录页（按钮、链接、徽标、聚焦圈与光晕按深/浅色各算一档），默认语言写进前台页面的 `lang`；改色不需要重新构建镜像
 - 🛠️ **OpenResty 反代** — 适合用 OpenResty 跑其他服务、复用现有 vhost 的部署场景
 - 🔒 **安全** — bcrypt 密码哈希、回调 HMAC 验签、Casbin RBAC、操作审计日志
 
@@ -291,7 +292,7 @@ sudo openresty -t && sudo openresty -s reload
 
 | 分组 | 路由 | 需要的授权 |
 |---|---|---|
-| 商店状态 | `GET /system/status`（公开） | — 返回安装状态、商店名/Logo/公告/页脚文案与链接，以及注册、签到、优惠码三个开关 |
+| 商店状态 | `GET /system/status`（公开） | — 返回安装状态、商店名/Logo/公告/页脚文案与链接、注册/签到/优惠码三个开关，以及 `theme`（`primary` 主题色、`locale` 前台语言），两端界面据此上色 |
 | | `POST /system/install`（公开，仅未安装时可用） | — |
 | 会话 | `POST /auth/register`、`POST /auth/login`、`POST /auth/logout`、`POST /auth/refresh` | 登录（refresh 用 refresh_token 换新的 access/refresh 对） |
 | | `GET /auth/oauth/initiate`、`GET /auth/oauth/callback`（公开） | — 见 2.3 |

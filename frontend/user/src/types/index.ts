@@ -191,4 +191,8 @@ export interface SiteStatus {
     checkin?: boolean
     coupons?: boolean
   }
+  theme?: {
+    primary?: string
+    locale?: string
+  }
 }

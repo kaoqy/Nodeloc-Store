@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { siteStatus } from '../api/system'
+import { applyBrand } from '../utils/brand'
 import type { FooterLink } from '../types'
 
 export const useSiteStore = defineStore('site', () => {
@@ -39,6 +40,11 @@ export const useSiteStore = defineStore('site', () => {
         checkinEnabled.value = status.features.checkin !== false
         couponsEnabled.value = status.features.coupons !== false
       }
+      // The owner's chosen colour is style, not copy: it repaints the tokens in
+      // style.css and is remembered for the next boot splash. The locale rides
+      // on <html lang>, which is what screen readers and CJK font fallback read.
+      applyBrand(status.theme?.primary)
+      if (status.theme?.locale) document.documentElement.lang = status.theme.locale
     } catch {
       // The status endpoint is optional; the storefront still works without it.
     }

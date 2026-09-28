@@ -1,10 +1,12 @@
 import client from './client'
+import { applyBrand } from '../utils/brand'
 import type { DashboardStats, RuntimeSettings } from '../types'
 
 export interface SystemStatus {
   initialized: boolean
   version: string
   app?: { name: string }
+  theme?: { primary?: string }
 }
 
 // Raw axios-free fetch: setup endpoints must not be intercepted (no token
@@ -12,7 +14,11 @@ export interface SystemStatus {
 export async function fetchStatus(): Promise<SystemStatus> {
   const res = await fetch('/api/v1/system/status', { headers: { Accept: 'application/json' } })
   if (!res.ok) throw new Error(`status ${res.status}`)
-  return res.json()
+  const status = (await res.json()) as SystemStatus
+  // The router guard reads this before the first view renders, which makes it
+  // the earliest place the back office can learn the shop's own colour.
+  applyBrand(status.theme?.primary)
+  return status
 }
 
 let cachedUninitialized: boolean | null = null

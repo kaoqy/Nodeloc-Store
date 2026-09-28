@@ -5,6 +5,7 @@
 package system
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
@@ -92,6 +93,24 @@ type ThemeConfig struct {
 	Locale  string `json:"default_locale"`
 }
 
+// defaultAccent is the wizard's starting swatch, and what a malformed stored
+// colour falls back to.
+const defaultAccent = "#f2704a"
+
+// hexColor is deliberately stricter than CSS: no #rgb shorthand, no colour
+// names. The value lands inside a style sheet, so the narrower the gate the
+// less room a typo has to turn into a declaration.
+var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// defaultLocale is what a storefront with no opinion about language says, and
+// what a malformed stored tag falls back to.
+const defaultLocale = "zh-CN"
+
+// localeTag accepts a plain BCP 47 primary tag with optional subtags, which is
+// everything the settings page offers and nothing that can smuggle markup into
+// the document element's lang attribute.
+var localeTag = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})*$`)
+
 // Redacted is returned in place of secret values; sending it back keeps the
 // stored value untouched.
 const Redacted = "********"
@@ -112,7 +131,7 @@ func Default() *RuntimeConfig {
 		},
 		Payment:  PaymentConfig{Enabled: true},
 		Features: FeaturesConfig{RegistrationEnabled: true, Checkin: &yes, Coupons: &yes, StockAlertThreshold: &threshold},
-		Theme:    ThemeConfig{Primary: "#f2704a", Locale: "zh-CN"},
+		Theme:    ThemeConfig{Primary: defaultAccent, Locale: defaultLocale},
 	}
 }
 
@@ -158,6 +177,20 @@ func (r *RuntimeConfig) Normalize() {
 	r.App.FooterText = trimRunes(r.App.FooterText, 300)
 	r.App.FooterNote = trimRunes(r.App.FooterNote, 120)
 	r.App.Announcement = trimRunes(r.App.Announcement, 200)
+
+	primary := strings.TrimSpace(r.Theme.Primary)
+	if !hexColor.MatchString(primary) {
+		primary = defaultAccent
+	}
+	// The storefront writes this straight into a CSS custom property, so it is
+	// the one setting that reaches the browser as style rather than as text.
+	r.Theme.Primary = strings.ToLower(primary)
+
+	locale := strings.TrimSpace(r.Theme.Locale)
+	if !localeTag.MatchString(locale) {
+		locale = defaultLocale
+	}
+	r.Theme.Locale = locale
 
 	links := make([]FooterLink, 0, len(r.App.FooterLinks))
 	for _, link := range r.App.FooterLinks {
