@@ -11,6 +11,7 @@ import {
   syncOAuthProfile,
   unbindOAuth,
   updateProfile,
+  uploadAvatar,
 } from '../api/auth'
 import { errorMessage } from '../api/client'
 import { listNotifications, markNotificationRead } from '../api/notifications'
@@ -41,6 +42,8 @@ const unread = ref(0)
 const editing = ref(false)
 const form = ref({ nickname: '', avatar_url: '', bio: '', email: '' })
 const savingProfile = ref(false)
+const avatarInput = ref<HTMLInputElement | null>(null)
+const uploadingAvatar = ref(false)
 
 const user = computed(() => auth.user)
 const bound = computed(() => Boolean(user.value?.oauth_provider))
@@ -155,6 +158,32 @@ async function saveProfile() {
     error.value = errorMessage(e, '资料保存失败，请稍后重试')
   } finally {
     savingProfile.value = false
+  }
+}
+
+// An avatar is applied as it is uploaded, not when the form is saved: the shop
+// drops the picture this one replaces, so a half-finished form must not leave a
+// file on disk that no account points at.
+async function chooseAvatar(event: Event) {
+  const input = event.target as HTMLInputElement
+  const picked = input.files?.[0]
+  // Cleared so choosing the same file again after a refusal still counts as a
+  // change, and so the field never shows a name it did not keep.
+  input.value = ''
+  if (!picked || uploadingAvatar.value) return
+
+  uploadingAvatar.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const result = await uploadAvatar(picked)
+    auth.user = result.user
+    form.value.avatar_url = result.url
+    message.value = '头像已更新。'
+  } catch (e) {
+    error.value = errorMessage(e, '头像上传失败，请稍后重试')
+  } finally {
+    uploadingAvatar.value = false
   }
 }
 
@@ -280,8 +309,15 @@ onMounted(async () => {
             {{ user.bio }}
           </p>
         </div>
-        <button v-if="!editing" class="btn btn-quiet btn-sm shrink-0" @click="startEditing">编辑资料</button>
+        <div v-if="!editing" class="flex shrink-0 flex-col items-end gap-2">
+          <button class="btn btn-quiet btn-sm" @click="startEditing">编辑资料</button>
+          <button class="btn btn-quiet btn-sm" :disabled="uploadingAvatar" @click="avatarInput?.click()">
+            {{ uploadingAvatar ? '上传中…' : '换头像' }}
+          </button>
+        </div>
       </div>
+
+      <input ref="avatarInput" type="file" accept="image/png,image/jpeg,image/gif" class="hidden" @change="chooseAvatar" />
 
       <div class="my-5 divider" />
 
@@ -311,7 +347,19 @@ onMounted(async () => {
         </div>
         <div>
           <label class="label" for="avatar">头像地址</label>
-          <input id="avatar" v-model="form.avatar_url" class="input" maxlength="255" placeholder="https://…（留空则使用 NodeLoc 头像）" />
+          <div class="flex items-center gap-2">
+            <input
+              id="avatar"
+              v-model="form.avatar_url"
+              class="input"
+              maxlength="255"
+              placeholder="https://…（留空则使用 NodeLoc 头像）"
+            />
+            <button class="btn btn-secondary btn-sm shrink-0" :disabled="uploadingAvatar" @click="avatarInput?.click()">
+              {{ uploadingAvatar ? '上传中…' : '上传' }}
+            </button>
+          </div>
+          <p class="hint mt-1">上传的图片会立刻换上，旧的头像随即丢弃；这里也可以填一个外部图片地址，保存后生效。</p>
         </div>
         <div>
           <label class="label" for="email">邮箱</label>

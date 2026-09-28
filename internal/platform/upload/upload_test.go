@@ -137,3 +137,48 @@ func TestStoreWritesOnlyInsideItsOwnDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Replacing a picture deletes the bytes it replaced — and only those. An address
+// from another folder, an address that is not this store's own shape, or one
+// carrying a path of its own is refused, so the caller cannot aim a delete at
+// the rest of the filesystem.
+func TestRemoveTakesBackOnlyWhatItGave(t *testing.T) {
+	root := t.TempDir()
+	avatars := New(root, "avatars")
+	covers := New(root, "covers")
+
+	kept, err := avatars.Save(picture(t, "png", 3, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "avatars", filepath.Base(kept.URL))); err != nil {
+		t.Fatal(err)
+	}
+	other, err := covers.Save(picture(t, "gif", 2, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, refused := range []string{
+		"", other.URL, "/uploads/avatars", "/uploads/avatars/", "/uploads/avatars/../covers/x.png",
+		"/uploads/avatars/sub/deep.png", "/uploads/avatars/notes.txt", "https://cdn/avatars/x.png",
+		"/uploads/avatars/..",
+	} {
+		if avatars.Remove(refused) {
+			t.Fatalf("Remove accepted %q", refused)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "covers", filepath.Base(other.URL))); err != nil {
+		t.Fatalf("a refused delete still took a file away: %v", err)
+	}
+
+	if !avatars.Remove(kept.URL) {
+		t.Fatal("Remove refused the address it handed out")
+	}
+	if _, err := os.Stat(filepath.Join(root, "avatars", filepath.Base(kept.URL))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the replaced picture is still on disk: %v", err)
+	}
+	if avatars.Remove(kept.URL) {
+		t.Fatal("Remove reported success for a file that was already gone")
+	}
+}

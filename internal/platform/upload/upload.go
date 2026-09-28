@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	// The three formats a browser can be handed without a second thought. A
@@ -126,4 +127,27 @@ func uniqueName(ext string) (string, error) {
 	}
 	stamp := time.Now().UTC().Format("20060102-150405")
 	return stamp + "-" + hex.EncodeToString(random[:]) + ext, nil
+}
+
+// Remove deletes a file this store wrote, given back the address it handed out.
+// It is asked for only when a picture is being replaced — a buyer's new avatar
+// makes the old one garbage — so the uploads tree does not grow one file per
+// upload forever. An address from another folder, or one carrying any path of
+// its own, is refused rather than resolved: the caller has no say in what gets
+// deleted.
+func (s *Store) Remove(url string) bool {
+	name, ok := strings.CutPrefix(url, "/uploads/"+s.scope+"/")
+	if !ok || name == "" || strings.ContainsRune(name, '/') || strings.ContainsRune(name, '\\') || strings.Contains(name, "..") {
+		return false
+	}
+	kept := false
+	for _, ext := range extensions {
+		if strings.HasSuffix(name, ext) {
+			kept = true
+		}
+	}
+	if !kept {
+		return false
+	}
+	return os.Remove(filepath.Join(s.root, s.scope, name)) == nil
 }

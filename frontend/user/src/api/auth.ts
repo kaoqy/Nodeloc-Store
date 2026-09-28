@@ -51,6 +51,18 @@ export async function updateProfile(payload: {
   return data.user
 }
 
+/**
+ * A buyer's own picture, kept by the shop. The server names the file, points the
+ * account at it and drops the avatar this one replaces, so the response carries
+ * the whole updated account rather than just an address to paste somewhere.
+ */
+export async function uploadAvatar(file: File) {
+  const form = new FormData()
+  form.append('image', file)
+  const { data } = await client.post<{ user: User; url: string }>('/auth/me/avatar', form)
+  return data
+}
+
 export async function myPermissions() {
   const { data } = await client.get<MyPermissions>('/auth/me/permissions')
   return data

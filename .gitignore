@@ -16,6 +16,8 @@ uploads/products/*
 !uploads/products/.gitkeep
 # What the back office writes: product covers and site images such as the Logo.
 uploads/site/*
+# What buyers write about themselves: one avatar each, the old one deleted.
+uploads/avatars/*
 
 # Env / secrets
 .env
