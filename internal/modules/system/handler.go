@@ -57,11 +57,18 @@ func (h *Handler) ListPermissions(c *gin.Context) {
 // the editor refuses to write to that role.
 func (h *Handler) ListRoles(c *gin.Context) {
 	permissions := authz.RolePermissions()
+	headcounts, err := h.service.RoleHeadcounts()
+	if err != nil {
+		// The matrix is still worth showing without the counts.
+		log.Printf("[system] role headcounts: %v", err)
+		headcounts = nil
+	}
 	type roleRow struct {
 		Role        string   `json:"role"`
 		Label       string   `json:"label"`
 		Editable    bool     `json:"editable"`
 		Permissions []string `json:"permissions"`
+		UserCount   int64    `json:"user_count"`
 	}
 	rows := make([]roleRow, 0, len(authz.Roles))
 	for _, role := range authz.Roles {
@@ -77,6 +84,7 @@ func (h *Handler) ListRoles(c *gin.Context) {
 			Label:       roleLabel(role),
 			Editable:    role != "super_admin",
 			Permissions: granted,
+			UserCount:   headcounts[role],
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": rows})

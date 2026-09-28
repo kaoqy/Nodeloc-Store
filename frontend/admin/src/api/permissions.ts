@@ -11,6 +11,8 @@ export interface RoleRow {
   label: string
   editable: boolean
   permissions: string[]
+  // How many accounts hold this role, so an edit shows its blast radius.
+  user_count?: number
 }
 
 export const listPermissions = () =>

@@ -334,9 +334,9 @@ func closeDB(db *gorm.DB) {
 // The wizard used to hand the owner 管理员, and this application deliberately
 // lets only a super_admin grant 管理员 or move a staff account's role: an
 // install from before the change had no account that could ever add a second
-// admin. Promoting the oldest 管理员 closes that hole; as soon as a
-// super_admin exists the check reads the count and stops touching roles, so it
-// is safe to run on every boot and never overrides a deliberate demotion.
+// admin. Promoting the oldest 管理员 closes that hole; as long as some
+// super_admin is still around the check only reads the count and leaves every
+// role alone, so it never undoes a deliberate change while the shop has an owner.
 func EnsureOwnerRole(db *gorm.DB) error {
 	if db == nil {
 		return nil
@@ -373,8 +373,39 @@ func EnsureOwnerRole(db *gorm.DB) error {
 	return nil
 }
 
-func (s *Service) claimInstalling() bool {
+// RoleHeadcounts is how many accounts sit in each role. The role editor shows
+// it before someone saves a matrix: 客服 has 4 accounts, so switching off
+// orders:view is a change that reaches four people on their next click.
+func (s *Service) RoleHeadcounts() (map[string]int64, error) {
 	s.mu.Lock()
+	db := s.db
+	s.mu.Unlock()
+	if db == nil {
+		return nil, nil
+	}
+	var rows []struct {
+		Role  string
+		Total int64
+	}
+	if err := db.Model(&models.User{}).
+		Select("role, COUNT(*) AS total").
+		Group("role").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int64, len(rows))
+	for _, item := range rows {
+		role := strings.TrimSpace(item.Role)
+		if role == "" {
+			// Accounts seeded before roles existed are plain buyers.
+			role = "user"
+		}
+		counts[role] += item.Total
+	}
+	return counts, nil
+}
+
+func (s *Service) claimInstalling() bool {	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.installing {
 		return false

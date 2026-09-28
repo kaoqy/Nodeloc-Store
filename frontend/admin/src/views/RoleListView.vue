@@ -102,7 +102,7 @@ async function save(role: RoleRow) {
     const index = roles.value.findIndex((item) => item.role === result.role)
     if (index >= 0) roles.value[index] = { ...roles.value[index], permissions: result.permissions ?? [] }
     hydrate()
-    notice.value = `已保存「${role.label}」的权限，成员下一次请求即生效。`
+    notice.value = `已保存「${role.label}」的权限，${role.user_count ? role.user_count + ' 个成员' : '该角色成员'}下一次请求即生效。`
   } catch (err) {
     error.value = errorMessage(err, '保存角色权限失败')
   } finally {
@@ -143,7 +143,9 @@ onMounted(load)
         >
           <span class="min-w-0">
             <span class="block text-sm font-semibold">{{ role.label }}</span>
-            <span class="mono quiet block truncate text-xs">{{ role.role }}</span>
+            <span class="mono quiet block truncate text-xs">
+              {{ role.role }}{{ role.user_count ? ' · ' + role.user_count + ' 个账号' : ' · 暂无人使用' }}
+            </span>
           </span>
           <span class="ml-auto flex items-center gap-2">
             <span v-if="!role.editable" class="badge badge-info">全部权限</span>
@@ -159,6 +161,11 @@ onMounted(load)
           </p>
 
           <div v-else class="grid gap-2 sm:grid-cols-2">
+            <p class="quiet col-span-full -mt-1 text-xs">
+              {{ role.user_count
+                ? '保存后，该角色下 ' + role.user_count + ' 个账号的下一次请求即按新权限执行。'
+                : '当前没有账号使用该角色，改动不会影响任何人。' }}
+            </p>
             <div
               v-for="group in groups"
               :key="group.resource"

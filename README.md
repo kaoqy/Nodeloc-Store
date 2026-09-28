@@ -16,7 +16,7 @@
 - 💰 **Nodeloc Payments** — 所有订单统一走 Nodeloc Payments，支持多种回调参数、HMAC-SHA256 验签和幂等履约
 - 🚚 **统一履约** — 卡密自动发货、缺货等待补货、人工交付、交付内容与备注、用户侧履约状态查询
 - 🏷️ **促销与优惠码** — 百分比/固定金额两种码，全场/指定商品/指定分类三种范围，生效窗口、最低消费、总量限用、每人限用；下单前可先试算，折扣直接参与 NodeLoc 收款金额
-- 👥 **角色权限** — 超级管理员、管理员、运营、客服和普通用户五级角色，后台按 11 项资源 × 查看/管理逐项授权，权限矩阵由服务端目录驱动，越权的按钮不会出现在页面上
+- 👥 **角色权限** — 超级管理员、管理员、运营、客服和普通用户五级角色，后台按 11 项资源 × 查看/管理逐项授权，权限矩阵由服务端目录驱动，每个角色标注当前账号数，越权的按钮不会出现在页面上
 - 🎁 **用户运营** — 每日签到、连续签到奖励、积分流水、站点公告与客服信息；个人中心可改昵称/简介/联系邮箱、从 NodeLoc 同步头像、绑定或换绑 NodeLoc 身份
 - 📊 **Admin 后台** — 概览看板（趋势图、订单结构、热销商品、买家排行、库存预警、优惠码成效、卡密健康、买家活跃）、商品/卡密/订单/用户/通知管理、操作审计日志、退款
 - 🧭 **店招与页脚** — 后台直接编辑商店名称、Logo、公告、页脚文案与最多 8 条页脚链接，保存后前台立即生效
@@ -324,7 +324,7 @@ sudo openresty -t && sudo openresty -s reload
 | 看板与设置 | `GET /admin/stats` | `stats:view` 概览全部面板（含上期对比、优惠码成效、卡密健康）都走这一个接口 |
 | | `GET /admin/settings` | `settings:view` 密钥以 `********` 回显，原样提交即保留原值 |
 | | `PUT` / `POST /admin/settings`、`POST /admin/settings/oauth-test`、`/payment-test` | `settings:manage` |
-| 权限目录 | `GET /admin/permissions`、`GET /admin/roles` | `roles:view` 目录由服务端给出，前端不写死资源清单 |
+| 权限目录 | `GET /admin/permissions`、`GET /admin/roles` | `roles:view` 目录由服务端给出，前端不写死资源清单；角色行里的 `user_count` 是该角色当前的账号数，保存前能看清改动影响到谁 |
 | | `PUT /admin/roles/:role/permissions` | `roles:manage` `super_admin` 拒绝被修改，避免店家把自己锁在门外 |
 | 审计 | `GET /admin/audit-logs` | `logs:view` |
 
