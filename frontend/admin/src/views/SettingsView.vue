@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { getRuntimeSettings, saveRuntimeSettings, testOAuth, testPayment } from '../api/system'
 import type { FooterLink, RuntimeSettings } from '../types'
+import ImageField from '../components/ImageField.vue'
 import { errorMessage } from '../utils/format'
 import { applyBrand } from '../utils/brand'
 import { applyShopIdentity } from '../utils/identity'
@@ -254,10 +255,15 @@ onMounted(load)
               </div>
             </div>
             <div class="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label class="label" for="site-logo">Logo 地址</label>
-                <input id="site-logo" v-model="settings.app.site_logo" class="input" placeholder="留空则使用内置标识" />
-              </div>
+              <ImageField
+                v-model="settings.app.site_logo"
+                input-id="site-logo"
+                label="Logo 地址"
+                placeholder="留空则使用内置标识"
+                scope="site"
+                preview
+                :disabled="!canManage"
+              />
               <div>
                 <label class="label" for="site-desc">网站描述</label>
                 <input id="site-desc" v-model="settings.app.site_description" class="input" />

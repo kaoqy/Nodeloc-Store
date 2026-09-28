@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createProduct, getProduct, updateProduct } from '../api/products'
 import { listCategories } from '../api/categories'
+import ImageField from '../components/ImageField.vue'
 import { errorMessage } from '../utils/format'
 import type { Category, Product } from '../types'
 
@@ -277,7 +278,7 @@ onMounted(load)
 
         <div class="card">
           <h3 class="mb-4 text-sm font-semibold">封面图</h3>
-          <input v-model="form.image_path" class="input mono text-xs" placeholder="https://… 或 /uploads/…" />
+          <ImageField v-model="form.image_path" />
           <img
             v-if="form.image_path"
             :src="form.image_path"

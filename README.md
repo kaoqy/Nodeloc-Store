@@ -24,6 +24,7 @@
 - 🔖 **浏览器标签页** — 商店名称就是标签页标题（商品页写成「商品名 · 店名」，订单页写成「订单号 · 店名」，后台写成「页面 · 店名 管理后台」），「网站描述」写进页面的 `description`，后台侧栏与登录页的门牌也用商店名称与 Logo
 - 🖼️ **站点图标** — 「Logo 地址」就是浏览器标签页图标（前台与后台各有一份内置图标兜底），留空即回落到内置标识；只有 http(s)、本站相对路径或 `data:image/…` 能作为图标来源，其它协议的值会被服务端直接丢弃
 - 📣 **不跑 JS 也认得你的店** — 商店名称、「网站描述」、Logo 与默认语言由 Go 在返回 `index.html` 时就写进文档，并补齐 `og:title` / `og:description` / `og:image` 与 `twitter:card`：搜索引擎、论坛分享卡片和标签页首帧用的都是店家自己的文案，而不是构建产物里的默认值。相对路径的 Logo 会按当前访问的域名补全成绝对地址（`data:` 内联图标只作图标，不作为卡片图），管理后台的文档带 `robots: noindex`，且所有 HTML 一律 `no-cache`，改完刷新即生效
+- 📷 **图片是上传的，不是抄路径的** — 后台的「封面图」和「Logo 地址」带上传按钮，选好文件就自动填回 `/uploads/…` 地址，不必登进服务器往数据卷里塞文件。服务端只认 png / jpg / gif（按文件头判断，改名的脚本会被拒；SVG 能带脚本，所以不收），单张不超过 2 MB 与 8192 px，文件名一律由服务端生成，两个上传入口分别挂在 `products:manage` 与 `settings:manage` 上——运营能换商品封面，却改不了店面招牌
 - 🛠️ **OpenResty 反代** — 适合用 OpenResty 跑其他服务、复用现有 vhost 的部署场景
 - 🔒 **安全** — bcrypt 密码哈希、回调 HMAC 验签、Casbin RBAC、操作审计日志
 
@@ -268,7 +269,7 @@ server {
 sudo openresty -t && sudo openresty -s reload
 ```
 
-> 商店无需在 nginx 里挂静态资源：页面、CSS/JS、图片都由容器内的服务直接吐出。数据卷 `./data:/app/data` 保存 SQLite 库与初始化配置，`./uploads:/app/uploads` 存放商品图片等持久文件——把图片放进宿主机的 `./uploads/`，在后台商品表单的「图片路径」里填 `/uploads/文件名` 即可（应用本身不提供上传接口）。
+> 商店无需在 nginx 里挂静态资源：页面、CSS/JS、图片都由容器内的服务直接吐出。数据卷 `./data:/app/data` 保存 SQLite 库与初始化配置，`./uploads:/app/uploads` 存放图片：后台的「封面图」和「Logo 地址」都带上传按钮，选好文件就自动填好 `/uploads/...` 地址，不必登进服务器。仍然想自己放文件也可以——写进宿主机的 `./uploads/`，在表单里手填地址即可。
 
 ### Step 5 · 应用内初始化向导
 
@@ -328,6 +329,7 @@ sudo openresty -t && sudo openresty -s reload
 | 看板与设置 | `GET /admin/stats` | `stats:view` 概览全部面板（含上期对比、优惠码成效、卡密健康）都走这一个接口 |
 | | `GET /admin/settings` | `settings:view` 密钥以 `********` 回显，原样提交即保留原值 |
 | | `PUT` / `POST /admin/settings`、`POST /admin/settings/oauth-test`、`/payment-test` | `settings:manage` |
+| 图片素材 | `POST /admin/uploads/products`、`POST /admin/uploads/site` | `products:manage` / `settings:manage` 表单字段名 `image`。类型看文件头而不是扩展名，只收 png / jpg / gif（SVG 会被拒——那是一段有时会画图的脚本）；单张 2 MB、边长 8192 px 以内，超了分别 `413` / `400`。文件名由服务端生成，返回 `{url,width,height,size}`，`url` 就是「封面图」或「Logo 地址」该填的内容 |
 | 权限目录 | `GET /admin/permissions`、`GET /admin/roles` | `roles:view` 目录由服务端给出，前端不写死资源清单；角色行里的 `user_count` 是该角色当前的账号数，保存前能看清改动影响到谁 |
 | | `PUT /admin/roles/:role/permissions` | `roles:manage` `super_admin` 拒绝被修改，避免店家把自己锁在门外 |
 | 审计 | `GET /admin/audit-logs` | `logs:view` |
@@ -391,12 +393,16 @@ cd frontend/admin && npx vue-tsc --noEmit          # 前端类型检查
 
 ```
 Nodeloc-Store/
-├── cmd/server/            # Go 入口（swapHandler 热重建 + SPA 静态托管 + 文档头部改写）
+├── cmd/server/            # Go 入口（swapHandler 热重建 + SPA 静态托管 + 文档头部改写 + 上传路由）
 ├── internal/
 │   ├── config/            # 默认值 + data/bootstrap.json（驱动/DSN/端口/JWT）
 │   ├── app/container/     # 依赖装配
+│   ├── app/httpserver/    # JWT、Casbin 授权中间件、审计
 │   ├── authz/             # Casbin RBAC
 │   ├── models/            # 共享 GORM 模型与迁移
+│   ├── platform/
+│   │   ├── database/      # SQLite / MySQL 接入
+│   │   └── upload/        # 后台图片：认字节、限大小、由服务端命名
 │   └── modules/           # identity / payment / catalog / notification / audit
 │       └── system/        # 应用内初始化：status / install / settings / 连通测试
 ├── frontend/user/         # 商店 SPA（Vue3 + Tailwind，挂在 /）
