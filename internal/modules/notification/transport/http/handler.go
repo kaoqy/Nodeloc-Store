@@ -25,6 +25,10 @@ func (h *Handler) RegisterRoutes(engine gin.IRouter, jwtConfig *config.JWTConfig
 	api.Use(middleware.JWTMiddleware(jwtConfig))
 	api.GET("/notifications", h.List)
 	api.POST("/notifications", guard, h.Send)
+	// The two inbox-wide routes are registered before /notifications/:id/read so
+	// the address bar of a buyer's inbox has a count and a one-click clear.
+	api.GET("/notifications/unread", h.UnreadCount)
+	api.POST("/notifications/read-all", h.MarkAllRead)
 	api.POST("/notifications/:id/read", h.MarkAsRead)
 	api.POST("/admin/notifications/broadcast", guard, h.Broadcast)
 }
@@ -114,6 +118,37 @@ func (h *Handler) MarkAsRead(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "is_read": true})
+}
+
+// UnreadCount answers the header badge: how many messages this buyer has not
+// opened yet.
+func (h *Handler) UnreadCount(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		unauthorized(c)
+		return
+	}
+	unread, err := h.service.CountUnread(c.Request.Context(), userID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"unread": unread})
+}
+
+// MarkAllRead clears the whole inbox with one click.
+func (h *Handler) MarkAllRead(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		unauthorized(c)
+		return
+	}
+	updated, err := h.service.MarkAllRead(c.Request.Context(), userID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"unread": 0, "marked": updated})
 }
 
 func (h *Handler) Broadcast(c *gin.Context) {

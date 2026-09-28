@@ -14,8 +14,9 @@ import {
   uploadAvatar,
 } from '../api/auth'
 import { errorMessage } from '../api/client'
-import { listNotifications, markNotificationRead } from '../api/notifications'
+import { listNotifications, markAllRead, markNotificationRead } from '../api/notifications'
 import { useAuthStore } from '../stores/auth'
+import { useInboxStore } from '../stores/inbox'
 import { useSiteStore } from '../stores/site'
 import { oauthErrorText, when } from '../utils/format'
 import type { AppNotification, CheckinRecord, CheckinStatus, PointEntry } from '../types'
@@ -24,6 +25,7 @@ const POINTS_PAGE = 20
 
 const auth = useAuthStore()
 const site = useSiteStore()
+const inbox = useInboxStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -37,7 +39,7 @@ const entries = ref<PointEntry[]>([])
 const pointsTotal = ref(0)
 const pointsLoading = ref(false)
 const notifications = ref<AppNotification[]>([])
-const unread = ref(0)
+const markingAll = ref(false)
 
 const editing = ref(false)
 const form = ref({ nickname: '', avatar_url: '', bio: '', email: '' })
@@ -65,7 +67,7 @@ function dayLabel(value: string) {
 }
 
 async function reloadAccountPanels() {
-  const [status, history, ledger, inbox] = await Promise.allSettled([
+  const [status, history, ledger, messages] = await Promise.allSettled([
     site.checkinEnabled ? checkinStatus() : Promise.resolve(null),
     site.checkinEnabled ? checkinHistory(7) : Promise.resolve([]),
     myPoints(POINTS_PAGE, 0),
@@ -77,9 +79,28 @@ async function reloadAccountPanels() {
     entries.value = ledger.value.data
     pointsTotal.value = ledger.value.total
   }
-  if (inbox.status === 'fulfilled') {
-    notifications.value = inbox.value.items
-    unread.value = inbox.value.items.filter((item) => !item.is_read).length
+  if (messages.status === 'fulfilled') {
+    notifications.value = messages.value.items
+  }
+  // The count comes from the server because the panel only lists one page:
+  // counting that page would under-report a longer inbox to the header badge.
+  await inbox.refresh()
+}
+
+/** 一键清空未读：通知一条条点太慢，尤其是店家刚群发过公告。 */
+async function readAllNotifications() {
+  if (markingAll.value) return
+  markingAll.value = true
+  error.value = ''
+  try {
+    const marked = await markAllRead()
+    notifications.value = notifications.value.map((item) => ({ ...item, is_read: true }))
+    inbox.reset(0)
+    message.value = marked ? `已把 ${marked} 条通知标为已读。` : '这些通知本来就是已读状态。'
+  } catch (e) {
+    error.value = errorMessage(e, '全部标为已读失败，请稍后重试')
+  } finally {
+    markingAll.value = false
   }
 }
 
@@ -237,7 +258,7 @@ async function readNotification(item: AppNotification) {
   try {
     await markNotificationRead(item.id)
     item.is_read = true
-    unread.value = Math.max(0, unread.value - 1)
+    inbox.reset(Math.max(0, inbox.unread - 1))
   } catch (e) {
     error.value = errorMessage(e, '标记已读失败')
   }
@@ -488,9 +509,19 @@ onMounted(async () => {
     </section>
 
     <section class="card mt-5">
-      <div class="flex items-baseline justify-between gap-3">
+      <div class="flex flex-wrap items-baseline justify-between gap-3">
         <h2 class="text-[15px] font-bold">通知</h2>
-        <span v-if="unread" class="badge badge-accent nums">{{ unread }} 未读</span>
+        <div class="flex items-center gap-2">
+          <span v-if="inbox.unread" class="badge badge-accent nums">{{ inbox.unread }} 未读</span>
+          <button
+            v-if="inbox.unread"
+            class="btn btn-quiet btn-sm"
+            :disabled="markingAll"
+            @click="readAllNotifications"
+          >
+            {{ markingAll ? '处理中…' : '全部标为已读' }}
+          </button>
+        </div>
       </div>
 
       <ul v-if="notifications.length" class="mt-4 divide-y divide-[var(--stroke-quiet)]">

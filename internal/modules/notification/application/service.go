@@ -82,3 +82,21 @@ func (s *Service) MarkAsRead(ctx context.Context, id, userID uint) error {
 	}
 	return s.repo.MarkAsRead(ctx, id, userID)
 }
+
+// CountUnread is the badge on the storefront header. A failure here is only
+// ever a missing number, so it stays the caller's problem to swallow.
+func (s *Service) CountUnread(ctx context.Context, userID uint) (int64, error) {
+	if userID == 0 {
+		return 0, ErrInvalidNotification
+	}
+	return s.repo.CountUnread(ctx, userID)
+}
+
+// MarkAllRead reads the whole inbox in one go and reports how many rows
+// actually flipped, so the page can confirm the count it cleared.
+func (s *Service) MarkAllRead(ctx context.Context, userID uint) (int64, error) {
+	if userID == 0 {
+		return 0, ErrInvalidNotification
+	}
+	return s.repo.MarkAllRead(ctx, userID)
+}

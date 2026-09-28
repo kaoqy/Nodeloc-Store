@@ -1,15 +1,26 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useInboxStore } from '../stores/inbox'
 import { useSiteStore } from '../stores/site'
 import { useThemeStore } from '../stores/theme'
 
 const auth = useAuthStore()
 const site = useSiteStore()
 const theme = useThemeStore()
+const inbox = useInboxStore()
 const router = useRouter()
 const menuOpen = ref(false)
+
+// The badge counts the whole inbox, not the page 个人中心 happens to show.
+onMounted(() => {
+  if (auth.isAuthenticated) void inbox.refresh()
+})
+watch(() => auth.isAuthenticated, (signedIn) => {
+  if (signedIn) void inbox.refresh()
+  else inbox.reset(0)
+})
 
 // The account's own picture, whichever side it came from: an uploaded or edited
 // avatar wins, a bound NodeLoc account shows the forum's copy.
@@ -17,6 +28,7 @@ const avatar = computed(() => auth.user?.avatar_url || auth.user?.oauth_avatar |
 const initial = computed(() =>
   (auth.user?.nickname || auth.user?.username || '我').slice(0, 1).toUpperCase(),
 )
+const badge = computed(() => (inbox.unread > 99 ? '99+' : String(inbox.unread)))
 
 async function logout() {
   menuOpen.value = false
@@ -38,7 +50,15 @@ async function logout() {
         <RouterLink to="/" class="nav-item">商品</RouterLink>
         <template v-if="auth.isAuthenticated">
           <RouterLink to="/orders" class="nav-item">我的订单</RouterLink>
-          <RouterLink to="/profile" class="nav-item">个人中心</RouterLink>
+          <RouterLink to="/profile" class="nav-item relative">
+            个人中心
+            <span
+              v-if="inbox.unread"
+              class="nums absolute -top-1 -right-3 rounded-full bg-[var(--accent)] px-1.5 text-[10px] leading-4 font-bold text-[var(--on-accent)]"
+              :aria-label="`${inbox.unread} 条未读通知`"
+              >{{ badge }}</span
+            >
+          </RouterLink>
         </template>
       </nav>
 
@@ -59,6 +79,12 @@ async function logout() {
               <span v-else>{{ initial }}</span>
             </span>
             <span class="truncate">{{ auth.user?.nickname || auth.user?.username || '我的账户' }}</span>
+            <span
+              v-if="inbox.unread"
+              class="nums shrink-0 rounded-full bg-[var(--accent)] px-1.5 text-[10px] leading-4 font-bold text-[var(--on-accent)]"
+              :aria-label="`${inbox.unread} 条未读通知`"
+              >{{ badge }}</span
+            >
           </RouterLink>
           <!-- Plain anchor: /admin is a separate SPA, so it needs a full load. -->
           <a v-if="auth.canEnterAdmin" href="/admin/" class="btn btn-quiet btn-sm">进入后台</a>
@@ -83,7 +109,9 @@ async function logout() {
       <RouterLink to="/" class="nav-item w-full">全部商品</RouterLink>
       <template v-if="auth.isAuthenticated">
         <RouterLink to="/orders" class="nav-item w-full">我的订单</RouterLink>
-        <RouterLink to="/profile" class="nav-item w-full">个人中心</RouterLink>
+        <RouterLink to="/profile" class="nav-item w-full">
+          个人中心<span v-if="inbox.unread" class="nums ml-2 text-[var(--accent)]">{{ inbox.unread }} 未读</span>
+        </RouterLink>
         <a v-if="auth.canEnterAdmin" href="/admin/" class="nav-item w-full">进入后台</a>
         <button class="btn btn-quiet btn-sm mt-1 self-start" @click="logout">退出登录</button>
       </template>
