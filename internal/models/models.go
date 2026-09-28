@@ -262,6 +262,9 @@ type AuditLog struct {
 	Target  *string `gorm:"size:120" json:"target,omitempty"`
 	Detail  *string `gorm:"type:text" json:"detail,omitempty"`
 	IP      *string `gorm:"size:64" json:"ip,omitempty"`
+	// ActorName is filled by the audit query so the log page can say who acted
+	// instead of only a bare user id. It is not a column.
+	ActorName string `gorm:"-" json:"actor_name,omitempty"`
 }
 
 // ── App Setting ──────────────────────────────────────────────────────

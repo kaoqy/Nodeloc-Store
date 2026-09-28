@@ -147,6 +147,7 @@ export interface Notification {
 export interface AuditLog {
   id: number
   actor_id?: number | null
+  actor_name?: string
   action: string
   target?: string | null
   detail?: string | null

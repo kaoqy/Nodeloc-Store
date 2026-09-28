@@ -157,6 +157,12 @@ function toggleDetail(id: number) {
   openDetail.value = openDetail.value === id ? 0 : id
 }
 
+/** What the log calls an operator: the account's name while it exists. */
+function who(log: AuditLog): string {
+  if (!log.actor_id) return '系统'
+  return log.actor_name || `#${log.actor_id}`
+}
+
 const route = useRoute()
 
 onMounted(async () => {
@@ -204,7 +210,7 @@ async function loadAuditActions() {
         v-model="searchFilter"
         class="input w-56"
         type="search"
-        placeholder="在对象/详情里找关键词"
+        placeholder="关键词：操作 / 对象 / 详情 / 用户名"
         aria-label="按关键词搜索日志内容"
         @keyup.enter="apply"
       />
@@ -304,15 +310,16 @@ async function loadAuditActions() {
                     {{ log.detail || '—' }}
                   </button>
                 </td>
-                <td class="nums text-sm">
+                <td class="text-sm">
                   <RouterLink
                     v-if="log.actor_id"
                     :to="`/users/${log.actor_id}`"
                     class="accent-text underline-offset-2 hover:underline"
+                    :title="`用户 #${log.actor_id}`"
                   >
-                    #{{ log.actor_id }}
+                    {{ who(log) }}
                   </RouterLink>
-                  <template v-else>系统</template>
+                  <span v-else class="quiet">系统</span>
                 </td>
                 <td class="mono text-sm quiet">{{ log.ip || '—' }}</td>
                 <td class="whitespace-nowrap text-sm quiet">{{ when(log.created_at) }}</td>
@@ -322,7 +329,7 @@ async function loadAuditActions() {
               <tr v-if="openDetail === log.id" class="bg-[var(--surface-sunken)]">
                 <td colspan="7" class="py-2">
                   <p class="mono text-xs mb-1">
-                    {{ log.action }} · {{ log.target || '无对象' }} · {{ when(log.created_at) }}
+                    {{ log.action }} · {{ who(log) }} · {{ log.target || '无对象' }} · {{ when(log.created_at) }}
                   </p>
                   <p class="hint whitespace-pre-wrap break-all">{{ log.detail || '这条日志没有更多详情。' }}</p>
                 </td>

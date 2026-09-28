@@ -40,7 +40,47 @@ func (s *GormStore) List(ctx context.Context, filter domain.LogFilter) ([]domain
 	if err := query.Order("created_at DESC, id DESC").Offset(offset).Limit(filter.Limit).Find(&logs).Error; err != nil {
 		return nil, 0, err
 	}
+	s.attachActorNames(ctx, logs)
 	return logs, total, nil
+}
+
+// attachActorNames resolves this page's operator ids with one query, because a
+// log line reading "kaoqy 退了这单" is actionable and "#7" is not.
+func (s *GormStore) attachActorNames(ctx context.Context, logs []domain.AuditLog) {
+	seen := make(map[uint]bool, len(logs))
+	ids := make([]uint, 0, len(logs))
+	for i := range logs {
+		if logs[i].ActorID == nil || seen[*logs[i].ActorID] {
+			continue
+		}
+		seen[*logs[i].ActorID] = true
+		ids = append(ids, *logs[i].ActorID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	var accounts []struct {
+		ID       uint
+		Username string
+	}
+	// The query goes to the table rather than the model on purpose: an account
+	// deleted since then still has to be named in the shop's own history. A
+	// lookup that fails only costs the names, never the log rows, so the page
+	// still opens.
+	if err := s.db.WithContext(ctx).Table("users").Select("id, username").Where("id IN ?", ids).Find(&accounts).Error; err != nil {
+		return
+	}
+
+	names := make(map[uint]string, len(accounts))
+	for _, account := range accounts {
+		names[account.ID] = account.Username
+	}
+	for i := range logs {
+		if logs[i].ActorID != nil {
+			logs[i].ActorName = names[*logs[i].ActorID]
+		}
+	}
 }
 
 // Actions returns the distinct recorded action names.
@@ -62,10 +102,12 @@ func (s *GormStore) filtered(ctx context.Context, filter domain.LogFilter) *gorm
 	if filter.Search != "" {
 		pattern := likeAny + escapeLike(filter.Search) + likeAny
 		// The alternatives are parenthesised so AND with the other filters keeps
-		// its precedence.
-		query = query.Where(
-			"(action LIKE ? ESCAPE '"+likeEscape+"' OR target LIKE ? ESCAPE '"+likeEscape+"' OR detail LIKE ? ESCAPE '"+likeEscape+"')",
-			pattern, pattern, pattern,
+		// its precedence. Searching by who acted is part of the point: "kaoqy"
+		// should find the rows that member wrote.
+		one := " LIKE ? ESCAPE '" + likeEscape + "'"
+		query = query.Where("(action"+one+" OR target"+one+" OR detail"+one+
+			" OR actor_id IN (SELECT id FROM users WHERE username"+one+"))",
+			pattern, pattern, pattern, pattern,
 		)
 	}
 	if filter.ActorID != nil {

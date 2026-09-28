@@ -21,10 +21,10 @@ type LogActionInput struct {
 
 // LogFilter controls audit-log queries.
 //
-// Search matches a substring of the action, target or detail. Since is an
-// inclusive lower bound and Before an exclusive upper bound, so an "until
-// today" pick still keeps today's entries — that is the pairing the log page's
-// date range relies on.
+// Search matches a substring of the action, target, detail or the acting
+// member's username. Since is an inclusive lower bound and Before an exclusive
+// upper bound, so an "until today" pick still keeps today's entries — that is
+// the pairing the log page's date range relies on.
 type LogFilter struct {
 	Action     string
 	Search     string
