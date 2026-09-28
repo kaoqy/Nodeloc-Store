@@ -4,9 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import PaginationFooter from '../components/PaginationFooter.vue'
 import { listOrders, reconcilePendingOrders, type ReconcileReport } from '../api/orders'
 import { errorMessage, fulfillmentStatus, money, orderStatus, providerStatus, when } from '../utils/format'
+import { useAuthStore } from '../stores/auth'
 import type { Order } from '../types'
 
 const PageSize = 20
+
+const auth = useAuthStore()
+const canManage = computed(() => auth.allows('orders', 'manage'))
 
 const loading = ref(true)
 const orders = ref<Order[]>([])
@@ -167,7 +171,14 @@ onMounted(() => {
         </button>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <button class="btn btn-secondary btn-sm" :disabled="reconciling" @click="reconcilePending">
+        <!-- Reconciling writes: it settles payment and hands out cards, so it is
+             orders:manage, not the read grant this screen opens with. -->
+        <button
+          v-if="canManage"
+          class="btn btn-secondary btn-sm"
+          :disabled="reconciling"
+          @click="reconcilePending"
+        >
           <span v-if="reconciling" class="spinner" />
           {{ reconciling ? '正在向 NodeLoc 核实…' : '批量查单对账' }}
         </button>

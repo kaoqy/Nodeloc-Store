@@ -34,6 +34,11 @@ var (
 	// ErrRefundRecipientUnknown reaches the back office verbatim, so it names
 	// what the admin can actually do next.
 	ErrRefundRecipientUnknown = errors.New("该买家没有绑定 NodeLoc 账号，积分无从退回；请先在订单详情里人工处理")
+	// ErrCouponUnavailable covers a code that was accepted in the quote box but
+	// cannot be honoured when the order is written — it expired, ran out, or the
+	// shop turned 优惠码 off in the meantime. The buyer re-quotes rather than
+	// paying an amount they were never shown.
+	ErrCouponUnavailable = errors.New("coupon cannot be applied to this order")
 )
 
 // maxOrderQuantity bounds a single storefront order so one buyer cannot drain
@@ -45,6 +50,7 @@ type Service struct {
 	gateway     contract.PaymentGateway
 	fulfillment contract.FulfillmentService
 	users       contract.UserLookup
+	coupons     contract.CouponPricing
 	paymentID   string
 }
 
@@ -60,6 +66,8 @@ type CreateOrderInput struct {
 	Quantity int
 	Contact  string
 	Note     string
+	// CouponCode is what the buyer typed in the 优惠码 field, if anything.
+	CouponCode string
 }
 
 type CreatePaymentOutput struct {
@@ -99,11 +107,11 @@ type RefundInput struct {
 	ToUsername string
 }
 
-func NewService(orders contract.OrderRepo, gateway contract.PaymentGateway, fulfillment contract.FulfillmentService, users contract.UserLookup, paymentID string) *Service {
+func NewService(orders contract.OrderRepo, gateway contract.PaymentGateway, fulfillment contract.FulfillmentService, users contract.UserLookup, coupons contract.CouponPricing, paymentID string) *Service {
 	if orders == nil || gateway == nil || fulfillment == nil || users == nil {
 		panic("payment: nil dependency")
 	}
-	return &Service{orders: orders, gateway: gateway, fulfillment: fulfillment, users: users, paymentID: strings.TrimSpace(paymentID)}
+	return &Service{orders: orders, gateway: gateway, fulfillment: fulfillment, users: users, coupons: coupons, paymentID: strings.TrimSpace(paymentID)}
 }
 
 func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*models.Order, error) {
@@ -153,13 +161,41 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 		}
 	}
 
+	total := product.Price * quantity
+	couponCode := strings.ToUpper(strings.TrimSpace(input.CouponCode))
+	var couponID *uint
+	if couponCode != "" {
+		if s.coupons == nil {
+			return nil, ErrCouponUnavailable
+		}
+		taken, id, err := s.coupons.DiscountFor(ctx, input.UserID, product.ID, quantity, product.Price, couponCode)
+		if err != nil {
+			// Both errors stay in the chain: ErrCouponUnavailable is what Classify
+			// matches on, and the catalogue error behind it names the exact rule
+			// ("you already used this code") the buyer should be told.
+			return nil, fmt.Errorf("%w: %w", ErrCouponUnavailable, err)
+		}
+		// A 0 amount is not a payment NodeLoc can collect, so the floor is one
+		// fen even if the pricing side ever loosens.
+		if taken < 0 || taken >= total {
+			taken = total - 1
+		}
+		total -= taken
+		if id != 0 {
+			couponID = &id
+		}
+	}
+
 	order := &models.Order{
 		OrderNo:           newOrderNo(),
 		UserID:            input.UserID,
 		ProductID:         product.ID,
 		Quantity:          quantity,
 		UnitPrice:         product.Price,
-		TotalAmount:       product.Price * quantity,
+		DiscountAmount:    product.Price*quantity - total,
+		CouponID:          couponID,
+		CouponCode:        couponCode,
+		TotalAmount:       total,
 		Status:            "pending",
 		FulfillmentStatus: "pending",
 	}

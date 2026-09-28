@@ -225,3 +225,80 @@ func (r *GormUserRepo) List(ctx context.Context, limit, offset int, search strin
 	}
 	return users, total, nil
 }
+
+func (r *GormUserRepo) RecordCheckin(ctx context.Context, user *domain.User, checkin *domain.CheckIn, entry *domain.PointEntry) error {
+	if user == nil || checkin == nil || entry == nil {
+		return domain.ErrInvalidInput
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// The user's own counters usually already answer "today?", but two taps
+		// can both read a stale row. This check inside the transaction plus the
+		// ledger's unique reference is what makes the second one pay nothing.
+		var already int64
+		if err := tx.Model(&domain.CheckIn{}).
+			Where("user_id = ? AND checkin_date >= ? AND checkin_date < ?", checkin.UserID, checkin.CheckinDate, checkin.CheckinDate.AddDate(0, 0, 1)).
+			Count(&already).Error; err != nil {
+			return err
+		}
+		if already > 0 {
+			return domain.ErrAlreadyCheckedIn
+		}
+		if err := tx.Create(checkin).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(entry).Error; err != nil {
+			return err
+		}
+		return tx.Save(user).Error
+	})
+	if err != nil {
+		return translateGormError(err)
+	}
+	return nil
+}
+
+func (r *GormUserRepo) AdjustPoints(ctx context.Context, user *domain.User, entry *domain.PointEntry) error {
+	if user == nil || user.ID == 0 || entry == nil {
+		return domain.ErrInvalidInput
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(entry).Error; err != nil {
+			return err
+		}
+		return tx.Save(user).Error
+	})
+	if err != nil {
+		return translateGormError(err)
+	}
+	return nil
+}
+
+func (r *GormUserRepo) ListPoints(ctx context.Context, userID uint, limit, offset int) ([]domain.PointEntry, int64, error) {
+	var entries []domain.PointEntry
+	var total int64
+	query := r.db.WithContext(ctx).Model(&domain.PointEntry{}).Where("user_id = ?", userID)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	err := query.Order("created_at DESC").Limit(limit).Offset(offset).Find(&entries).Error
+	return entries, total, err
+}
+
+func (r *GormUserRepo) ListCheckins(ctx context.Context, userID uint, limit int) ([]domain.CheckIn, error) {
+	if limit <= 0 || limit > 60 {
+		limit = 30
+	}
+	var checkins []domain.CheckIn
+	err := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("checkin_date DESC").
+		Limit(limit).
+		Find(&checkins).Error
+	return checkins, err
+}

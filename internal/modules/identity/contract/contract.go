@@ -24,6 +24,16 @@ type UserRepo interface {
 	FindOAuthIdentityByUser(ctx context.Context, userID uint, provider string) (*domain.OAuthIdentity, error)
 	DeleteOAuthIdentity(ctx context.Context, userID uint, provider string) error
 	CountOAuthIdentities(ctx context.Context, userID uint) (int64, error)
+
+	// RecordCheckin writes the day's check-in, its ledger row and the user's
+	// counters in one transaction. The ledger's unique reference is what stops a
+	// double-tapped 签到 from paying twice.
+	RecordCheckin(ctx context.Context, user *domain.User, checkin *domain.CheckIn, entry *domain.PointEntry) error
+	// AdjustPoints moves the balance and appends its ledger row atomically, so
+	// the history always explains the current number.
+	AdjustPoints(ctx context.Context, user *domain.User, entry *domain.PointEntry) error
+	ListPoints(ctx context.Context, userID uint, limit, offset int) ([]domain.PointEntry, int64, error)
+	ListCheckins(ctx context.Context, userID uint, limit int) ([]domain.CheckIn, error)
 }
 
 // OAuthProvider abstracts authorization URL generation, NodeLoc callback
@@ -33,11 +43,17 @@ type OAuthProvider interface {
 	AuthorizationURL(state string) (string, error)
 	VerifyCallback(params map[string]string) bool
 	ExchangeCode(ctx context.Context, code string) (*domain.OAuthProfile, error)
+	// FetchProfile re-reads the account behind an access token, so a buyer can
+	// pull a fresh 头像/邮箱 from NodeLoc without signing out and back in.
+	FetchProfile(ctx context.Context, accessToken string) (*domain.OAuthProfile, error)
 }
 
 // TokenService creates and validates application access and refresh tokens.
 type TokenService interface {
 	Issue(ctx context.Context, user *domain.User) (*domain.TokenPair, error)
 	Parse(ctx context.Context, token string) (*domain.TokenClaims, error)
-	Refresh(ctx context.Context, refreshToken string) (*domain.TokenPair, error)
+	// ParseRefresh validates a refresh token and returns its claims. Issuing
+	// the new pair is left to the caller, which re-reads the account first so a
+	// disabled or demoted one cannot keep renewing on its old claims.
+	ParseRefresh(ctx context.Context, token string) (*domain.TokenClaims, error)
 }

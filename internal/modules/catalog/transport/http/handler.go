@@ -1,10 +1,13 @@
 package http
 
 import (
+	"encoding/csv"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -23,46 +26,172 @@ func NewHandler(service *application.Service) *Handler {
 	return &Handler{service: service}
 }
 
-// RegisterRoutes installs the public store routes and JWT-protected admin routes.
+// RegisterRoutes installs the public store routes and permission-gated admin
+// routes. Every admin route names the permission it needs, so a 运营 account can
+// work the catalogue without ever reaching 设置 or 角色权限.
 func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
 	store := router.Group("/api/v1/store")
 	store.GET("/products", h.listPublicProducts)
 	store.GET("/products/:slug", h.getPublicProduct)
 	store.GET("/categories", h.listPublicCategories)
+	store.GET("/stats", h.storeStats)
+
+	// A code is quoted, not guessed: only an account the store already knows
+	// may ask what a coupon would take off, and the answer never reveals
+	// another buyer's usage.
+	shop := router.Group("/api/v1/store", middleware.JWTMiddleware(jwtConfig))
+	shop.POST("/coupons/quote", h.quoteCoupon)
+
+	guard := func(resource, action string) gin.HandlerFunc {
+		return middleware.RequirePermission(accounts, resource, action)
+	}
 
 	admin := router.Group("/api/v1/admin")
-	admin.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin(accounts))
+	admin.Use(middleware.JWTMiddleware(jwtConfig))
 
-	admin.GET("/products", h.listProducts)
-	admin.GET("/products/:id", h.getProduct)
-	admin.POST("/products", h.createProduct)
-	admin.PUT("/products/:id", h.updateProduct)
-	admin.DELETE("/products/:id", h.deleteProduct)
+	admin.GET("/products", guard("products", "view"), h.listProducts)
+	// A sibling of /products/:id would collide with the wildcard, so the
+	// restocking queue sits at its own path rather than under /products.
+	admin.GET("/low-stock", guard("products", "view"), h.listLowStock)
+	admin.GET("/products/:id", guard("products", "view"), h.getProduct)
+	admin.POST("/products", guard("products", "manage"), h.createProduct)
+	admin.PUT("/products/:id", guard("products", "manage"), h.updateProduct)
+	admin.DELETE("/products/:id", guard("products", "manage"), h.deleteProduct)
 
-	admin.GET("/products/:id/cards", h.listCards)
-	admin.POST("/products/:id/cards", h.addCard)
-	admin.PUT("/products/:id/cards/:card_id", h.updateCard)
-	admin.DELETE("/products/:id/cards/:card_id", h.deleteCard)
-	admin.POST("/products/:id/cards/batch-add", h.batchAddCards)
+	admin.GET("/cards", guard("cards", "view"), h.listAllCards)
+	admin.GET("/cards/export", guard("cards", "manage"), h.exportCards)
+	admin.GET("/products/:id/cards", guard("cards", "view"), h.listCards)
+	admin.POST("/products/:id/cards", guard("cards", "manage"), h.addCard)
+	admin.POST("/products/:id/cards/generate", guard("cards", "manage"), h.generateCards)
+	admin.POST("/products/:id/cards/batch-status", guard("cards", "manage"), h.batchCardStatus)
+	admin.POST("/products/:id/cards/batch-delete", guard("cards", "manage"), h.batchDeleteCards)
+	admin.PUT("/products/:id/cards/:card_id", guard("cards", "manage"), h.updateCard)
+	admin.DELETE("/products/:id/cards/:card_id", guard("cards", "manage"), h.deleteCard)
+	admin.POST("/products/:id/cards/batch-add", guard("cards", "manage"), h.batchAddCards)
 
-	admin.GET("/categories", h.listCategories)
-	admin.POST("/categories", h.createCategory)
-	admin.PUT("/categories/:id", h.updateCategory)
-	admin.DELETE("/categories/:id", h.deleteCategory)
+	admin.GET("/categories", guard("categories", "view"), h.listCategories)
+	admin.POST("/categories", guard("categories", "manage"), h.createCategory)
+	admin.PUT("/categories/:id", guard("categories", "manage"), h.updateCategory)
+	admin.DELETE("/categories/:id", guard("categories", "manage"), h.deleteCategory)
 
-	admin.GET("/coupons", h.listCoupons)
-	admin.POST("/coupons", h.createCoupon)
-	admin.PUT("/coupons/:id", h.updateCoupon)
-	admin.DELETE("/coupons/:id", h.deleteCoupon)
+	admin.GET("/coupons", guard("coupons", "view"), h.listCoupons)
+	admin.POST("/coupons", guard("coupons", "manage"), h.createCoupon)
+	admin.PUT("/coupons/:id", guard("coupons", "manage"), h.updateCoupon)
+	admin.DELETE("/coupons/:id", guard("coupons", "manage"), h.deleteCoupon)
+}
+
+// productQuery reads the storefront's listing parameters. The same handler has
+// served every shop since, so unknown values degrade to the default ordering
+// rather than erroring: a stale link should still show products.
+func productQuery(c *gin.Context) domain.ProductQuery {
+	query := domain.ProductQuery{
+		Search: strings.TrimSpace(c.Query("q")),
+		Sort:   strings.TrimSpace(c.Query("sort")),
+	}
+	if value, err := strconv.ParseUint(strings.TrimSpace(c.Query("category")), 10, 32); err == nil && value > 0 {
+		id := uint(value)
+		query.CategoryID = &id
+	}
+	query.FeaturedOnly = c.Query("featured") == "true"
+	query.InStockOnly = c.Query("in_stock") == "true"
+	query.Limit = positiveInt(c.Query("limit"), 24)
+	query.Offset = positiveInt(c.Query("offset"), 0)
+	return query
+}
+
+func positiveInt(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func (h *Handler) listPublicProducts(c *gin.Context) {
-	products, err := h.service.ListPublicProducts(c.Request.Context())
+	products, total, err := h.service.PublicProducts(c.Request.Context(), productQuery(c))
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": products})
+	c.JSON(http.StatusOK, gin.H{
+		"data":  products,
+		"total": total,
+		"limit": len(products),
+	})
+}
+
+func (h *Handler) storeStats(c *gin.Context) {
+	stats, err := h.service.StoreStats(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"stats": stats, "coupons_enabled": h.service.CouponsEnabled()})
+}
+
+func (h *Handler) quoteCoupon(c *gin.Context) {
+	var request struct {
+		Code      string `json:"code"`
+		ProductID uint   `json:"product_id"`
+		Slug      string `json:"product_slug"`
+		Quantity  int    `json:"quantity"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, errors.Join(application.ErrInvalidQuery, err))
+		return
+	}
+	userID := contextUserID(c)
+	productID := request.ProductID
+	if productID == 0 && strings.TrimSpace(request.Slug) != "" {
+		product, err := h.service.GetPublicProduct(c.Request.Context(), request.Slug)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		productID = product.ID
+	}
+	if productID == 0 {
+		respondError(c, fmt.Errorf("%w: product_id or product_slug is required", application.ErrInvalidQuery))
+		return
+	}
+	product, err := h.service.GetProduct(c.Request.Context(), productID)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	quantity := request.Quantity
+	if quantity <= 0 {
+		quantity = 1
+	}
+	quote, err := h.service.QuoteCoupon(c.Request.Context(), userID, productID, quantity, product.Price, request.Code)
+	if err != nil {
+		message := couponMessage(err)
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":   message,
+			"code":    couponReason(err),
+			"message": message,
+		})
+		return
+	}
+	c.JSON(http.StatusOK, quote)
+}
+
+// couponReason turns a rejection into the code the storefront switches on.
+func couponReason(err error) string {
+	var refusal *application.CouponError
+	if errors.As(err, &refusal) {
+		return refusal.CouponCode()
+	}
+	return "coupon_invalid"
+}
+
+// couponMessage is written for the person typing the code, not for the log.
+func couponMessage(err error) string {
+	var refusal *application.CouponError
+	if errors.As(err, &refusal) {
+		return refusal.CouponMessage()
+	}
+	return "优惠码无法使用。"
 }
 
 func (h *Handler) getPublicProduct(c *gin.Context) {
@@ -83,13 +212,49 @@ func (h *Handler) listPublicCategories(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": categories})
 }
 
+// listProducts is the back office's catalogue table: same filters as the shop,
+// plus the unpublished rows.
 func (h *Handler) listProducts(c *gin.Context) {
-	products, err := h.service.ListProducts(c.Request.Context())
+	query := productQuery(c)
+	// The storefront pages 24 at a time; the back office table reads the whole
+	// catalogue at once, so an absent limit means "as many as one page allows".
+	if strings.TrimSpace(c.Query("limit")) == "" {
+		query.Limit = 100
+	}
+	products, total, err := h.service.AdminProducts(c.Request.Context(), query)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": products})
+	c.JSON(http.StatusOK, gin.H{"data": products, "total": total})
+}
+
+// listLowStock answers "what must I restock", using the shop's own threshold
+// rather than a hard-coded number the owner cannot tune.
+func (h *Handler) listLowStock(c *gin.Context) {
+	products, err := h.service.LowStockProducts(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	threshold := h.service.AlertThreshold()
+	c.JSON(http.StatusOK, gin.H{"data": products, "threshold": threshold})
+}
+
+func contextUserID(c *gin.Context) uint {
+	value, exists := c.Get(middleware.UserIDKey)
+	if !exists {
+		return 0
+	}
+	switch id := value.(type) {
+	case uint:
+		return id
+	case int:
+		if id > 0 {
+			return uint(id)
+		}
+	}
+	return 0
 }
 
 func (h *Handler) getProduct(c *gin.Context) {
@@ -175,6 +340,183 @@ func (h *Handler) addCard(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": card})
 }
 
+// listAllCards backs the inventory screen: every product or a selected one,
+// by status, with a key search and server-side paging.
+func (h *Handler) listAllCards(c *gin.Context) {
+	cards, total, err := h.service.ListCardsFiltered(c.Request.Context(), cardFilter(c))
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	rows := make([]gin.H, 0, len(cards))
+	for _, card := range cards {
+		rows = append(rows, cardRow(card))
+	}
+	c.JSON(http.StatusOK, gin.H{"data": rows, "total": total})
+}
+
+// cardFilter reads the inventory screen's query string. product_id is optional:
+// without it the shop sees its whole key stock in one list.
+func cardFilter(c *gin.Context) domain.CardFilter {
+	filter := domain.CardFilter{
+		Status: strings.TrimSpace(c.Query("status")),
+		Search: strings.TrimSpace(c.Query("q")),
+	}
+	if value, err := strconv.ParseUint(strings.TrimSpace(c.Query("product_id")), 10, 32); err == nil && value > 0 {
+		id := uint(value)
+		filter.ProductID = &id
+	}
+	filter.Limit = positiveInt(c.Query("limit"), 50)
+	filter.Offset = positiveInt(c.Query("offset"), 0)
+	return filter
+}
+
+// cardRow flattens a card with the two names a shop owner reads it by: which
+// product it belongs to, and which order consumed it.
+func cardRow(card domain.Card) gin.H {
+	row := gin.H{
+		"id":         card.ID,
+		"product_id": card.ProductID,
+		"content":    card.Content,
+		"status":     card.Status,
+		"created_at": card.CreatedAt,
+		"sold_at":    card.SoldAt,
+		"order_id":   card.OrderID,
+	}
+	if card.Product.ID != 0 {
+		row["product_name"] = card.Product.Name
+		row["product_slug"] = card.Product.Slug
+	}
+	if card.Order.ID != 0 {
+		row["order_no"] = card.Order.OrderNo
+	}
+	return row
+}
+
+// exportCards streams the current selection as a CSV download so a shop owner
+// can move keys between tools. The UTF-8 BOM is not decoration: Excel opens a
+// Chinese header row as mojibake without it.
+func (h *Handler) exportCards(c *gin.Context) {
+	cards, truncated, err := h.service.ExportCards(c.Request.Context(), cardFilter(c))
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	name := "cards"
+	if id := c.Query("product_id"); id != "" {
+		name = "cards-" + id
+	}
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", `attachment; filename="`+sanitizeFilename(name)+`.csv"`)
+	c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
+	writer := csv.NewWriter(c.Writer)
+	_ = writer.Write([]string{"id", "商品", "卡密", "状态", "售出时间", "订单号"})
+	for _, card := range cards {
+		soldAt := ""
+		if card.SoldAt != nil {
+			soldAt = card.SoldAt.Format(time.RFC3339)
+		}
+		_ = writer.Write([]string{
+			strconv.FormatUint(uint64(card.ID), 10),
+			card.Product.Name,
+			card.Content,
+			card.Status,
+			soldAt,
+			card.Order.OrderNo,
+		})
+	}
+	writer.Flush()
+	if truncated {
+		_, _ = c.Writer.Write([]byte("# 结果已截断，请缩小筛选范围后再导出\n"))
+	}
+}
+
+// sanitizeFilename keeps a query-string value out of a response header.
+func sanitizeFilename(value string) string {
+	var builder strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			builder.WriteRune(r)
+		}
+	}
+	if builder.Len() == 0 {
+		return "cards"
+	}
+	return builder.String()
+}
+
+type generateCardsRequest struct {
+	Count  int    `json:"count"`
+	Prefix string `json:"prefix"`
+}
+
+func (h *Handler) generateCards(c *gin.Context) {
+	productID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var request generateCardsRequest
+	if !bindJSON(c, &request) {
+		return
+	}
+	result, err := h.service.GenerateCards(c.Request.Context(), productID, request.Count, request.Prefix)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, result)
+}
+
+type cardBatchRequest struct {
+	CardIDs []uint `json:"card_ids"`
+	IDs     []uint `json:"ids"`
+	Status  string `json:"status"`
+}
+
+// selected returns either spelling of the id list; the SPA and the curl examples
+// in the README both send card_ids, and a body that says ids should not fail.
+func (r cardBatchRequest) selected() []uint {
+	if len(r.CardIDs) > 0 {
+		return r.CardIDs
+	}
+	return r.IDs
+}
+
+func (h *Handler) batchCardStatus(c *gin.Context) {
+	productID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var request cardBatchRequest
+	if !bindJSON(c, &request) {
+		return
+	}
+	moved, err := h.service.SetCardStatus(c.Request.Context(), productID, request.selected(), request.Status)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"updated": moved})
+}
+
+func (h *Handler) batchDeleteCards(c *gin.Context) {
+	productID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var request cardBatchRequest
+	if !bindJSON(c, &request) {
+		return
+	}
+	deleted, err := h.service.DeleteCards(c.Request.Context(), productID, request.selected())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": deleted})
+}
+
 type batchAddCardsRequest struct {
 	Cards    []string `json:"cards"`
 	Contents []string `json:"contents"`
@@ -197,12 +539,12 @@ func (h *Handler) batchAddCards(c *gin.Context) {
 	if len(contents) == 0 && request.Content != "" {
 		contents = strings.Split(strings.ReplaceAll(request.Content, "\r\n", "\n"), "\n")
 	}
-	cards, err := h.service.AddCards(c.Request.Context(), productID, contents)
+	result, err := h.service.ImportCards(c.Request.Context(), productID, contents)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": cards, "count": len(cards)})
+	c.JSON(http.StatusCreated, result)
 }
 
 func (h *Handler) updateCard(c *gin.Context) {

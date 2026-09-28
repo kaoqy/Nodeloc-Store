@@ -24,11 +24,13 @@ func NewHandler(service *application.Service) *Handler {
 	return &Handler{service: service}
 }
 
-// RegisterRoutes registers GET /api/v1/admin/audit-logs with JWT + admin middleware.
+// RegisterRoutes registers GET /api/v1/admin/audit-logs for a role that holds
+// the logs:view grant.
 func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
-	admin := router.Group("/api/v1/admin")
-	admin.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin(accounts))
-	admin.GET("/audit-logs", h.ListAuditLogs)
+	router.GET("/api/v1/admin/audit-logs",
+		middleware.JWTMiddleware(jwtConfig),
+		middleware.RequirePermission(accounts, "logs", "view"),
+		h.ListAuditLogs)
 }
 
 // ListAuditLogs returns audit logs using page, limit, and optional action query parameters.

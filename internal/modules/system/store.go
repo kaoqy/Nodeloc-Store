@@ -30,6 +30,7 @@ func LoadRuntime(db *gorm.DB) (*RuntimeConfig, error) {
 		return nil, err
 	}
 	rt.MergeDefaults()
+	rt.Normalize()
 	return &rt, nil
 }
 

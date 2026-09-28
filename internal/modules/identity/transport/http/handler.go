@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
+	"github.com/kaoqy/Nodeloc-Store/internal/authz"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity/domain"
@@ -47,24 +48,38 @@ func (h *Handler) cookieSecure(c *gin.Context) bool {
 }
 
 func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig) {
+	authed := router.Group("/api/v1/auth", h.AuthMiddleware())
 	auth := router.Group("/api/v1/auth")
 	auth.POST("/register", h.Register)
 	auth.POST("/login", h.Login)
 	auth.POST("/logout", h.Logout)
+	auth.POST("/refresh", h.RefreshToken)
 	auth.GET("/oauth/initiate", h.InitiateOAuth)
 	auth.GET("/oauth/callback", h.OAuthCallback)
-	auth.POST("/bind-oauth", h.AuthMiddleware(), h.BindOAuth)
-	auth.DELETE("/unbind-oauth", h.AuthMiddleware(), h.UnbindOAuth)
-	auth.GET("/me", h.AuthMiddleware(), h.Me)
+	authed.POST("/bind-oauth", h.BindOAuth)
+	authed.DELETE("/unbind-oauth", h.UnbindOAuth)
+	authed.GET("/me", h.Me)
+	authed.PATCH("/me", h.UpdateProfile)
+	authed.GET("/me/permissions", h.MyPermissions)
+	authed.GET("/me/points", h.MyPoints)
+	authed.POST("/me/sync-oauth", h.SyncOAuthProfile)
+	authed.GET("/checkin/status", h.CheckinStatus)
+	authed.GET("/checkin/history", h.CheckinHistory)
+	authed.POST("/checkin", h.CheckIn)
 
-	admin := router.Group("/api/v1/admin/users")
-	admin.Use(h.AuthMiddleware(), middleware.RequireAdmin(h.AccountReader()))
-	admin.GET("", h.AdminListUsers)
-	admin.GET("/:id", h.AdminGetUser)
-	admin.POST("/:id/role", h.AdminSetRole)
-	admin.POST("/:id/toggle-admin", h.AdminToggleAdmin)
-	admin.POST("/:id/toggle-active", h.AdminToggleActive)
-	admin.POST("/:id/points", h.AdminAdjustPoints)
+	// The back office is gated per resource, not "any admin at all": 客服 gets
+	// the user list, granting roles stays with 管理员 and above.
+	accounts := h.AccountReader()
+	guard := func(resource, action string) gin.HandlerFunc {
+		return middleware.RequirePermission(accounts, resource, action)
+	}
+	admin := router.Group("/api/v1/admin/users", h.AuthMiddleware())
+	admin.GET("", guard("users", "view"), h.AdminListUsers)
+	admin.GET("/:id", guard("users", "view"), h.AdminGetUser)
+	admin.POST("/:id/role", guard("roles", "manage"), h.AdminSetRole)
+	admin.POST("/:id/toggle-admin", guard("roles", "manage"), h.AdminToggleAdmin)
+	admin.POST("/:id/toggle-active", guard("users", "manage"), h.AdminToggleActive)
+	admin.POST("/:id/points", guard("users", "manage"), h.AdminAdjustPoints)
 }
 
 // AccountReader lets the admin guard re-check the role behind the current
@@ -118,7 +133,7 @@ func (h *Handler) AdminSetRole(c *gin.Context) {
 		writeError(c, domain.ErrInvalidInput)
 		return
 	}
-	user, err := h.service.AdminSetRole(c.Request.Context(), claims.UserID, idParam(c), request.Role)
+	user, err := h.service.AdminSetRole(c.Request.Context(), claims.UserID, actorRole(c), idParam(c), request.Role)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -132,7 +147,7 @@ func (h *Handler) AdminToggleAdmin(c *gin.Context) {
 		writeError(c, domain.ErrInvalidCredentials)
 		return
 	}
-	user, err := h.service.AdminToggleAdmin(c.Request.Context(), claims.UserID, idParam(c))
+	user, err := h.service.AdminToggleAdmin(c.Request.Context(), claims.UserID, actorRole(c), idParam(c))
 	if err != nil {
 		writeError(c, err)
 		return
@@ -155,6 +170,11 @@ func (h *Handler) AdminToggleActive(c *gin.Context) {
 }
 
 func (h *Handler) AdminAdjustPoints(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
 	var request struct {
 		Delta *int `json:"delta" binding:"required"`
 	}
@@ -162,12 +182,185 @@ func (h *Handler) AdminAdjustPoints(c *gin.Context) {
 		writeError(c, domain.ErrInvalidInput)
 		return
 	}
-	user, err := h.service.AdminAdjustPoints(c.Request.Context(), idParam(c), *request.Delta)
+	user, err := h.service.AdminAdjustPoints(c.Request.Context(), claims.UserID, idParam(c), *request.Delta)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+// RefreshToken trades a refresh token for a new access token, so a session
+// lasts as long as the refresh TTL instead of dropping the buyer every two
+// hours.
+func (h *Handler) RefreshToken(c *gin.Context) {
+	var request struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	result, err := h.service.Refresh(c.Request.Context(), request.RefreshToken)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// CheckIn pays out today's 签到.
+func (h *Handler) CheckIn(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	checkin, user, err := h.service.CheckIn(c.Request.Context(), claims.UserID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"reward":           checkin.RewardPoints,
+		"consecutive_days": checkin.ConsecutiveDays,
+		"total_checkins":   user.TotalCheckins,
+		"points":           user.Points,
+		"user":             user,
+	})
+}
+
+func (h *Handler) CheckinStatus(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	status, err := h.service.CheckinStatus(c.Request.Context(), claims.UserID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, status)
+}
+
+func (h *Handler) CheckinHistory(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	checkins, err := h.service.Checkins(c.Request.Context(), claims.UserID, positiveParam(c.DefaultQuery("limit", "30"), 30))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": checkins})
+}
+
+func (h *Handler) MyPoints(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	limit := positiveParam(c.DefaultQuery("limit", "20"), 20)
+	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if err != nil || offset < 0 {
+		offset = 0
+	}
+	entries, total, err := h.service.Points(c.Request.Context(), claims.UserID, limit, offset)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": entries, "total": total, "limit": limit, "offset": offset})
+}
+
+// UpdateProfile keeps the account's own nickname, avatar and bio in step with
+// what NodeLoc knows, so 个人中心 does not have to stay all-or-nothing.
+func (h *Handler) UpdateProfile(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	var request struct {
+		Nickname  *string `json:"nickname"`
+		AvatarURL *string `json:"avatar_url"`
+		Bio       *string `json:"bio"`
+		Email     *string `json:"email"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, domain.ErrInvalidInput)
+		return
+	}
+	user, err := h.service.UpdateProfile(c.Request.Context(), claims.UserID, domain.ProfileEdit{
+		Nickname:  request.Nickname,
+		AvatarURL: request.AvatarURL,
+		Bio:       request.Bio,
+		Email:     request.Email,
+	})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+func (h *Handler) SyncOAuthProfile(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	user, err := h.service.SyncOAuthProfile(c.Request.Context(), claims.UserID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+// MyPermissions tells the storefront and the back office what the signed-in
+// account may actually see, so navigation can be built from the server's answer
+// rather than a second copy of the rules in the client.
+func (h *Handler) MyPermissions(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	user, err := h.service.Me(c.Request.Context(), claims.UserID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	permissions := authz.PermissionsOf(user.Role)
+	if user.Role == "super_admin" {
+		permissions = []string{"*:*"}
+	}
+	if permissions == nil {
+		permissions = []string{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"role":        user.Role,
+		"is_staff":    domain.IsStaff(user.Role),
+		"permissions": permissions,
+	})
+}
+
+// actorRole is the role the permission guard just verified against the store.
+func actorRole(c *gin.Context) string {
+	return c.GetString(middleware.UserRoleKey)
+}
+
+func positiveParam(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 // idParam reads the numeric :id path parameter; 0 means it was missing or junk.
@@ -303,6 +496,12 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	}
 	fragment := url.Values{}
 	fragment.Set("access_token", result.Tokens.AccessToken)
+	// The refresh token travels with it for the same reason the access token does:
+	// a fragment is neither logged nor sent to a server. Without it a NodeLoc
+	// login would expire every access TTL with no way to renew.
+	if result.Tokens.RefreshToken != "" {
+		fragment.Set("refresh_token", result.Tokens.RefreshToken)
+	}
 	c.Redirect(http.StatusFound, "/oauth/callback#"+fragment.Encode())
 }
 
@@ -327,23 +526,29 @@ func acceptsJSON(c *gin.Context) bool {
 
 // AuthMiddleware validates JWT and sets identity claims in context.
 func (h *Handler) AuthMiddleware() gin.HandlerFunc {
+	rejected := func(c *gin.Context) {
+		// Its own copy, not the login one: someone whose session timed out needs
+		// "请重新登录", not "用户名或密码不正确".
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"error": "登录状态已失效，请重新登录",
+			"code":  "invalid_credentials",
+		})
+	}
 	return func(c *gin.Context) {
 		header := strings.TrimSpace(c.GetHeader("Authorization"))
 		if len(header) < 8 || !strings.EqualFold(header[:7], "Bearer ") {
-			writeError(c, domain.ErrInvalidCredentials)
-			c.Abort()
+			rejected(c)
 			return
 		}
 		claims, err := h.service.Authenticate(c.Request.Context(), strings.TrimSpace(header[7:]))
 		if err != nil {
-			writeError(c, domain.ErrInvalidCredentials)
-			c.Abort()
+			rejected(c)
 			return
 		}
 		c.Set(claimsKey, claims)
 		c.Set("user_id", claims.UserID)
-		// RequireAdmin reads the shared context keys, so this middleware has to
-		// populate them as well or every admin user route is rejected as anonymous.
+		// RequirePermission reads the shared context keys, so this middleware has
+		// to populate them as well or every admin route is rejected as anonymous.
 		c.Set(middleware.UserRoleKey, claims.Role)
 		c.Set(middleware.IsAdminKey, claims.IsAdmin)
 		c.Next()
@@ -444,24 +649,56 @@ func currentUserID(c *gin.Context) (uint, bool) {
 	}
 }
 
-func writeError(c *gin.Context, err error) {
-	status := http.StatusInternalServerError
-	message := "internal server error"
+// errorCopy is the storefront-facing answer for an identity failure. The
+// domain sentinels are English (they are log material), so the buyer-facing
+// wording lives here, keyed off the sentinel, with the specific reason a
+// validation error carries kept visible.
+func errorCopy(err error) (int, string, string) {
 	switch {
 	case errors.Is(err, domain.ErrInvalidInput):
-		status, message = http.StatusBadRequest, err.Error()
+		return http.StatusBadRequest, "invalid_input", detail(err, "信息填得不对，请检查后重试")
 	case errors.Is(err, domain.ErrInvalidCredentials):
-		status, message = http.StatusUnauthorized, err.Error()
+		return http.StatusUnauthorized, "invalid_credentials", detail(err, "用户名或密码不正确，或登录状态已过期")
 	case errors.Is(err, domain.ErrInactiveUser):
-		status, message = http.StatusForbidden, err.Error()
-	case errors.Is(err, domain.ErrUserNotFound), errors.Is(err, domain.ErrIdentityNotFound):
-		status, message = http.StatusNotFound, err.Error()
-	case errors.Is(err, domain.ErrUsernameTaken), errors.Is(err, domain.ErrEmailTaken), errors.Is(err, domain.ErrIdentityAlreadyBound), errors.Is(err, domain.ErrLastLoginMethod):
-		status, message = http.StatusConflict, err.Error()
-	default:
+		return http.StatusForbidden, "account_disabled", "账号已被停用，请联系管理员"
+	case errors.Is(err, domain.ErrCheckinDisabled):
+		return http.StatusForbidden, "checkin_disabled", "签到功能当前未开启"
+	case errors.Is(err, domain.ErrUserNotFound):
+		return http.StatusNotFound, "user_not_found", "用户不存在"
+	case errors.Is(err, domain.ErrIdentityNotFound):
+		return http.StatusNotFound, "identity_not_found", "还没有绑定 NodeLoc 账号"
+	case errors.Is(err, domain.ErrNotBound):
+		return http.StatusConflict, "not_bound", "还没有绑定 NodeLoc 账号，请先完成绑定"
+	case errors.Is(err, domain.ErrUsernameTaken):
+		return http.StatusConflict, "username_taken", "用户名已被占用，换一个试试"
+	case errors.Is(err, domain.ErrEmailTaken):
+		return http.StatusConflict, "email_taken", "这个邮箱已经被其他账号使用"
+	case errors.Is(err, domain.ErrIdentityAlreadyBound):
+		return http.StatusConflict, "identity_bound", "这个 NodeLoc 账号已经绑定了其他用户"
+	case errors.Is(err, domain.ErrLastLoginMethod):
+		return http.StatusConflict, "last_login_method", "这是仅剩的登录方式，无法解绑"
+	case errors.Is(err, domain.ErrAlreadyCheckedIn):
+		return http.StatusConflict, "checked_in_today", "今天已经签到过啦，明天再来"
+	}
+	return http.StatusInternalServerError, "internal_error", "服务器开小差了，请稍后再试"
+}
+
+// detail keeps the reason a wrapped sentinel carries ("invalid input: 昵称最多
+// 32 个字符" → the part after the colon) and falls back when there is none.
+func detail(err error, fallback string) string {
+	_, tail, found := strings.Cut(err.Error(), ": ")
+	if found && strings.TrimSpace(tail) != "" {
+		return tail
+	}
+	return fallback
+}
+
+func writeError(c *gin.Context, err error) {
+	status, code, message := errorCopy(err)
+	if status == http.StatusInternalServerError {
 		// The client only sees a generic message, so the real cause has to reach
 		// the server log or unexplained 500s cannot be diagnosed.
 		log.Printf("[identity] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
 	}
-	c.JSON(status, gin.H{"error": message})
+	c.JSON(status, gin.H{"error": message, "code": code})
 }

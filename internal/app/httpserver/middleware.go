@@ -77,32 +77,56 @@ func parseUint(s string) (uint, error) {
 	return result, nil
 }
 
-// RequirePermission checks if the user has the required permission via Casbin.
-func RequirePermission(resource, action string) gin.HandlerFunc {
+// RequirePermission is the back office's gate. It replaces the old
+// admin-or-nothing check: the account behind the token is re-read (a JWT only
+// carries the role it was signed with), and Casbin then decides whether that
+// role may act on this resource. A plain customer therefore gets a clear 403 on
+// every admin route, while 运营 and 客服 see only the pages their role grants.
+func RequirePermission(reader AccountReader, resource, action string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID, exists := c.Get(UserIDKey)
-		if !exists {
+		userID := contextUserID(c)
+		if userID == 0 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
 
-		role, _ := c.Get(UserRoleKey)
-		roleStr, _ := role.(string)
-		userIDStr, _ := userID.(uint)
-
-		// Super admin always has access
-		if roleStr == "super_admin" {
-			c.Next()
-			return
+		role := contextRole(c)
+		if reader != nil {
+			state, found := reader(c.Request.Context(), userID)
+			switch {
+			case !found:
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "账号已不存在，请重新登录"})
+				return
+			case !state.IsActive:
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "账号已被禁用"})
+				return
+			}
+			role = state.Role
+			c.Set(UserRoleKey, role)
+			c.Set(IsAdminKey, state.IsAdmin)
 		}
 
-		if !authz.HasPermission(userIDStr, resource, action) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+		if role == "" || role == "user" || !authz.Can(role, resource, action) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":      "当前账号没有这项后台权限",
+				"code":       "permission_denied",
+				"permission": resource + ":" + action,
+				"your_role":  role,
+			})
 			return
 		}
 
 		c.Next()
 	}
+}
+
+func contextRole(c *gin.Context) string {
+	value, exists := c.Get(UserRoleKey)
+	if !exists {
+		return ""
+	}
+	role, _ := value.(string)
+	return role
 }
 
 // AccountState is an account's current authorization data, read from the store.
@@ -115,45 +139,6 @@ type AccountState struct {
 // AccountReader reports an account's current state; found is false when the
 // account no longer exists.
 type AccountReader func(ctx context.Context, userID uint) (state AccountState, found bool)
-
-// RequireAdmin checks if user is an admin.
-//
-// reader is mandatory in the booted application: a JWT only carries the role
-// the account had when it was signed, so without a fresh read a newly promoted
-// admin is locked out of every admin route (403) until the token expires, and a
-// demoted one keeps full access.
-func RequireAdmin(reader AccountReader) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userID := contextUserID(c)
-		if reader != nil && userID != 0 {
-			state, found := reader(c.Request.Context(), userID)
-			switch {
-			case !found:
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "账号已不存在，请重新登录"})
-				return
-			case !state.IsActive:
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "账号已被禁用"})
-				return
-			}
-			c.Set(UserRoleKey, state.Role)
-			c.Set(IsAdminKey, state.IsAdmin)
-		}
-
-		role, exists := c.Get(UserRoleKey)
-		if !exists {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-			return
-		}
-
-		roleStr, _ := role.(string)
-		if roleStr != "super_admin" && roleStr != "admin" {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin access required"})
-			return
-		}
-
-		c.Next()
-	}
-}
 
 func contextUserID(c *gin.Context) uint {
 	v, exists := c.Get(UserIDKey)

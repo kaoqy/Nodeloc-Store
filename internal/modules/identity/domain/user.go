@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -18,6 +19,9 @@ var (
 	ErrInactiveUser         = errors.New("user account is inactive")
 	ErrInvalidInput         = errors.New("invalid input")
 	ErrLastLoginMethod      = errors.New("cannot remove the last login method")
+	ErrAlreadyCheckedIn     = errors.New("already checked in today")
+	ErrCheckinDisabled      = errors.New("check-in is disabled")
+	ErrNotBound             = errors.New("no oauth account is bound")
 )
 
 // User is the identity module's user aggregate.
@@ -34,6 +38,8 @@ type User struct {
 	Role            string         `gorm:"size:32;default:'user';not null;index" json:"role"`
 	Points          int            `gorm:"default:0;not null" json:"points"`
 	ConsecutiveDays int            `gorm:"default:0;not null" json:"consecutive_days"`
+	TotalCheckins   int            `gorm:"default:0;not null" json:"total_checkins"`
+	LastCheckinDate *time.Time     `json:"last_checkin_date,omitempty"`
 	Nickname        string         `gorm:"size:64" json:"nickname"`
 	AvatarURL       string         `gorm:"size:255" json:"avatar_url"`
 	Bio             string         `gorm:"type:text" json:"bio"`
@@ -48,6 +54,40 @@ type User struct {
 	LastLoginIP     string         `gorm:"size:45" json:"-"`
 	LastLoginAt     *time.Time     `json:"last_login_at,omitempty"`
 }
+
+// CheckIn is one day's check-in. The row is the receipt; the user's counters are
+// the summary kept on the account.
+type CheckIn struct {
+	ID              uint           `gorm:"primarykey" json:"id"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+	UserID          uint           `gorm:"not null;index" json:"user_id"`
+	CheckinDate     time.Time      `gorm:"type:date;not null;index" json:"checkin_date"`
+	RewardPoints    int            `gorm:"default:0;not null" json:"reward_points"`
+	ConsecutiveDays int            `gorm:"default:1;not null" json:"consecutive_days"`
+}
+
+func (CheckIn) TableName() string { return "check_ins" }
+
+// PointEntry is a row of the points ledger. ReferenceType+ReferenceID are
+// unique, which is what makes an award idempotent: re-running the same reward
+// fails on the constraint instead of paying twice.
+type PointEntry struct {
+	ID            uint           `gorm:"primarykey" json:"id"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	DeletedAt     gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+	UserID        uint           `gorm:"not null;index" json:"user_id"`
+	Delta         int            `gorm:"not null" json:"delta"`
+	BalanceAfter  int            `gorm:"not null" json:"balance_after"`
+	Reason        string         `gorm:"size:120;not null" json:"reason"`
+	ReferenceType string         `gorm:"size:32;not null;index:idx_reference,unique" json:"reference_type"`
+	ReferenceID   string         `gorm:"size:128;not null;index:idx_reference,unique" json:"reference_id"`
+	ActorID       *uint          `json:"actor_id,omitempty"`
+}
+
+func (PointEntry) TableName() string { return "point_ledgers" }
 
 // OAuthIdentity links a local User to an OAuth provider identity.
 type OAuthIdentity struct {
@@ -172,4 +212,128 @@ func stringPointer(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+// Check-in rewards: a flat daily base plus a streak bonus that tops out after a
+// week, so coming back every day pays but the reward never runs away from the
+// shop owner.
+const (
+	checkinBasePoints  = 5
+	checkinStreakBonus = 2
+	checkinStreakCap   = 6
+)
+
+// Checkin pays out today's check-in and moves the user's counters. The day is
+// truncated to UTC because 签到 gates on the calendar day, not the timestamp:
+// two checks a minute apart are still the same day, and one yesterday plus one
+// today is a streak even if only an hour sits between them.
+func (u *User) Checkin(now time.Time) (*CheckIn, error) {
+	day := startOfUTCDay(now)
+	if u.LastCheckinDate != nil && startOfUTCDay(*u.LastCheckinDate).Equal(day) {
+		return nil, ErrAlreadyCheckedIn
+	}
+	streak := 1
+	if u.LastCheckinDate != nil && startOfUTCDay(*u.LastCheckinDate).Equal(day.AddDate(0, 0, -1)) {
+		streak = u.ConsecutiveDays + 1
+	}
+	reward := checkinBasePoints
+	if bonus := (streak - 1) * checkinStreakBonus; bonus < checkinStreakCap*checkinStreakBonus {
+		reward += bonus
+	} else {
+		reward += checkinStreakCap * checkinStreakBonus
+	}
+
+	u.ConsecutiveDays = streak
+	u.TotalCheckins++
+	u.LastCheckinDate = &day
+	u.Points += reward
+
+	return &CheckIn{UserID: u.ID, CheckinDate: day, RewardPoints: reward, ConsecutiveDays: streak}, nil
+}
+
+// HasCheckedInToday reports whether the current streak is still open.
+func (u *User) HasCheckedInToday(now time.Time) bool {
+	return u.LastCheckinDate != nil && startOfUTCDay(*u.LastCheckinDate).Equal(startOfUTCDay(now))
+}
+
+// Roles are every role the application issues, lowest privilege first. They
+// live with the User aggregate because IsAdmin is derived from Role; the
+// policy side of the same names is authz.Roles.
+var Roles = []string{"user", "support", "operator", "admin", "super_admin"}
+
+// ValidRole reports whether a name is one of those roles.
+func ValidRole(role string) bool {
+	for _, candidate := range Roles {
+		if candidate == role {
+			return true
+		}
+	}
+	return false
+}
+
+// SetRole assigns a role and keeps IsAdmin in step with it. Both the JWT
+// claims and the bootstrap check read IsAdmin, so letting the two drift is how
+// an account ends up shown as staff in one place and refused in another.
+func (u *User) SetRole(role string) error {
+	if !ValidRole(role) {
+		return fmt.Errorf("%w: 未知的角色 %q", ErrInvalidInput, role)
+	}
+	u.Role = role
+	u.IsAdmin = IsStaff(role)
+	return nil
+}
+
+// IsStaff reports whether a role belongs to the back office.
+func IsStaff(role string) bool { return role != "" && role != "user" }
+
+// ProfileEdit is the part of an account a buyer may change themselves. A nil
+// field means "leave it alone", which keeps a partial PATCH from blanking the
+// nickname or avatar.
+type ProfileEdit struct {
+	Nickname  *string
+	AvatarURL *string
+	Bio       *string
+	Email     *string
+}
+
+// ApplyProfile validates and applies an edit in place, so an invalid request
+// never leaves the aggregate half-changed.
+func (u *User) ApplyProfile(edit ProfileEdit) error {
+	if edit.Nickname != nil {
+		nickname := strings.TrimSpace(*edit.Nickname)
+		if len(nickname) > 32 {
+			return fmt.Errorf("%w: 昵称最多 32 个字符", ErrInvalidInput)
+		}
+		u.Nickname = nickname
+	}
+	if edit.AvatarURL != nil {
+		avatar := strings.TrimSpace(*edit.AvatarURL)
+		if len(avatar) > 255 {
+			return fmt.Errorf("%w: 头像链接过长", ErrInvalidInput)
+		}
+		if avatar != "" && !strings.HasPrefix(avatar, "https://") && !strings.HasPrefix(avatar, "http://") && !strings.HasPrefix(avatar, "/") {
+			return fmt.Errorf("%w: 头像必须是 http(s) 链接或站内路径", ErrInvalidInput)
+		}
+		u.AvatarURL = avatar
+	}
+	if edit.Bio != nil {
+		bio := strings.TrimSpace(*edit.Bio)
+		if len(bio) > 500 {
+			return fmt.Errorf("%w: 个人简介最多 500 个字符", ErrInvalidInput)
+		}
+		u.Bio = bio
+	}
+	if edit.Email != nil {
+		email := strings.ToLower(strings.TrimSpace(*edit.Email))
+		if email == "" || len(email) > 190 || !strings.Contains(email, "@") {
+			return fmt.Errorf("%w: 邮箱格式不正确", ErrInvalidInput)
+		}
+		u.Email = &email
+	}
+	return nil
+}
+
+func startOfUTCDay(value time.Time) time.Time {
+	value = value.UTC()
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
 }

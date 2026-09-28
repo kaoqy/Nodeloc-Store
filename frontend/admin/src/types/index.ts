@@ -26,6 +26,7 @@ export interface User {
 
 export interface AuthTokens {
   access_token: string
+  refresh_token?: string
 }
 
 export interface LoginResponse {
@@ -42,6 +43,9 @@ export interface Product {
   price: number
   original_price?: number | null
   stock_count: number
+  // Delivered volume, maintained by the server. Read-only in the back office.
+  sold_count?: number
+  is_featured?: boolean
   stock_visible?: boolean
   auto_deliver?: boolean
   is_published: boolean
@@ -66,6 +70,10 @@ export interface Card {
   sold_at?: string | null
   created_at?: string
   updated_at?: string
+  // Present on /admin/cards, which spans products and names each row.
+  product_name?: string
+  product_slug?: string
+  order_no?: string
 }
 
 export interface Order {
@@ -78,6 +86,8 @@ export interface Order {
   quantity: number
   unit_price?: number
   total_amount: number
+  discount_amount?: number
+  coupon_code?: string | null
   status: string
   fulfillment_status?: string
   transaction_id?: string | null
@@ -114,6 +124,11 @@ export interface Coupon {
   is_active: boolean
   valid_from?: string | null
   valid_until?: string | null
+  description?: string | null
+  scope?: string
+  category_id?: number | null
+  product_id?: number | null
+  per_user_limit?: number
   created_at?: string
   updated_at?: string
 }
@@ -201,6 +216,48 @@ export interface RecentOrder {
   paid_at?: string
 }
 
+export interface CategoryStat {
+  name: string
+  products: number
+  orders: number
+  revenue: number
+}
+
+export interface CouponStat {
+  coupon_id: number
+  code: string
+  uses: number
+  discount: number
+  revenue: number
+}
+
+export interface CardProductHealth {
+  product_id: number
+  name: string
+  slug: string
+  available: number
+  sold: number
+  disabled: number
+  sell_through: number
+}
+
+export interface CardHealth {
+  available: number
+  sold: number
+  disabled: number
+  total: number
+  by_product: CardProductHealth[] | null
+}
+
+export interface Engagement {
+  checkins_period: number
+  checkin_users_period: number
+  points_issued_period: number
+  points_held: number
+  bound_users: number
+  active_week: number
+}
+
 export interface DashboardStats {
   revenue_total: number
   revenue_period: number
@@ -237,9 +294,24 @@ export interface DashboardStats {
   stock_alerts: StockAlert[] | null
   funnel: FunnelCount[] | null
   recent_orders: RecentOrder[] | null
+
+  stock_alert_threshold: number
+  category_sales: CategoryStat[] | null
+  top_coupons: CouponStat[] | null
+  coupon_uses_period: number
+  coupon_discount_period: number
+  coupons_total: number
+  coupons_active: number
+  card_health: CardHealth
+  engagement: Engagement
 }
 
 export type SettingsMap = Record<string, string | number | boolean | null>
+
+export interface FooterLink {
+  label: string
+  url: string
+}
 
 export interface RuntimeSettings {
   app: {
@@ -249,6 +321,10 @@ export interface RuntimeSettings {
     site_logo: string
     scheme: string
     domain: string
+    footer_text?: string
+    footer_note?: string
+    footer_links?: FooterLink[] | null
+    announcement?: string
   }
   oauth: {
     enabled: boolean
@@ -264,6 +340,11 @@ export interface RuntimeSettings {
     token: string
     secret_key: string
   }
-  features: { enabled_registration: boolean }
+  features: {
+    enabled_registration: boolean
+    enabled_checkin?: boolean
+    enabled_coupons?: boolean
+    stock_alert_threshold?: number
+  }
   theme: { theme_primary: string; default_locale: string }
 }

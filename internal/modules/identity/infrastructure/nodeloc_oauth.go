@@ -175,6 +175,34 @@ func (n *NodeLocOAuth) ExchangeCode(ctx context.Context, code string) (*domain.O
 	}, nil
 }
 
+// FetchProfile re-reads the account behind a stored access token. It is the
+// 同步资料 path: a buyer who changes their 头像 or confirms their email on
+// NodeLoc gets the new values here without a sign-out round trip.
+func (n *NodeLocOAuth) FetchProfile(ctx context.Context, accessToken string) (*domain.OAuthProfile, error) {
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return nil, errors.New("access token is required")
+	}
+	var userResponse nodeLocUserResponse
+	if err := n.getBearing(ctx, "/oauth-provider/userinfo", accessToken, &userResponse); err != nil {
+		return nil, fmt.Errorf("retrieve nodeloc userinfo: %w", err)
+	}
+	uid := firstNonEmpty(userResponse.ID, userResponse.UID, userResponse.UserID)
+	if uid == "" {
+		return nil, errors.New("nodeloc userinfo response did not contain a user ID")
+	}
+	return &domain.OAuthProfile{
+		Provider:    nodeLocProviderName,
+		ProviderUID: uid,
+		Username:    firstNonEmpty(userResponse.Username, userResponse.Name, "nodeloc-"+uid),
+		DisplayName: firstNonEmpty(userResponse.Name, userResponse.DisplayName, userResponse.Username),
+		Email:       optionalString(userResponse.Email),
+		AvatarURL:   firstNonEmpty(userResponse.AvatarURL, userResponse.Avatar),
+		TrustLevel:  parseOptionalInt(userResponse.TrustLevel),
+		Scope:       n.scopes,
+	}, nil
+}
+
 type nodeLocUserResponse struct {
 	ID          string          `json:"id"`
 	UID         string          `json:"uid"`

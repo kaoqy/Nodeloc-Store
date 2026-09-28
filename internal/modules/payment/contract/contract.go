@@ -110,3 +110,11 @@ type TransferResult struct {
 type FulfillmentService interface {
 	Fulfill(ctx context.Context, order *models.Order) error
 }
+
+// CouponPricing is the catalogue's answer to "what is this code worth on that
+// order". Payment asks before any money moves, because the amount handed to
+// NodeLoc must already be the discounted one; a code that cannot be priced
+// there has to fail the checkout rather than quietly bill the full total.
+type CouponPricing interface {
+	DiscountFor(ctx context.Context, userID, productID uint, quantity, unitPrice int, code string) (discount int, couponID uint, err error)
+}

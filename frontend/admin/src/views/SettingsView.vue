@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useAuthStore } from '../stores/auth'
 import { getRuntimeSettings, saveRuntimeSettings, testOAuth, testPayment } from '../api/system'
-import type { RuntimeSettings } from '../types'
+import type { FooterLink, RuntimeSettings } from '../types'
 import { errorMessage } from '../utils/format'
 
 type Probe = { ok: boolean; text: string }
 
+// The storefront renders the link rows straight into its footer, so the same
+// ceiling the server applies is shown here instead of failing on save.
+const MaxFooterLinks = 8
+
+const auth = useAuthStore()
 const loading = ref(true)
 const saving = ref(false)
 const message = ref('')
@@ -17,12 +23,25 @@ const testingPayment = ref(false)
 const snapshot = ref('')
 
 const settings = reactive<RuntimeSettings>({
-  app: { site_name: '', site_slogan: '', site_description: '', site_logo: '', scheme: 'https', domain: '' },
+  app: {
+    site_name: '',
+    site_slogan: '',
+    site_description: '',
+    site_logo: '',
+    scheme: 'https',
+    domain: '',
+    footer_text: '',
+    footer_note: '',
+    footer_links: [],
+    announcement: '',
+  },
   oauth: { enabled: true, base_url: '', client_id: '', client_secret: '', redirect_uri: '', scopes: '' },
   payment: { enabled: true, payment_id: '', token: '', secret_key: '' },
-  features: { enabled_registration: true },
+  features: { enabled_registration: true, enabled_checkin: true, enabled_coupons: true, stock_alert_threshold: 5 },
   theme: { theme_primary: '#f2704a', default_locale: 'zh-CN' },
 })
+
+const canManage = computed(() => auth.allows('settings', 'manage'))
 
 const dirty = computed(() => snapshot.value !== '' && JSON.stringify(settings) !== snapshot.value)
 const redirectPreview = computed(() => {
@@ -38,15 +57,53 @@ const paymentIncomplete = computed(
     settings.payment.secret_key.trim() === '',
 )
 
+const footerLinks = computed(() => settings.app.footer_links ?? [])
+const linksFull = computed(() => footerLinks.value.length >= MaxFooterLinks)
+
+function addFooterLink() {
+  if (linksFull.value) return
+  const list = (settings.app.footer_links ||= [])
+  const link: FooterLink = { label: '', url: '' }
+  list.push(link)
+}
+
+function removeFooterLink(index: number) {
+  settings.app.footer_links?.splice(index, 1)
+}
+
+// A number input goes through an empty state while it is being retyped, so the
+// field keeps its own string and only the committed value reaches the settings.
+const stockThreshold = ref('5')
+watch(stockThreshold, (raw) => {
+  const parsed = Number.parseInt(raw, 10)
+  settings.features.stock_alert_threshold = Number.isNaN(parsed) ? 5 : Math.min(Math.max(parsed, 0), 999)
+})
+watch(
+  () => settings.features.stock_alert_threshold,
+  (value) => {
+    const text = String(value ?? 5)
+    if (text !== stockThreshold.value) stockThreshold.value = text
+  },
+)
+
+function linkTargetValid(url: string) {
+  const value = url.trim()
+  if (!value) return false
+  if (value.startsWith('/') && !value.startsWith('//')) return true
+  return /^https?:\/\//i.test(value)
+}
+
 async function load() {
   loading.value = true
   try {
     const result = await getRuntimeSettings()
     Object.assign(settings.app, result.app)
+    settings.app.footer_links = (result.app.footer_links ?? []).map((link) => ({ ...link }))
     Object.assign(settings.oauth, result.oauth)
     Object.assign(settings.payment, result.payment)
     Object.assign(settings.features, result.features)
     Object.assign(settings.theme, result.theme)
+    stockThreshold.value = String(settings.features.stock_alert_threshold ?? 5)
     snapshot.value = JSON.stringify(settings)
   } catch (err) {
     message.value = errorMessage(err, '加载配置失败')
@@ -122,8 +179,9 @@ onMounted(load)
         <p class="mt-1 text-sm text-[var(--text-quiet)]">保存后运行时配置立即重建，无需重启容器</p>
       </div>
       <div class="flex items-center gap-3">
-        <span v-if="dirty" class="badge badge-warning">有未保存的更改</span>
-        <button class="btn btn-primary" :disabled="saving || !dirty" @click="save">
+        <span v-if="!canManage" class="badge badge-neutral">只读</span>
+        <span v-else-if="dirty" class="badge badge-warning">有未保存的更改</span>
+        <button class="btn btn-primary" :disabled="saving || !dirty || !canManage" @click="save">
           <span v-if="saving" class="spinner spinner-light !size-4" />
           {{ saving ? '正在保存…' : '保存设置' }}
         </button>
@@ -131,9 +189,14 @@ onMounted(load)
     </div>
 
     <p v-if="message" :class="['alert', messageType === 'ok' ? 'alert-success' : 'alert-danger']">{{ message }}</p>
+    <p v-if="!canManage" class="alert alert-warning" role="alert">
+      当前账号只有查看系统设置的权限，所有字段均为只读。需要改动时请联系超级管理员授予「设置 · 管理」。
+    </p>
 
     <div class="grid gap-6 lg:grid-cols-3">
-      <div class="space-y-5 lg:col-span-2">
+      <!-- A disabled fieldset turns off every control inside it at once, so the
+           read-only view cannot be edited even where an input has no :disabled. -->
+      <fieldset class="m-0 min-w-0 space-y-5 border-0 p-0 lg:col-span-2" :disabled="!canManage">
         <!-- 站点信息 -->
         <div class="card">
           <div class="mb-5 flex items-baseline justify-between gap-4">
@@ -286,26 +349,154 @@ onMounted(load)
             <p v-if="payment" class="codebox text-xs">{{ payment.text }}</p>
           </div>
         </div>
-      </div>
+
+        <!-- 公告与页脚 -->
+        <div class="card">
+          <div class="mb-5 flex items-baseline justify-between gap-4">
+            <div>
+              <h3 class="font-semibold">公告与页脚</h3>
+              <p class="hint mt-0.5">商店前台的首页横幅与页脚文案</p>
+            </div>
+            <span class="hint">纯展示，不参与下单</span>
+          </div>
+          <div class="space-y-4">
+            <div>
+              <label class="label" for="footer-announcement">首页公告</label>
+              <input
+                id="footer-announcement"
+                v-model="settings.app.announcement"
+                class="input"
+                maxlength="200"
+                placeholder="例如：国庆期间 24 小时自动发货"
+              />
+              <p class="hint mt-1">单行横幅，买家可以在前台自行关闭；清空即不再展示。</p>
+            </div>
+            <div>
+              <label class="label" for="footer-text">页脚主文案</label>
+              <textarea
+                id="footer-text"
+                v-model="settings.app.footer_text"
+                class="input"
+                maxlength="300"
+                rows="2"
+                placeholder="店铺简介、联系方式、备案号等"
+              ></textarea>
+              <p class="hint mt-1">留空则显示站点名称与标语。</p>
+            </div>
+            <div>
+              <label class="label" for="footer-note">页脚小字</label>
+              <input
+                id="footer-note"
+                v-model="settings.app.footer_note"
+                class="input"
+                maxlength="120"
+                placeholder="例如：© 2026 Your Shop · 保留所有权利"
+              />
+              <p class="hint mt-1">展示在主文案下方的一行说明。</p>
+            </div>
+            <div>
+              <div class="flex items-baseline justify-between gap-3">
+                <span class="label mb-0">页脚链接</span>
+                <span class="hint mono">{{ footerLinks.length }} / {{ MaxFooterLinks }}</span>
+              </div>
+              <p class="hint mt-1">支持 <span class="mono">https://</span>、<span class="mono">http://</span> 或以 <span class="mono">/</span> 开头的站内路径。</p>
+              <div class="mt-3 space-y-2.5">
+                <div v-for="(link, index) in footerLinks" :key="index">
+                  <div class="flex items-center gap-2">
+                    <input
+                      v-model="link.label"
+                      class="input w-32 shrink-0"
+                      maxlength="40"
+                      placeholder="名称"
+                      :aria-label="`第 ${index + 1} 条页脚链接的名称`"
+                    />
+                    <input
+                      v-model="link.url"
+                      class="input mono min-w-0 flex-1"
+                      maxlength="300"
+                      placeholder="https://example.com"
+                      :aria-label="`第 ${index + 1} 条页脚链接的地址`"
+                    />
+                    <button class="btn btn-quiet btn-sm shrink-0" type="button" @click="removeFooterLink(index)">移除</button>
+                  </div>
+                  <p v-if="link.url.trim() && !linkTargetValid(link.url)" class="mt-1 text-xs text-[var(--danger)]">
+                    地址需要以 http://、https:// 或 / 开头，这一条在保存时会被忽略。
+                  </p>
+                </div>
+                <div class="flex items-center gap-3">
+                  <button v-if="!linksFull" class="btn btn-secondary btn-sm" type="button" @click="addFooterLink">添加链接</button>
+                  <span v-else class="hint">最多 {{ MaxFooterLinks }} 条链接。</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </fieldset>
 
       <!-- 右侧栏 -->
-      <div class="space-y-5">
+      <fieldset class="m-0 min-w-0 space-y-5 border-0 p-0" :disabled="!canManage">
         <div class="card">
           <h3 class="mb-4 font-semibold">功能开关</h3>
-          <div class="flex items-center justify-between gap-4">
-            <div>
-              <p class="text-sm">开放本地账号注册</p>
-              <p class="hint mt-0.5">关闭后仅能通过 NodeLoc 登录</p>
+          <div class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm">开放本地账号注册</p>
+                <p class="hint mt-0.5">关闭后仅能通过 NodeLoc 登录</p>
+              </div>
+              <button
+                class="switch"
+                :class="{ 'switch-on': settings.features.enabled_registration }"
+                type="button"
+                role="switch"
+                :aria-checked="settings.features.enabled_registration"
+                aria-label="开放本地账号注册"
+                @click="settings.features.enabled_registration = !settings.features.enabled_registration"
+              />
             </div>
-            <button
-              class="switch"
-              :class="{ 'switch-on': settings.features.enabled_registration }"
-              type="button"
-              role="switch"
-              :aria-checked="settings.features.enabled_registration"
-              aria-label="开放本地账号注册"
-              @click="settings.features.enabled_registration = !settings.features.enabled_registration"
-            />
+            <div class="divider" />
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm">每日签到</p>
+                <p class="hint mt-0.5">关闭后买家中心不再显示签到入口</p>
+              </div>
+              <button
+                class="switch"
+                :class="{ 'switch-on': settings.features.enabled_checkin }"
+                type="button"
+                role="switch"
+                :aria-checked="settings.features.enabled_checkin"
+                aria-label="开放每日签到"
+                @click="settings.features.enabled_checkin = !settings.features.enabled_checkin"
+              />
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm">优惠码</p>
+                <p class="hint mt-0.5">关闭后下单不再接受任何优惠码</p>
+              </div>
+              <button
+                class="switch"
+                :class="{ 'switch-on': settings.features.enabled_coupons }"
+                type="button"
+                role="switch"
+                :aria-checked="settings.features.enabled_coupons"
+                aria-label="开放优惠码"
+                @click="settings.features.enabled_coupons = !settings.features.enabled_coupons"
+              />
+            </div>
+            <div class="divider" />
+            <div>
+              <label class="label" for="stock-threshold">库存预警阈值</label>
+              <input
+                id="stock-threshold"
+                v-model="stockThreshold"
+                class="input mono w-28"
+                inputmode="numeric"
+                autocomplete="off"
+                @blur="stockThreshold = String(settings.features.stock_alert_threshold ?? 5)"
+              />
+              <p class="hint mt-1">可用卡密少于这个数就进入看板的「等待补货」，0 表示只在完全缺货时提醒。</p>
+            </div>
           </div>
         </div>
 
@@ -350,7 +541,7 @@ onMounted(load)
             配置写入数据库中的运行时记录，不依赖任何 yml 文件；备份数据库即备份全部设置。
           </p>
         </div>
-      </div>
+      </fieldset>
     </div>
   </section>
 </template>

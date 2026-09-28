@@ -3,9 +3,11 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { cancelOrder, deliverOrder, fulfillOrder, getOrder, reconcileOrder, refundOrder } from '../api/orders'
 import { errorMessage, fulfillmentStatus, money, orderStatus, providerStatus, reconcileMessage, when } from '../utils/format'
+import { useAuthStore } from '../stores/auth'
 import type { Order } from '../types'
 
 const route = useRoute()
+const auth = useAuthStore()
 
 const loading = ref(true)
 const busy = ref(false)
@@ -15,6 +17,11 @@ const order = ref<Order | null>(null)
 const showDeliver = ref(false)
 const deliveryContent = ref('')
 const copied = ref(false)
+
+// Every button below moves the order or the money, so they belong to
+// orders:manage. A 客服 account with only orders:view reads this same screen and
+// is told why there is nothing to press, rather than meeting a 403 on click.
+const canManage = computed(() => auth.allows('orders', 'manage'))
 
 const orderNo = computed(() => String(route.params.orderNo || ''))
 const status = computed(() => orderStatus(order.value?.status || ''))
@@ -134,8 +141,11 @@ onMounted(load)
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-2">
+        <p v-if="!canManage" class="quiet max-w-56 text-right text-xs">
+          当前账号只有查看订单的权限，需要处理本单请向店家申请「订单管理」。
+        </p>
         <button
-          v-if="order.status === 'pending'"
+          v-if="canManage && order.status === 'pending'"
           class="btn btn-primary btn-sm"
           :disabled="busy"
           @click="reconcile"
@@ -143,7 +153,7 @@ onMounted(load)
           查单对账
         </button>
         <button
-          v-if="order.status === 'pending'"
+          v-if="canManage && order.status === 'pending'"
           class="btn btn-secondary btn-sm"
           :disabled="busy"
           @click="run(() => cancelOrder(orderNo), '订单已取消')"
@@ -151,18 +161,18 @@ onMounted(load)
           取消订单
         </button>
         <button
-          v-if="waitingStock"
+          v-if="canManage && waitingStock"
           class="btn btn-primary btn-sm"
           :disabled="busy"
           @click="run(() => fulfillOrder(orderNo), '已重试自动交付')"
         >
           重试自动交付
         </button>
-        <button v-if="canDeliver" class="btn btn-primary btn-sm" :disabled="busy" @click="showDeliver = true">
+        <button v-if="canManage && canDeliver" class="btn btn-primary btn-sm" :disabled="busy" @click="showDeliver = true">
           人工发货
         </button>
         <button
-          v-if="isPaid && order.status !== 'refunded'"
+          v-if="canManage && isPaid && order.status !== 'refunded'"
           class="btn btn-danger btn-sm"
           :disabled="busy"
           @click="run(() => refundOrder(orderNo), '订单已退款')"

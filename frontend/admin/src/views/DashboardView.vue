@@ -4,6 +4,7 @@ import StatCard from '../components/StatCard.vue'
 import { listAuditLogs } from '../api/logs'
 import { getStats } from '../api/system'
 import { errorMessage, fulfillmentStatus, money, orderStatus, when, dayLabel } from '../utils/format'
+import { useAuthStore } from '../stores/auth'
 import type { AuditLog, DashboardStats } from '../types'
 
 type Metric = 'revenue' | 'orders' | 'users'
@@ -49,6 +50,7 @@ function readPrefs(): ViewPrefs {
 }
 
 const prefs = readPrefs()
+const auth = useAuthStore()
 const loading = ref(true)
 const error = ref('')
 const days = ref(prefs.days)
@@ -65,13 +67,32 @@ const topBuyers = computed(() => stats.value?.top_buyers ?? [])
 const stockAlerts = computed(() => stats.value?.stock_alerts ?? [])
 const funnel = computed(() => stats.value?.funnel ?? [])
 const recentOrders = computed(() => stats.value?.recent_orders ?? [])
+const categorySales = computed(() => stats.value?.category_sales ?? [])
+const topCoupons = computed(() => stats.value?.top_coupons ?? [])
+const cardHealth = computed(() => stats.value?.card_health ?? null)
+const cardByProduct = computed(() => cardHealth.value?.by_product ?? [])
+const engagement = computed(() => stats.value?.engagement ?? null)
+const alertThreshold = computed(() => stats.value?.stock_alert_threshold ?? 0)
 const onboarding = computed(() => Boolean(stats.value) && (stats.value?.orders_total ?? 0) === 0)
 
-const onboardingSteps = [
-  { to: '/products/new', label: '上架第一件商品', hint: '定价、描述并公开可见' },
-  { to: '/cards', label: '导入卡密库存', hint: '卡密类商品付款后自动交付' },
-  { to: '/settings', label: '核对支付与登录', hint: 'NodeLoc Payments 与 OAuth 回调' },
-]
+// Panels only ask for what the role may open. 近期操作 reads the audit log, so a
+// role without logs:view skips that request instead of collecting a 403.
+const canSeeLogs = computed(() => auth.allows('logs', 'view'))
+const sellThrough = computed(() => {
+  const health = cardHealth.value
+  if (!health?.total) return 0
+  return Math.round((health.sold / health.total) * 100)
+})
+const categoryPeak = computed(() => Math.max(1, ...categorySales.value.map((item) => item.revenue)))
+const couponPeak = computed(() => Math.max(1, ...topCoupons.value.map((item) => item.revenue)))
+
+const onboardingSteps = computed(() =>
+  [
+    { to: '/products/new', label: '上架第一件商品', hint: '定价、描述并公开可见', permission: ['products', 'manage'] },
+    { to: '/cards', label: '导入卡密库存', hint: '卡密类商品付款后自动交付', permission: ['cards', 'manage'] },
+    { to: '/settings', label: '核对支付与登录', hint: 'NodeLoc Payments 与 OAuth 回调', permission: ['settings', 'view'] },
+  ].filter((step) => auth.allows(step.permission[0], step.permission[1])),
+)
 
 const bars = computed(() => {
   const key = metric.value
@@ -130,11 +151,11 @@ const backlog = computed(() => {
   const s = stats.value
   if (!s) return []
   return [
-    { to: '/orders?status=pending', label: '待支付订单', count: s.orders_pending, tone: 'warning' },
-    { to: '/orders?status=paid', label: '等待人工发货', count: s.orders_manual_pending, tone: 'info' },
-    { to: '/cards', label: '等待补货', count: s.orders_waiting, tone: 'danger' },
-    { to: '/orders', label: '期间退款', count: s.refunded_period, tone: 'neutral' },
-  ].filter((item) => item.count > 0)
+    { to: '/orders?status=pending', label: '待支付订单', count: s.orders_pending, tone: 'warning', permission: ['orders', 'view'] },
+    { to: '/orders?status=paid', label: '等待人工发货', count: s.orders_manual_pending, tone: 'info', permission: ['orders', 'view'] },
+    { to: '/cards', label: '等待补货', count: s.orders_waiting, tone: 'danger', permission: ['cards', 'view'] },
+    { to: '/orders', label: '期间退款', count: s.refunded_period, tone: 'neutral', permission: ['orders', 'view'] },
+  ].filter((item) => item.count > 0 && auth.allows(item.permission[0], item.permission[1]))
 })
 
 const buyerPeak = computed(() => Math.max(1, ...topBuyers.value.map((item) => item.revenue)))
@@ -145,7 +166,12 @@ async function load(silent = false) {
   if (!silent) loading.value = true
   error.value = ''
   try {
-    const [statsResult, logResult] = await Promise.all([getStats(days.value), listAuditLogs({ page: 1, limit: 6 })])
+    const [statsResult, logResult] = await Promise.all([
+      getStats(days.value),
+      canSeeLogs.value
+        ? listAuditLogs({ page: 1, limit: 6 })
+        : Promise.resolve({ items: [] as AuditLog[], total: 0, page: 1, limit: 6, total_pages: 0 }),
+    ])
     stats.value = statsResult
     logs.value = logResult.items
     updatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
@@ -394,7 +420,7 @@ onUnmounted(() => {
       <div class="card">
         <div class="mb-4 flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold">订单结构</h2>
-          <RouterLink to="/orders" class="text-sm accent-text">订单管理</RouterLink>
+          <RouterLink v-if="auth.allows('orders', 'view')" to="/orders" class="text-sm accent-text">订单管理</RouterLink>
         </div>
         <div v-if="loading" class="space-y-3">
           <div v-for="i in 4" :key="i" class="skeleton h-9" />
@@ -435,7 +461,7 @@ onUnmounted(() => {
       <div class="card">
         <div class="mb-4 flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold">热销商品</h2>
-          <RouterLink to="/products" class="text-sm accent-text">商品管理</RouterLink>
+          <RouterLink v-if="auth.allows('products', 'view')" to="/products" class="text-sm accent-text">商品管理</RouterLink>
         </div>
         <div v-if="loading" class="space-y-3">
           <div v-for="i in 4" :key="i" class="skeleton h-10" />
@@ -466,7 +492,7 @@ onUnmounted(() => {
       <div class="card">
         <div class="mb-4 flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold">买家排行</h2>
-          <RouterLink to="/users" class="text-sm accent-text">用户管理</RouterLink>
+          <RouterLink v-if="auth.allows('users', 'view')" to="/users" class="text-sm accent-text">用户管理</RouterLink>
         </div>
         <div v-if="loading" class="space-y-3">
           <div v-for="i in 4" :key="i" class="skeleton h-10" />
@@ -475,6 +501,7 @@ onUnmounted(() => {
         <ol v-else class="space-y-3.5">
           <li v-for="(item, index) in topBuyers" :key="item.user_id">
             <RouterLink
+              v-if="auth.allows('users', 'view')"
               :to="`/users/${item.user_id}`"
               class="flex items-baseline justify-between gap-3 transition-colors hover:underline"
             >
@@ -484,6 +511,13 @@ onUnmounted(() => {
               </p>
               <span class="nums shrink-0 text-[13px] font-semibold">{{ money(item.revenue) }}</span>
             </RouterLink>
+            <div v-else class="flex items-baseline justify-between gap-3">
+              <p class="min-w-0 truncate text-[13px]">
+                <span class="mono quiet mr-1.5">{{ String(index + 1).padStart(2, '0') }}</span>
+                {{ item.name || `#${item.user_id}` }}
+              </p>
+              <span class="nums shrink-0 text-[13px] font-semibold">{{ money(item.revenue) }}</span>
+            </div>
             <div class="mt-1.5 flex items-center gap-2">
               <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
                 <div
@@ -500,7 +534,8 @@ onUnmounted(() => {
       <div class="card">
         <div class="mb-4 flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold">库存预警</h2>
-          <RouterLink to="/cards" class="text-sm accent-text">卡密库存</RouterLink>
+          <RouterLink v-if="auth.allows('cards', 'view')" to="/cards" class="text-sm accent-text">卡密库存</RouterLink>
+          <span v-else class="hint nums">阈值 {{ alertThreshold }}</span>
         </div>
         <div v-if="loading" class="space-y-3">
           <div v-for="i in 4" :key="i" class="skeleton h-10" />
@@ -509,8 +544,21 @@ onUnmounted(() => {
         <ul v-else class="space-y-2.5">
           <li v-for="item in stockAlerts" :key="item.product_id">
             <RouterLink
+              v-if="auth.allows('cards', 'view')"
               :to="`/cards/${item.product_id}`"
               class="flex items-center justify-between gap-3 rounded-md border border-[var(--stroke-quiet)] px-3 py-2.5 transition-colors hover:border-[var(--stroke-hi)]"
+            >
+              <span class="min-w-0">
+                <span class="block truncate text-[13px]">{{ item.name || `#${item.product_id}` }}</span>
+                <span class="hint nums block">已售 {{ item.sold }} 张 · 阈值 {{ alertThreshold }}</span>
+              </span>
+              <span class="badge shrink-0" :class="item.available ? 'badge-warning' : 'badge-danger'">
+                余 {{ item.available }}
+              </span>
+            </RouterLink>
+            <div
+              v-else
+              class="flex items-center justify-between gap-3 rounded-md border border-[var(--stroke-quiet)] px-3 py-2.5"
             >
               <span class="min-w-0">
                 <span class="block truncate text-[13px]">{{ item.name || `#${item.product_id}` }}</span>
@@ -519,12 +567,12 @@ onUnmounted(() => {
               <span class="badge shrink-0" :class="item.available ? 'badge-warning' : 'badge-danger'">
                 余 {{ item.available }}
               </span>
-            </RouterLink>
+            </div>
           </li>
         </ul>
       </div>
 
-      <div class="card">
+      <div v-if="canSeeLogs" class="card">
         <div class="mb-4 flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold">近期操作</h2>
           <RouterLink to="/logs" class="text-sm accent-text">审计日志</RouterLink>
@@ -542,13 +590,160 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <div class="stagger grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+      <div class="card">
+        <div class="mb-4 flex items-center justify-between gap-3">
+          <h2 class="text-base font-semibold">分类销售</h2>
+          <RouterLink v-if="auth.allows('categories', 'view')" to="/categories" class="text-sm accent-text">分类管理</RouterLink>
+        </div>
+        <div v-if="loading" class="space-y-3">
+          <div v-for="i in 4" :key="i" class="skeleton h-10" />
+        </div>
+        <div v-else-if="!categorySales.length" class="py-12 text-center text-sm quiet">期间内还没有分类成交</div>
+        <ul v-else class="space-y-3.5">
+          <li v-for="(item, index) in categorySales" :key="item.name">
+            <div class="flex items-baseline justify-between gap-3">
+              <p class="min-w-0 truncate text-[13px]">
+                <span class="mono quiet mr-1.5">{{ String(index + 1).padStart(2, '0') }}</span>
+                {{ item.name || '未分类' }}
+              </p>
+              <span class="nums shrink-0 text-[13px] font-semibold">{{ money(item.revenue) }}</span>
+            </div>
+            <div class="mt-1.5 flex items-center gap-2">
+              <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
+                <div
+                  class="h-full rounded-full border border-[var(--accent-line)] bg-[var(--accent-soft)]"
+                  :style="{ width: `${Math.max((item.revenue / categoryPeak) * 100, 2)}%` }"
+                />
+              </div>
+              <span class="hint nums shrink-0">{{ item.orders }} 单 · {{ item.products }} 品</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="mb-4 flex items-center justify-between gap-3">
+          <h2 class="text-base font-semibold">优惠码成效</h2>
+          <RouterLink v-if="auth.allows('coupons', 'view')" to="/coupons" class="text-sm accent-text">优惠码</RouterLink>
+        </div>
+        <div v-if="loading" class="space-y-3">
+          <div v-for="i in 3" :key="i" class="skeleton h-10" />
+        </div>
+        <template v-else>
+          <div class="mb-4 grid grid-cols-3 gap-2 text-center">
+            <div class="panel">
+              <p class="hint">用码次数</p>
+              <p class="nums mt-1 text-base font-bold">{{ stats?.coupon_uses_period ?? 0 }}</p>
+            </div>
+            <div class="panel">
+              <p class="hint">让利</p>
+              <p class="nums mt-1 text-base font-bold">{{ money(stats?.coupon_discount_period ?? 0) }}</p>
+            </div>
+            <div class="panel">
+              <p class="hint">生效中</p>
+              <p class="nums mt-1 text-base font-bold">{{ stats?.coupons_active ?? 0 }}/{{ stats?.coupons_total ?? 0 }}</p>
+            </div>
+          </div>
+          <div v-if="!topCoupons.length" class="py-8 text-center text-sm quiet">期间内还没有人用码</div>
+          <ul v-else class="space-y-3">
+            <li v-for="item in topCoupons" :key="item.coupon_id">
+              <div class="flex items-baseline justify-between gap-3">
+                <code class="mono min-w-0 truncate text-[13px]">{{ item.code }}</code>
+                <span class="nums shrink-0 text-[13px] font-semibold">{{ money(item.discount) }}</span>
+              </div>
+              <div class="mt-1.5 flex items-center gap-2">
+                <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
+                  <div
+                    class="h-full rounded-full bg-[var(--teal)]"
+                    :style="{ width: `${Math.max((item.revenue / couponPeak) * 100, 2)}%` }"
+                  />
+                </div>
+                <span class="hint nums shrink-0">{{ item.uses }} 次 · 带单 {{ money(item.revenue) }}</span>
+              </div>
+            </li>
+          </ul>
+        </template>
+      </div>
+
+      <div class="card">
+        <div class="mb-4 flex items-center justify-between gap-3">
+          <h2 class="text-base font-semibold">卡密健康</h2>
+          <RouterLink v-if="auth.allows('cards', 'view')" to="/cards" class="text-sm accent-text">库存</RouterLink>
+        </div>
+        <div v-if="loading" class="space-y-3">
+          <div v-for="i in 3" :key="i" class="skeleton h-10" />
+        </div>
+        <template v-else>
+          <div class="mb-3 flex items-end gap-4">
+            <div>
+              <p class="hint">售出率</p>
+              <p class="nums text-2xl font-bold">{{ sellThrough }}%</p>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex h-2.5 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
+                <div class="h-full bg-[var(--accent)]" :style="{ width: `${sellThrough}%` }" />
+                <div
+                  class="h-full bg-[var(--warning)]"
+                  :style="{ width: `${cardHealth?.total ? (cardHealth.disabled / cardHealth.total) * 100 : 0}%` }"
+                />
+              </div>
+              <p class="hint nums mt-1.5">
+                共 {{ cardHealth?.total ?? 0 }} 张 · 已售 {{ cardHealth?.sold ?? 0 }} · 可用
+                {{ cardHealth?.available ?? 0 }} · 停用 {{ cardHealth?.disabled ?? 0 }}
+              </p>
+            </div>
+          </div>
+          <div v-if="!cardByProduct.length" class="py-6 text-center text-sm quiet">还没有卡密库存</div>
+          <ul v-else class="space-y-2">
+            <li v-for="item in cardByProduct.slice(0, 4)" :key="item.product_id" class="flex items-center justify-between gap-3">
+              <span class="min-w-0 truncate text-[13px]">{{ item.name || `#${item.product_id}` }}</span>
+              <span class="hint nums shrink-0">
+                可用 {{ item.available }} · 售出率 {{ Math.round((item.sell_through || 0) * 100) }}%
+              </span>
+            </li>
+          </ul>
+        </template>
+      </div>
+
+      <div class="card">
+        <div class="mb-4 flex items-center justify-between gap-3">
+          <h2 class="text-base font-semibold">买家活跃</h2>
+          <RouterLink v-if="auth.allows('users', 'view')" to="/users" class="text-sm accent-text">用户</RouterLink>
+        </div>
+        <div v-if="loading" class="space-y-3">
+          <div v-for="i in 3" :key="i" class="skeleton h-10" />
+        </div>
+        <div v-else class="grid grid-cols-2 gap-3">
+          <div class="panel">
+            <p class="hint">期间签到</p>
+            <p class="nums mt-1 text-lg font-bold">{{ engagement?.checkins_period ?? 0 }}</p>
+            <p class="hint nums">{{ engagement?.checkin_users_period ?? 0 }} 人参与</p>
+          </div>
+          <div class="panel">
+            <p class="hint">发放积分</p>
+            <p class="nums mt-1 text-lg font-bold">{{ engagement?.points_issued_period ?? 0 }}</p>
+            <p class="hint nums">持有 {{ engagement?.points_held ?? 0 }}</p>
+          </div>
+          <div class="panel">
+            <p class="hint">绑定 NodeLoc</p>
+            <p class="nums mt-1 text-lg font-bold">{{ engagement?.bound_users ?? 0 }}</p>
+          </div>
+          <div class="panel">
+            <p class="hint">近 7 天活跃</p>
+            <p class="nums mt-1 text-lg font-bold">{{ engagement?.active_week ?? 0 }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="card !p-0 overflow-hidden">
       <div class="flex items-center justify-between gap-3 px-5 py-4">
         <div>
           <h2 class="text-base font-semibold">最新订单</h2>
           <p class="hint mt-0.5">共 {{ stats?.orders_total ?? 0 }} 笔订单 · 可用卡密 {{ stats?.cards_available ?? 0 }} 张</p>
         </div>
-        <RouterLink to="/orders" class="text-sm accent-text">查看全部</RouterLink>
+        <RouterLink v-if="auth.allows('orders', 'view')" to="/orders" class="text-sm accent-text">查看全部</RouterLink>
       </div>
       <div v-if="loading" class="space-y-2 px-5 pb-5">
         <div v-for="i in 4" :key="i" class="skeleton h-11" />
@@ -570,9 +765,14 @@ onUnmounted(() => {
           <tbody>
             <tr v-for="order in recentOrders" :key="order.order_no">
               <td>
-                <RouterLink :to="`/orders/${order.order_no}`" class="mono text-sm accent-text">
+                <RouterLink
+                  v-if="auth.allows('orders', 'view')"
+                  :to="`/orders/${order.order_no}`"
+                  class="mono text-sm accent-text"
+                >
                   {{ order.order_no }}
                 </RouterLink>
+                <span v-else class="mono text-sm quiet">{{ order.order_no }}</span>
               </td>
               <td class="text-sm">{{ order.buyer || '—' }}</td>
               <td class="max-w-[220px] truncate text-sm">{{ order.product || '—' }}</td>

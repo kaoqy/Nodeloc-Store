@@ -5,11 +5,14 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
+	"github.com/kaoqy/Nodeloc-Store/internal/authz"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 )
+
 type Handler struct {
 	service *Service
 }
@@ -28,13 +31,92 @@ func (h *Handler) RegisterPublicRoutes(router gin.IRouter) {
 // RegisterRoutes adds the admin settings endpoints to a booted router.
 func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
 	h.RegisterPublicRoutes(router)
-	admin := router.Group("/api/v1/admin", middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin(accounts))
-	admin.GET("/settings", h.GetSettings)
-	admin.PUT("/settings", h.SaveSettings)
-	admin.POST("/settings", h.SaveSettings)
-	admin.POST("/settings/oauth-test", h.TestOAuth)
-	admin.POST("/settings/payment-test", h.TestPayment)
-	admin.GET("/stats", h.Stats)
+	guard := func(resource, action string) gin.HandlerFunc {
+		return middleware.RequirePermission(accounts, resource, action)
+	}
+	admin := router.Group("/api/v1/admin", middleware.JWTMiddleware(jwtConfig))
+	admin.GET("/settings", guard("settings", "view"), h.GetSettings)
+	admin.PUT("/settings", guard("settings", "manage"), h.SaveSettings)
+	admin.POST("/settings", guard("settings", "manage"), h.SaveSettings)
+	admin.POST("/settings/oauth-test", guard("settings", "manage"), h.TestOAuth)
+	admin.POST("/settings/payment-test", guard("settings", "manage"), h.TestPayment)
+	admin.GET("/stats", guard("stats", "view"), h.Stats)
+	admin.GET("/permissions", guard("roles", "view"), h.ListPermissions)
+	admin.GET("/roles", guard("roles", "view"), h.ListRoles)
+	admin.PUT("/roles/:role/permissions", guard("roles", "manage"), h.SaveRolePermissions)
+}
+
+// ListPermissions hands the role editor the grantable vocabulary, so it can
+// render checkboxes instead of letting someone type policy strings.
+func (h *Handler) ListPermissions(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": authz.PermissionCatalog()})
+}
+
+// ListRoles returns every back-office role with its current grants. super_admin
+// reports the wildcard it actually holds rather than an expanded list, because
+// the editor refuses to write to that role.
+func (h *Handler) ListRoles(c *gin.Context) {
+	permissions := authz.RolePermissions()
+	type roleRow struct {
+		Role        string   `json:"role"`
+		Label       string   `json:"label"`
+		Editable    bool     `json:"editable"`
+		Permissions []string `json:"permissions"`
+	}
+	rows := make([]roleRow, 0, len(authz.Roles))
+	for _, role := range authz.Roles {
+		granted := permissions[role]
+		if role == "super_admin" {
+			granted = []string{"*:*"}
+		}
+		if granted == nil {
+			granted = []string{}
+		}
+		rows = append(rows, roleRow{
+			Role:        role,
+			Label:       roleLabel(role),
+			Editable:    role != "super_admin",
+			Permissions: granted,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"data": rows})
+}
+
+// SaveRolePermissions replaces one role's grants in a single write, so a saved
+// matrix is never half-applied.
+func (h *Handler) SaveRolePermissions(c *gin.Context) {
+	role := strings.TrimSpace(c.Param("role"))
+	var body struct {
+		Permissions *[]string `json:"permissions"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.Permissions == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整或格式错误"})
+		return
+	}
+	if err := authz.SetRolePermissions(role, *body.Permissions); err != nil {
+		status := http.StatusInternalServerError
+		if role == "super_admin" || strings.Contains(err.Error(), "unknown role") ||
+			strings.Contains(err.Error(), "malformed permission") {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "role": role, "permissions": authz.PermissionsOf(role)})
+}
+
+func roleLabel(role string) string {
+	switch role {
+	case "super_admin":
+		return "超级管理员"
+	case "admin":
+		return "管理员"
+	case "operator":
+		return "运营"
+	case "support":
+		return "客服"
+	}
+	return role
 }
 
 func (h *Handler) Status(c *gin.Context) {

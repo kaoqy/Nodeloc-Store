@@ -56,6 +56,56 @@ type BuyerStat struct {
 	Revenue int64  `json:"revenue"`
 }
 
+// CategoryStat is one row of the 分类销售 panel: which kind of goods the
+// period's money came from.
+type CategoryStat struct {
+	Name     string `json:"name"`
+	Products int64  `json:"products"`
+	Orders   int64  `json:"orders"`
+	Revenue  int64  `json:"revenue"`
+}
+
+// CouponStat is one row of the 优惠码 usage panel.
+type CouponStat struct {
+	CouponID uint   `json:"coupon_id"`
+	Code     string `json:"code"`
+	Uses     int64  `json:"uses"`
+	Discount int64  `json:"discount"`
+	Revenue  int64  `json:"revenue"`
+}
+
+// CardHealth is the key inventory behind the shop: how many are left, how many
+// went out, and which product is closest to empty.
+type CardHealth struct {
+	Available int64               `json:"available"`
+	Sold      int64               `json:"sold"`
+	Disabled  int64               `json:"disabled"`
+	Total     int64               `json:"total"`
+	ByProduct []CardProductHealth `json:"by_product"`
+}
+
+// CardProductHealth is one product's key stock line.
+type CardProductHealth struct {
+	ProductID   uint    `json:"product_id"`
+	Name        string  `json:"name"`
+	Slug        string  `json:"slug"`
+	Available   int64   `json:"available"`
+	Sold        int64   `json:"sold"`
+	Disabled    int64   `json:"disabled"`
+	SellThrough float64 `json:"sell_through"`
+}
+
+// Engagement counts the buyer-side activity that is not money: 签到, points and
+// how many accounts actually carry a NodeLoc binding.
+type Engagement struct {
+	Checkins     int64 `json:"checkins_period"`
+	CheckinUsers int64 `json:"checkin_users_period"`
+	PointsIssued int64 `json:"points_issued_period"`
+	PointsHeld   int64 `json:"points_held"`
+	BoundUsers   int64 `json:"bound_users"`
+	ActiveWeek   int64 `json:"active_week"`
+}
+
 // RecentOrder is a compact row for the live activity panel.
 type RecentOrder struct {
 	OrderNo           string     `json:"order_no"`
@@ -104,6 +154,18 @@ type DashboardStats struct {
 	StockAlerts  []StockAlert  `json:"stock_alerts"`
 	Funnel       []FunnelCount `json:"funnel"`
 	RecentOrders []RecentOrder `json:"recent_orders"`
+
+	// StockAlertThreshold is the 库存告急 line the shop owner set, so the panel
+	// explains itself instead of hardcoding a number in the client.
+	StockAlertThreshold int64          `json:"stock_alert_threshold"`
+	CategorySales       []CategoryStat `json:"category_sales"`
+	TopCoupons          []CouponStat   `json:"top_coupons"`
+	CouponUses          int64          `json:"coupon_uses_period"`
+	CouponDiscount      int64          `json:"coupon_discount_period"`
+	CouponsTotal        int64          `json:"coupons_total"`
+	CouponsActive       int64          `json:"coupons_active"`
+	CardHealth          CardHealth     `json:"card_health"`
+	Engagement          Engagement     `json:"engagement"`
 }
 
 // Stats aggregates the overview numbers straight from the live database, so the
@@ -159,8 +221,15 @@ func (s *Service) Stats(ctx context.Context, days int) (*DashboardStats, error) 
 	latest := startOfDay(time.Now())
 	cutoff := latest.AddDate(0, 0, -(days - 1))
 
+	// 库存告急 is the shop's own number now; the panel shows it next to the list.
+	stats.StockAlertThreshold = int64(lowStockAt)
+	if rt, err := s.currentRuntime(); err == nil && rt != nil {
+		stats.StockAlertThreshold = int64(rt.Features.AlertThreshold())
+	}
+
 	for _, step := range []func(context.Context, *gorm.DB, *DashboardStats, time.Time) error{
 		statTrend, statPreviousRevenue, statBestSellers, statTopBuyers, statStockAlerts, statFunnel, statRecentOrders,
+		statCategories, statCoupons, statCardHealth, statEngagement,
 	} {
 		if err := step(ctx, db, stats, cutoff); err != nil {
 			return nil, err
@@ -362,7 +431,7 @@ func statStockAlerts(ctx context.Context, db *gorm.DB, stats *DashboardStats, _ 
 		Joins("LEFT JOIN cards ON cards.product_id = products.id AND cards.deleted_at IS NULL").
 		Where("products.deleted_at IS NULL AND products.is_archived = ? AND products.product_type = ?", false, "card").
 		Group("products.id, products.name, products.slug").
-		Having("available <= ?", int64(lowStockAt)).
+		Having("available <= ?", stats.StockAlertThreshold).
 		Order("available ASC").Limit(6).Scan(&rows).Error
 	if err != nil {
 		return err
@@ -427,6 +496,206 @@ func statRecentOrders(ctx context.Context, db *gorm.DB, stats *DashboardStats, _
 		}
 		stats.RecentOrders = append(stats.RecentOrders, item)
 	}
+	return nil
+}
+
+// statCategories attributes the period's paid revenue to each category.
+func statCategories(ctx context.Context, db *gorm.DB, stats *DashboardStats, cutoff time.Time) error {
+	type row struct {
+		Name     string
+		Products int64
+		Orders   int64
+		Revenue  int64
+	}
+	var rows []row
+	// Deleted orders have to be excluded by hand: Table("orders") carries no
+	// model for GORM to attach the soft-delete scope to.
+	err := db.WithContext(ctx).Table("orders").
+		Select(`COALESCE(categories.name, '未分类') AS name,
+			COUNT(DISTINCT orders.product_id) AS products,
+			COUNT(*) AS orders,
+			COALESCE(SUM(orders.total_amount), 0) AS revenue`).
+		Joins("LEFT JOIN products ON products.id = orders.product_id").
+		Joins("LEFT JOIN categories ON categories.id = products.category_id").
+		Where("orders.status IN ?", paidOrderStatuses).
+		Where("orders.created_at >= ?", cutoff).
+		Where("orders.deleted_at IS NULL").
+		Group("COALESCE(categories.name, '未分类')").
+		Order("revenue DESC").Limit(8).Scan(&rows).Error
+	if err != nil {
+		return err
+	}
+	for _, item := range rows {
+		stats.CategorySales = append(stats.CategorySales, CategoryStat(item))
+	}
+	return nil
+}
+
+// statCoupons reports what the promotions cost and which code was spent most.
+// The numbers come off the orders, not coupons.used_count, so a cancelled or
+// refunded order cannot inflate what the shop gave away.
+func statCoupons(ctx context.Context, db *gorm.DB, stats *DashboardStats, cutoff time.Time) error {
+	var totals struct {
+		Uses     int64
+		Discount int64
+	}
+	err := db.WithContext(ctx).Table("orders").
+		Select("COUNT(*) AS uses, COALESCE(SUM(discount_amount), 0) AS discount").
+		Where("coupon_code <> ''").
+		Where("status IN ?", paidOrderStatuses).
+		Where("created_at >= ?", cutoff).
+		Where("deleted_at IS NULL").Scan(&totals).Error
+	if err != nil {
+		return err
+	}
+	stats.CouponUses = totals.Uses
+	stats.CouponDiscount = totals.Discount
+
+	type row struct {
+		CouponID uint
+		Code     string
+		Uses     int64
+		Discount int64
+		Revenue  int64
+	}
+	var rows []row
+	err = db.WithContext(ctx).Table("orders").
+		Select(`MAX(orders.coupon_id) AS coupon_id, orders.coupon_code AS code,
+			COUNT(*) AS uses, COALESCE(SUM(orders.discount_amount), 0) AS discount,
+			COALESCE(SUM(orders.total_amount), 0) AS revenue`).
+		Where("orders.coupon_code <> ''").
+		Where("orders.status IN ?", paidOrderStatuses).
+		Where("orders.created_at >= ?", cutoff).
+		Where("orders.deleted_at IS NULL").
+		Group("orders.coupon_code").
+		Order("discount DESC").Limit(5).Scan(&rows).Error
+	if err != nil {
+		return err
+	}
+	for _, item := range rows {
+		stats.TopCoupons = append(stats.TopCoupons, CouponStat(item))
+	}
+	if err := db.WithContext(ctx).Model(&models.Coupon{}).Count(&stats.CouponsTotal).Error; err != nil {
+		return err
+	}
+	return db.WithContext(ctx).Model(&models.Coupon{}).
+		Where("is_active = ?", true).Count(&stats.CouponsActive).Error
+}
+
+// statCardHealth counts the keys behind the shop and breaks the biggest stock
+// lines down per product, so 卡密 shows where the inventory actually sits.
+func statCardHealth(ctx context.Context, db *gorm.DB, stats *DashboardStats, _ time.Time) error {
+	var health struct {
+		Available int64
+		Sold      int64
+		Disabled  int64
+		Total     int64
+	}
+	err := db.WithContext(ctx).Table("cards").
+		Select(`COALESCE(SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END), 0) AS available,
+			COALESCE(SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END), 0) AS sold,
+			COALESCE(SUM(CASE WHEN status = 'disabled' THEN 1 ELSE 0 END), 0) AS disabled,
+			COUNT(*) AS total`).
+		Where("deleted_at IS NULL").Scan(&health).Error
+	if err != nil {
+		return err
+	}
+	stats.CardHealth.Available = health.Available
+	stats.CardHealth.Sold = health.Sold
+	stats.CardHealth.Disabled = health.Disabled
+	stats.CardHealth.Total = health.Total
+
+	type row struct {
+		ProductID uint
+		Name      string
+		Slug      string
+		Available int64
+		Sold      int64
+		Disabled  int64
+	}
+	var rows []row
+	err = db.WithContext(ctx).Table("cards").
+		Select(`cards.product_id AS product_id, products.name AS name, products.slug AS slug,
+			COALESCE(SUM(CASE WHEN cards.status = 'available' THEN 1 ELSE 0 END), 0) AS available,
+			COALESCE(SUM(CASE WHEN cards.status = 'sold' THEN 1 ELSE 0 END), 0) AS sold,
+			COALESCE(SUM(CASE WHEN cards.status = 'disabled' THEN 1 ELSE 0 END), 0) AS disabled`).
+		Joins("LEFT JOIN products ON products.id = cards.product_id").
+		Where("cards.deleted_at IS NULL").
+		Group("cards.product_id, products.name, products.slug").
+		Order("sold DESC").Limit(6).Scan(&rows).Error
+	if err != nil {
+		return err
+	}
+	for _, item := range rows {
+		line := CardProductHealth{
+			ProductID: item.ProductID,
+			Name:      item.Name,
+			Slug:      item.Slug,
+			Available: item.Available,
+			Sold:      item.Sold,
+			Disabled:  item.Disabled,
+		}
+		// Sell-through ignores disabled keys: a retired batch is not a demand
+		// signal, and counting it would make a cleaned-up product look sold out.
+		if moving := item.Available + item.Sold; moving > 0 {
+			line.SellThrough = float64(item.Sold) / float64(moving) * 100
+		}
+		stats.CardHealth.ByProduct = append(stats.CardHealth.ByProduct, line)
+	}
+	return nil
+}
+
+// statEngagement measures the buyer-side habits that keep an account coming
+// back: 签到, the points in circulation and how many accounts came through
+// NodeLoc.
+func statEngagement(ctx context.Context, db *gorm.DB, stats *DashboardStats, cutoff time.Time) error {
+	var checkins struct {
+		Count int64
+		Users int64
+	}
+	err := db.WithContext(ctx).Table("check_ins").
+		Select("COUNT(*) AS count, COUNT(DISTINCT user_id) AS users").
+		Where("created_at >= ?", cutoff).
+		Where("deleted_at IS NULL").Scan(&checkins).Error
+	if err != nil {
+		return err
+	}
+	stats.Engagement.Checkins = checkins.Count
+	stats.Engagement.CheckinUsers = checkins.Users
+
+	var issued int64
+	err = db.WithContext(ctx).Table("point_ledgers").
+		Where("delta > 0 AND created_at >= ? AND deleted_at IS NULL", cutoff).
+		Select("COALESCE(SUM(delta), 0)").Scan(&issued).Error
+	if err != nil {
+		return err
+	}
+	stats.Engagement.PointsIssued = issued
+
+	var held int64
+	if err := db.WithContext(ctx).Model(&models.User{}).
+		Select("COALESCE(SUM(points), 0)").Scan(&held).Error; err != nil {
+		return err
+	}
+	stats.Engagement.PointsHeld = held
+
+	var bound int64
+	// 绑定 NodeLoc is counted on the link table: it is what a binding really is,
+	// and the denormalised column on users carries GORM's spelled-out name
+	// (o_auth_provider), which is easy to hand-write wrong and impossible to rename.
+	if err := db.WithContext(ctx).Table("oauth_identities").
+		Where("deleted_at IS NULL").
+		Distinct("user_id").Count(&bound).Error; err != nil {
+		return err
+	}
+	stats.Engagement.BoundUsers = bound
+
+	var active int64
+	if err := db.WithContext(ctx).Model(&models.User{}).
+		Where("last_login_at >= ?", time.Now().AddDate(0, 0, -7)).Count(&active).Error; err != nil {
+		return err
+	}
+	stats.Engagement.ActiveWeek = active
 	return nil
 }
 

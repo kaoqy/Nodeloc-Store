@@ -3,9 +3,11 @@ import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import SideBar from './components/SideBar.vue'
 import RouteProgress from './components/RouteProgress.vue'
+import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
 
 const route = useRoute()
+const auth = useAuthStore()
 const theme = useThemeStore()
 const open = ref(false)
 
@@ -18,8 +20,10 @@ const titles: Record<string, string> = {
   '/coupons': '优惠券',
   '/users': '用户管理',
   '/notifications': '通知中心',
+  '/roles': '角色权限',
   '/logs': '审计日志',
   '/settings': '系统设置',
+  '/forbidden': '权限不足',
 }
 
 const label = (segment: string) => titles['/' + segment] || segment
@@ -79,7 +83,7 @@ const breadcrumb = computed(() => {
             >
               <span aria-hidden="true">{{ theme.theme === 'dark' ? '☀' : '☾' }}</span>
             </button>
-            <RouterLink to="/notifications" class="btn btn-quiet btn-sm">通知</RouterLink>
+            <RouterLink v-if="auth.allows('notifications', 'view')" to="/notifications" class="btn btn-quiet btn-sm">通知</RouterLink>
           </div>
         </div>
       </header>

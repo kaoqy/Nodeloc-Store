@@ -26,6 +26,7 @@ defineProps<{ product: Product }>()
         v-if="product.stock_visible && product.stock_count <= 0"
         class="badge badge-neutral absolute left-3 top-3"
       >暂时缺货</span>
+      <span v-if="product.is_featured" class="badge badge-accent absolute right-3 top-3">推荐</span>
     </div>
 
     <div class="flex flex-1 flex-col p-5">
@@ -50,8 +51,15 @@ defineProps<{ product: Product }>()
         </span>
       </div>
 
-      <p v-if="product.stock_visible && product.stock_count > 0" class="hint mt-2">
-        现货 <span class="nums">{{ product.stock_count }}</span> 件
+      <!-- 销量 is delivered volume from the server, so it counts goods that
+           actually left the shop rather than orders that were abandoned. -->
+      <p class="hint mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span>
+          已售 <span class="nums">{{ product.sold_count ?? 0 }}</span> 件
+        </span>
+        <span v-if="product.stock_visible && product.stock_count > 0">
+          现货 <span class="nums">{{ product.stock_count }}</span> 件
+        </span>
       </p>
     </div>
   </RouterLink>

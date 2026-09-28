@@ -16,8 +16,8 @@ const loading = ref(false)
 const error = ref('')
 
 onMounted(() => {
-  if (route.query.reason === 'not_admin') {
-    error.value = '当前登录的账号不是管理员。可用管理员账号在此登录，或返回商店前台。'
+  if (route.query.reason === 'not_staff' || route.query.reason === 'not_admin') {
+    error.value = '当前登录的账号没有后台权限。可用管理员、运营或客服账号在此登录，或返回商店前台。'
   }
 })
 
@@ -49,7 +49,7 @@ async function submit() {
       <div class="brand-mark mb-6">N</div>
       <p class="eyebrow">Nodeloc Store</p>
       <h1 class="mt-2 text-2xl font-bold">管理后台登录</h1>
-      <p class="mt-2 text-sm muted">仅管理员账号可进入，普通用户请在商店前台浏览下单。</p>
+      <p class="mt-2 text-sm muted">仅店铺成员（管理员、运营、客服）可进入，普通用户请在商店前台浏览下单。</p>
 
       <form class="card mt-8 space-y-4" @submit.prevent="submit">
         <div>

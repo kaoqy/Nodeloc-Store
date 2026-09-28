@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/infrastructure"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/transport/http"
@@ -14,13 +15,13 @@ type Module struct {
 }
 
 // Wire constructs the catalog module.
-func Wire(db *gorm.DB) *Module {
+func Wire(db *gorm.DB, cfg *config.Config) *Module {
 	products := infrastructure.NewProductRepo(db)
 	cards := infrastructure.NewCardRepo(db)
 	categories := infrastructure.NewCategoryRepo(db)
 	coupons := infrastructure.NewCouponRepo(db)
 
-	svc := application.NewService(products, cards, categories, coupons)
+	svc := application.NewService(products, cards, categories, coupons, cfg.Features)
 	handler := http.NewHandler(svc)
 	return &Module{Service: svc, Handler: handler}
 }

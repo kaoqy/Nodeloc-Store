@@ -73,6 +73,23 @@ export function cardStatus(status?: string | null): StatusMeta {
   return CARD_STATUS[status] || { label: status, badge: 'badge-neutral' }
 }
 
+const ROLE: Record<string, StatusMeta> = {
+  user: { label: '普通用户', badge: 'badge-neutral' },
+  support: { label: '客服', badge: 'badge-info' },
+  operator: { label: '运营', badge: 'badge-teal' },
+  admin: { label: '管理员', badge: 'badge-warning' },
+  super_admin: { label: '超级管理员', badge: 'badge-danger' },
+}
+
+/**
+ * roleMeta names an account role. The labels match the roles the permission
+ * editor writes, so a user list and a policy matrix never disagree about what
+ * 运营 means.
+ */
+export function roleMeta(role?: string | null): StatusMeta {
+  return ROLE[role || 'user'] || { label: role || '普通用户', badge: 'badge-neutral' }
+}
+
 export function errorMessage(error: unknown, fallback = '请求失败，请稍后重试'): string {
   const response = (error as { response?: { data?: { error?: string } } })?.response
   if (response?.data?.error) return response.data.error

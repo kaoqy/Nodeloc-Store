@@ -15,6 +15,7 @@ export interface CreateOrderPayload {
   quantity: number
   contact?: string
   note?: string
+  coupon_code?: string
 }
 
 export async function createOrder(payload: CreateOrderPayload): Promise<Order> {

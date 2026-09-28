@@ -1,19 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProductCard from '../components/ProductCard.vue'
-import { listProducts, getProduct } from '../api/products'
+import { couponQuoteMessage, getProduct, listProducts, quoteCoupon } from '../api/products'
 import { createOrder, createPayment } from '../api/payment'
 import { errorMessage } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useSiteStore } from '../stores/site'
 import { money } from '../utils/format'
-import type { Product } from '../types'
+import type { CouponQuote, Product } from '../types'
 
 const MaxQuantity = 20
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const site = useSiteStore()
 
 const product = ref<Product | null>(null)
 const quantity = ref(1)
@@ -23,6 +25,11 @@ const loading = ref(true)
 const submitting = ref(false)
 const error = ref('')
 const related = ref<Product[]>([])
+
+const couponCode = ref('')
+const quote = ref<CouponQuote | null>(null)
+const couponError = ref('')
+const quoting = ref(false)
 
 const cardStock = computed(() => {
   const item = product.value
@@ -36,11 +43,43 @@ const limit = computed(() => {
 })
 
 const soldOut = computed(() => limit.value === 0)
-const total = computed(() => (product.value?.price ?? 0) * quantity.value)
+const gross = computed(() => (product.value?.price ?? 0) * quantity.value)
+/** What NodeLoc is asked to collect: the quoted discount is already off it. */
+const payable = computed(() => (quote.value?.accepted ? quote.value.payable : gross.value))
+const discount = computed(() => (quote.value?.accepted ? quote.value.discount : 0))
 
 function step(delta: number) {
   quantity.value = Math.min(limit.value, Math.max(1, quantity.value + delta))
 }
+
+/**
+ * The code is checked against the order the buyer is actually looking at, so a
+ * 满 100 减 20 code says "还差多少" before checkout instead of failing at 支付.
+ */
+async function applyQuote() {
+  const item = product.value
+  couponError.value = ''
+  quote.value = null
+  if (!item) return
+  const code = couponCode.value.trim()
+  if (!code) return
+  if (!auth.isAuthenticated) {
+    couponError.value = '登录后才能使用优惠码。'
+    return
+  }
+  quoting.value = true
+  try {
+    quote.value = await quoteCoupon({ code, slug: item.slug, quantity: quantity.value })
+  } catch (e) {
+    couponError.value = couponQuoteMessage(e)
+  } finally {
+    quoting.value = false
+  }
+}
+
+watch(quantity, () => {
+  if (couponCode.value.trim()) void applyQuote()
+})
 
 async function purchase() {
   const item = product.value
@@ -57,6 +96,7 @@ async function purchase() {
       quantity: quantity.value,
       contact: contact.value.trim() || undefined,
       note: note.value.trim() || undefined,
+      coupon_code: quote.value?.accepted ? quote.value.code : undefined,
     })
     const payment = await createPayment(order.order_no, item.name)
     if (!payment.payment_url) throw new Error('支付通道未返回付款地址，请稍后在订单页重试')
@@ -70,10 +110,8 @@ async function purchase() {
 async function loadRelated(item: Product) {
   if (!item.category_id) return
   try {
-    const all = await listProducts()
-    related.value = all
-      .filter((other) => other.id !== item.id && other.category_id === item.category_id)
-      .slice(0, 3)
+    const list = await listProducts({ category: item.category_id, limit: 4 })
+    related.value = list.data.filter((other) => other.id !== item.id).slice(0, 3)
   } catch {
     related.value = []
   }
@@ -134,10 +172,12 @@ onMounted(async () => {
               <span class="badge" :class="product.product_type === 'card' ? 'badge-teal' : 'badge-accent'">
                 {{ product.product_type === 'card' ? '付款后自动交付' : '商家人工交付' }}
               </span>
+              <span v-if="product.is_featured" class="badge badge-accent">店长推荐</span>
             </div>
 
             <h1 class="mt-4 text-3xl font-bold">{{ product.name }}</h1>
             <p v-if="product.summary" class="mt-2 text-[15px] text-[var(--text-dim)]">{{ product.summary }}</p>
+            <p class="hint mt-2 nums">已售 {{ product.sold_count ?? 0 }} 件</p>
 
             <div v-if="product.description" class="my-6 divider" />
 
@@ -201,11 +241,44 @@ onMounted(async () => {
             <textarea id="note" v-model="note" class="input" maxlength="500" placeholder="选填，例如规格要求"></textarea>
           </div>
 
+          <div v-if="site.couponsEnabled">
+            <label class="label" for="coupon">优惠码</label>
+            <div class="flex gap-2">
+              <input
+                id="coupon"
+                v-model="couponCode"
+                class="input flex-1"
+                maxlength="64"
+                placeholder="选填，例如 NEWBIE20"
+                @keyup.enter="applyQuote"
+              />
+              <button class="btn btn-secondary btn-sm shrink-0" type="button" :disabled="quoting" @click="applyQuote">
+                {{ quoting ? '核对中…' : '使用' }}
+              </button>
+            </div>
+            <p v-if="quote?.accepted" class="alert alert-success mt-2">
+              已优惠 {{ money(quote.discount) }}
+              <span v-if="quote.description"> · {{ quote.description }}</span>
+            </p>
+            <p v-else-if="couponError" class="alert alert-warning mt-2" role="status">{{ couponError }}</p>
+            <p v-else-if="!auth.isAuthenticated" class="hint mt-1.5">登录后即可核对优惠码。</p>
+          </div>
+
           <div class="divider" />
 
-          <div class="flex items-baseline justify-between">
-            <span class="text-sm text-[var(--text-dim)]">应付合计</span>
-            <span class="nums accent-text text-2xl font-bold">{{ money(total) }}</span>
+          <div class="space-y-1.5 text-sm">
+            <div class="flex items-baseline justify-between text-[var(--text-dim)]">
+              <span>小计</span>
+              <span class="nums">{{ money(gross) }}</span>
+            </div>
+            <div v-if="discount" class="flex items-baseline justify-between text-[var(--success)]">
+              <span>优惠码减免</span>
+              <span class="nums">-{{ money(discount) }}</span>
+            </div>
+            <div class="flex items-baseline justify-between">
+              <span class="text-[var(--text-dim)]">应付合计</span>
+              <span class="nums accent-text text-2xl font-bold">{{ money(payable) }}</span>
+            </div>
           </div>
 
           <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>

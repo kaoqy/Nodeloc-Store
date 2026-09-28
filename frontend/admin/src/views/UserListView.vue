@@ -2,11 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import PaginationFooter from '../components/PaginationFooter.vue'
 import { listUsers, toggleActive } from '../api/users'
-import { errorMessage, when } from '../utils/format'
+import { errorMessage, roleMeta, when } from '../utils/format'
+import { useAuthStore } from '../stores/auth'
 import type { User } from '../types'
 
 const PageSize = 20
 
+const auth = useAuthStore()
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
@@ -15,16 +17,12 @@ const total = ref(0)
 const offset = ref(0)
 const search = ref('')
 
+const canManage = computed(() => auth.allows('users', 'manage'))
+
 const page = computed(() => Math.floor(offset.value / PageSize) + 1)
 const pages = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
 const from = computed(() => (users.value.length ? offset.value + 1 : 0))
 const to = computed(() => offset.value + users.value.length)
-
-const roleMeta: Record<string, { label: string; badge: string }> = {
-  super_admin: { label: '超级管理员', badge: 'badge-danger' },
-  admin: { label: '管理员', badge: 'badge-warning' },
-  user: { label: '普通用户', badge: 'badge-neutral' },
-}
 
 async function load() {
   loading.value = true
@@ -148,9 +146,7 @@ onMounted(load)
               <span v-else class="quiet text-xs">未绑定</span>
             </td>
             <td>
-              <span class="badge" :class="(roleMeta[user.role] || roleMeta.user).badge">
-                {{ (roleMeta[user.role] || roleMeta.user).label }}
-              </span>
+              <span class="badge" :class="roleMeta(user.role).badge">{{ roleMeta(user.role).label }}</span>
             </td>
             <td class="nums text-sm">{{ user.points }}</td>
             <td>
@@ -161,7 +157,7 @@ onMounted(load)
             <td class="text-sm quiet">{{ when(user.created_at) }}</td>
             <td class="text-right whitespace-nowrap">
               <RouterLink :to="`/users/${user.id}`" class="btn btn-ghost btn-sm">详情</RouterLink>
-              <button class="btn btn-ghost btn-sm" :disabled="busy" @click="toggle(user)">
+              <button v-if="canManage" class="btn btn-ghost btn-sm" :disabled="busy" @click="toggle(user)">
                 {{ user.is_active ? '禁用' : '启用' }}
               </button>
             </td>

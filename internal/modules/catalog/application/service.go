@@ -2,10 +2,14 @@ package application
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
+	"time"
 
+	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/domain"
 )
@@ -21,23 +25,79 @@ type Service struct {
 	cards      contract.CardRepo
 	categories contract.CategoryRepo
 	coupons    contract.CouponRepo
+	features   config.FeaturesConfig
+	now        func() time.Time
 }
 
-func NewService(products contract.ProductRepo, cards contract.CardRepo, categories contract.CategoryRepo, coupons contract.CouponRepo) *Service {
+func NewService(products contract.ProductRepo, cards contract.CardRepo, categories contract.CategoryRepo, coupons contract.CouponRepo, features config.FeaturesConfig) *Service {
 	return &Service{
 		products:   products,
 		cards:      cards,
 		categories: categories,
 		coupons:    coupons,
+		features:   features,
+		now:        time.Now,
 	}
 }
 
-func (s *Service) ListPublicProducts(ctx context.Context) ([]domain.Product, error) {
-	return s.products.List(ctx, true)
+// CouponsEnabled reports whether codes may be spent at all, so the storefront
+// can hide the field instead of rejecting every input the buyer types.
+func (s *Service) CouponsEnabled() bool { return s.features.CouponsOn() }
+
+// AlertThreshold is the stock level below which a card product counts as
+// needing restocking, so the back office and the low-stock list agree.
+func (s *Service) AlertThreshold() int { return s.features.AlertThreshold() }
+
+// PublicProducts is the storefront listing: filtered, ranked and paged in the
+// database, with the total that the page belongs to.
+func (s *Service) PublicProducts(ctx context.Context, query domain.ProductQuery) ([]domain.Product, int64, error) {
+	query.PublishedOnly = true
+	return s.filteredProducts(ctx, query)
 }
 
-func (s *Service) ListProducts(ctx context.Context) ([]domain.Product, error) {
-	return s.products.List(ctx, false)
+// AdminProducts is the same read without the publishing gate.
+func (s *Service) AdminProducts(ctx context.Context, query domain.ProductQuery) ([]domain.Product, int64, error) {
+	query.PublishedOnly = false
+	return s.filteredProducts(ctx, query)
+}
+
+func (s *Service) filteredProducts(ctx context.Context, query domain.ProductQuery) ([]domain.Product, int64, error) {
+	if !domain.ValidSort(query.Sort) {
+		return nil, 0, fmt.Errorf("%w: unknown sort %q", ErrInvalidQuery, query.Sort)
+	}
+	if query.Limit <= 0 {
+		query.Limit = 24
+	}
+	return s.products.ListQuery(ctx, query)
+}
+
+// PublicCategories returns each visible category with how many products a buyer
+// can actually reach under it, which is what the home page chips are labelled
+// with. An empty category stays listed — hiding it would make the shop owner's
+// taxonomy disappear without explanation.
+func (s *Service) PublicCategories(ctx context.Context) ([]domain.CategoryView, error) {
+	categories, err := s.categories.List(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	counts, err := s.products.CountByCategory(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]domain.CategoryView, 0, len(categories))
+	for _, category := range categories {
+		views = append(views, domain.CategoryView{Category: category, ProductCount: counts[category.ID]})
+	}
+	return views, nil
+}
+
+func (s *Service) StoreStats(ctx context.Context) (domain.StoreStats, error) {
+	return s.products.Stats(ctx, true)
+}
+
+// LowStockProducts is the restocking queue at the shop's own threshold.
+func (s *Service) LowStockProducts(ctx context.Context) ([]domain.Product, error) {
+	return s.products.ListLowStock(ctx, s.features.AlertThreshold())
 }
 
 func (s *Service) GetPublicProduct(ctx context.Context, slug string) (*domain.Product, error) {
@@ -68,6 +128,7 @@ func (s *Service) UpdateProduct(ctx context.Context, id uint, input *domain.Prod
 		return nil, err
 	}
 	stockCount := product.StockCount
+	soldCount := product.SoldCount
 	createdAt := product.CreatedAt
 	deletedAt := product.DeletedAt
 	*product = *input
@@ -75,6 +136,9 @@ func (s *Service) UpdateProduct(ctx context.Context, id uint, input *domain.Prod
 	product.CreatedAt = createdAt
 	product.DeletedAt = deletedAt
 	product.StockCount = stockCount
+	// 销量 is a fact about orders, not a form field: the edit screen never sends
+	// it, and a blank input must not wipe the number the storefront shows.
+	product.SoldCount = soldCount
 	if err := normalizeProduct(product); err != nil {
 		return nil, err
 	}
@@ -120,34 +184,6 @@ func (s *Service) AddCard(ctx context.Context, productID uint, card *domain.Card
 		return err
 	}
 	return s.SyncStock(ctx, productID)
-}
-
-func (s *Service) AddCards(ctx context.Context, productID uint, contents []string) ([]domain.Card, error) {
-	if err := s.ensureCardProduct(ctx, productID); err != nil {
-		return nil, err
-	}
-	cards := make([]domain.Card, 0, len(contents))
-	for _, content := range contents {
-		content = strings.TrimSpace(content)
-		if content == "" {
-			continue
-		}
-		cards = append(cards, domain.Card{
-			ProductID: productID,
-			Content:   content,
-			Status:    domain.CardStatusAvailable,
-		})
-	}
-	if len(cards) == 0 {
-		return nil, errors.New("at least one non-empty card is required")
-	}
-	if err := s.cards.CreateBatch(ctx, cards); err != nil {
-		return nil, err
-	}
-	if err := s.SyncStock(ctx, productID); err != nil {
-		return nil, err
-	}
-	return cards, nil
 }
 
 func (s *Service) UpdateCard(ctx context.Context, productID, cardID uint, input *domain.Card) (*domain.Card, error) {
@@ -321,6 +357,353 @@ func (s *Service) DeleteCoupon(ctx context.Context, id uint) error {
 	return s.coupons.Delete(ctx, id)
 }
 
+// CouponQuote is the answer the storefront shows under the 优惠码 field. It
+// carries the reason a code was refused in the shop's own words, because the
+// buyer needs to know whether to change the code, add quantity, or give up.
+type CouponQuote struct {
+	Code          string `json:"code"`
+	Accepted      bool   `json:"accepted"`
+	Discount      int    `json:"discount"`
+	Payable       int    `json:"payable"`
+	OriginalTotal int    `json:"original_total"`
+	Description   string `json:"description,omitempty"`
+
+	// couponID is kept off the wire: the buyer sees the code, the payment
+	// module needs the row it points at.
+	couponID uint
+}
+
+// DiscountFor is the checkout-side contract: given what the buyer is about to
+// order, how much does this code take off? The payment module asks this before
+// any money moves, and the discounted total is what NodeLoc is told to collect.
+func (s *Service) DiscountFor(ctx context.Context, userID uint, productID uint, quantity, unitPrice int, code string) (discount int, couponID uint, err error) {
+	quote, err := s.QuoteCoupon(ctx, userID, productID, quantity, unitPrice, code)
+	if err != nil {
+		return 0, 0, err
+	}
+	return quote.Discount, quote.couponID, nil
+}
+
+// QuoteCoupon evaluates a code against a would-be order.
+func (s *Service) QuoteCoupon(ctx context.Context, userID uint, productID uint, quantity, unitPrice int, code string) (*CouponQuote, error) {
+	if !s.features.CouponsOn() {
+		return nil, ErrCouponDisabled
+	}
+	normalized := strings.ToUpper(strings.TrimSpace(code))
+	if normalized == "" {
+		return nil, ErrCouponNotFound
+	}
+	if quantity <= 0 {
+		quantity = 1
+	}
+	coupon, err := s.coupons.GetByCode(ctx, normalized)
+	if err != nil {
+		return nil, ErrCouponNotFound
+	}
+	product, err := s.products.GetByID(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	total := unitPrice * quantity
+	if err := couponApplies(coupon, product, total, s.now()); err != nil {
+		return nil, err
+	}
+	if coupon.MaxUses > 0 {
+		// Live orders, not coupon.UsedCount: that column only moves when NodeLoc
+		// confirms the payment, so the last code of a 限量 promotion would be sold
+		// to everyone who asked before the first buyer paid.
+		committed, err := s.coupons.UsedTotal(ctx, coupon.ID)
+		if err != nil {
+			return nil, err
+		}
+		if committed >= int64(coupon.MaxUses) {
+			return nil, ErrCouponExhausted
+		}
+	}
+	if coupon.PerUserLimit > 0 && userID != 0 {
+		used, err := s.coupons.UsedBy(ctx, coupon.ID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if used >= int64(coupon.PerUserLimit) {
+			return nil, ErrCouponPerUser
+		}
+	}
+
+	discount := couponDiscount(coupon, total)
+	quote := &CouponQuote{
+		Code:          coupon.Code,
+		Accepted:      true,
+		Discount:      discount,
+		Payable:       total - discount,
+		OriginalTotal: total,
+	}
+	if coupon.Description != nil {
+		quote.Description = *coupon.Description
+	}
+	quote.couponID = coupon.ID
+	return quote, nil
+}
+
+// couponApplies runs the rules that make a code spendable at all: the window,
+// the shop's minimum, and the product scope it was written for.
+func couponApplies(coupon *domain.Coupon, product *domain.Product, total int, now time.Time) error {
+	if !coupon.IsActive {
+		return ErrCouponInactive
+	}
+	if coupon.ValidFrom != nil && now.Before(*coupon.ValidFrom) {
+		return ErrCouponNotStarted
+	}
+	if coupon.ValidUntil != nil && now.After(*coupon.ValidUntil) {
+		return ErrCouponExpired
+	}
+	switch coupon.Scope {
+	case "product":
+		if coupon.ProductID == nil || product.ID != *coupon.ProductID {
+			return ErrCouponNotApplicable
+		}
+	case "category":
+		if coupon.CategoryID == nil || product.CategoryID == nil || *product.CategoryID != *coupon.CategoryID {
+			return ErrCouponNotApplicable
+		}
+	}
+	if coupon.MinOrderAmount > 0 && total < coupon.MinOrderAmount {
+		return ErrCouponMinAmount
+	}
+	return nil
+}
+
+// couponDiscount never takes the whole order: NodeLoc is asked to collect a
+// payment, and a 0 amount order is not a payment. A 100% code therefore leaves
+// one fen behind rather than being rejected outright.
+func couponDiscount(coupon *domain.Coupon, total int) int {
+	if total <= 1 {
+		return 0
+	}
+	discount := 0
+	switch coupon.DiscountType {
+	case "percent":
+		discount = total * coupon.DiscountValue / 100
+	case "fixed":
+		discount = coupon.DiscountValue
+	}
+	if discount < 0 {
+		return 0
+	}
+	if limit := total - 1; discount > limit {
+		return limit
+	}
+	return discount
+}
+
+// ListCardsFiltered backs the back office's inventory screen: any product or a
+// selected one, by status, with a content search and server-side paging.
+func (s *Service) ListCardsFiltered(ctx context.Context, filter domain.CardFilter) ([]domain.Card, int64, error) {
+	if filter.Limit <= 0 {
+		filter.Limit = 50
+	}
+	return s.cards.ListFiltered(ctx, filter)
+}
+
+// maxExportCards bounds a download: a shop with a hundred thousand keys should
+// filter before exporting rather than pull the whole table into memory.
+const maxExportCards = 20000
+
+// ExportCards walks the filtered inventory page by page for the CSV download.
+// The second return says the selection was cut short, so a truncated file
+// never reads like a complete one.
+func (s *Service) ExportCards(ctx context.Context, filter domain.CardFilter) ([]domain.Card, bool, error) {
+	const pageSize = 500
+	filter.Limit = pageSize
+	filter.Offset = 0
+	var (
+		cards     []domain.Card
+		truncated bool
+	)
+	for {
+		batch, _, err := s.cards.ListFiltered(ctx, filter)
+		if err != nil {
+			return nil, false, err
+		}
+		cards = append(cards, batch...)
+		if len(batch) < pageSize {
+			return cards, truncated, nil
+		}
+		if len(cards)+pageSize > maxExportCards {
+			return cards, true, nil
+		}
+		filter.Offset += pageSize
+	}
+}
+
+// ImportResult reports what a bulk paste did, because the shop owner needs to
+// know that 40 of the 120 lines they pasted were already in stock.
+type ImportResult struct {
+	Created []domain.Card `json:"created"`
+	Skipped int           `json:"skipped"`
+	Blank   int           `json:"blank"`
+}
+
+// ImportCards adds lines to a product, dropping blanks and duplicates. Card
+// keys are only worth their scarcity, so a repeated paste must not create a
+// second copy of a key that was already sold.
+func (s *Service) ImportCards(ctx context.Context, productID uint, contents []string) (*ImportResult, error) {
+	if err := s.ensureCardProduct(ctx, productID); err != nil {
+		return nil, err
+	}
+	existing, err := s.cards.ExistingContents(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	result := &ImportResult{Created: make([]domain.Card, 0, len(contents))}
+	seen := make(map[string]struct{}, len(contents))
+	for _, content := range contents {
+		content = strings.TrimSpace(content)
+		switch {
+		case content == "":
+			result.Blank++
+			continue
+		}
+		if _, dup := existing[content]; dup {
+			result.Skipped++
+			continue
+		}
+		if _, dup := seen[content]; dup {
+			result.Skipped++
+			continue
+		}
+		seen[content] = struct{}{}
+		result.Created = append(result.Created, domain.Card{
+			ProductID: productID,
+			Content:   content,
+			Status:    domain.CardStatusAvailable,
+		})
+	}
+	if len(result.Created) == 0 {
+		if result.Blank > 0 || result.Skipped > 0 {
+			return result, nil
+		}
+		return nil, errors.New("at least one non-empty card is required")
+	}
+	if err := s.cards.CreateBatch(ctx, result.Created); err != nil {
+		return nil, err
+	}
+	if err := s.SyncStock(ctx, productID); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// cardAlphabet leaves out the characters a buyer transcribes wrong: no I/O, no
+// 0/1. Codes are read off a screen and typed by hand.
+const cardAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+// GenerateCards produces a batch of keys for a product. Shop owners used to
+// paste these from an external generator; generating them here keeps the format
+// consistent and makes "I have 200 keys left" a statement the shop can verify.
+func (s *Service) GenerateCards(ctx context.Context, productID uint, count int, prefix string) (*ImportResult, error) {
+	if err := s.ensureCardProduct(ctx, productID); err != nil {
+		return nil, err
+	}
+	if count <= 0 || count > 500 {
+		return nil, fmt.Errorf("%w: generate count must be between 1 and 500", ErrInvalidQuery)
+	}
+	prefix = strings.ToUpper(strings.TrimSpace(prefix))
+	if len(prefix) > 16 {
+		return nil, fmt.Errorf("%w: prefix is too long", ErrInvalidQuery)
+	}
+	for _, r := range prefix {
+		if !strings.ContainsRune(cardAlphabet+"-", r) {
+			return nil, fmt.Errorf("%w: prefix may only use letters, digits and dashes", ErrInvalidQuery)
+		}
+	}
+
+	existing, err := s.cards.ExistingContents(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	cards := make([]domain.Card, 0, count)
+	issued := make(map[string]struct{}, count)
+	for attempt := 0; len(cards) < count && attempt < count*20; attempt++ {
+		body, err := randomCardBody(16)
+		if err != nil {
+			return nil, err
+		}
+		content := prefix + body
+		if _, taken := existing[content]; taken {
+			continue
+		}
+		if _, dup := issued[content]; dup {
+			continue
+		}
+		issued[content] = struct{}{}
+		cards = append(cards, domain.Card{ProductID: productID, Content: content, Status: domain.CardStatusAvailable})
+	}
+	if len(cards) == 0 {
+		return nil, errors.New("could not generate unique card keys")
+	}
+	if err := s.cards.CreateBatch(ctx, cards); err != nil {
+		return nil, err
+	}
+	if err := s.SyncStock(ctx, productID); err != nil {
+		return nil, err
+	}
+	return &ImportResult{Created: cards}, nil
+}
+
+func randomCardBody(length int) (string, error) {
+	out := make([]byte, length)
+	limit := big.NewInt(int64(len(cardAlphabet)))
+	for i := range out {
+		index, err := rand.Int(rand.Reader, limit)
+		if err != nil {
+			return "", fmt.Errorf("generate card key: %w", err)
+		}
+		out[i] = cardAlphabet[index.Int64()]
+	}
+	return string(out), nil
+}
+
+// SetCardStatus enables or disables selected keys and reports how many moved.
+func (s *Service) SetCardStatus(ctx context.Context, productID uint, ids []uint, status string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("%w: no cards selected", ErrInvalidQuery)
+	}
+	if status != domain.CardStatusAvailable && status != domain.CardStatusDisabled {
+		return 0, ErrInvalidCardStatus
+	}
+	if err := s.ensureCardProduct(ctx, productID); err != nil {
+		return 0, err
+	}
+	moved, err := s.cards.BulkStatus(ctx, productID, ids, status)
+	if err != nil {
+		return 0, err
+	}
+	if err := s.SyncStock(ctx, productID); err != nil {
+		return 0, err
+	}
+	return moved, nil
+}
+
+// DeleteCards removes selected keys, and never a key a buyer already paid for:
+// that card is part of their order record.
+func (s *Service) DeleteCards(ctx context.Context, productID uint, ids []uint) (int64, error) {
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("%w: no cards selected", ErrInvalidQuery)
+	}
+	if err := s.ensureCardProduct(ctx, productID); err != nil {
+		return 0, err
+	}
+	deleted, err := s.cards.BulkDelete(ctx, productID, ids)
+	if err != nil {
+		return 0, err
+	}
+	if err := s.SyncStock(ctx, productID); err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
 func (s *Service) ensureCardProduct(ctx context.Context, productID uint) error {
 	product, err := s.products.GetByID(ctx, productID)
 	if err != nil {
@@ -372,6 +755,41 @@ func normalizeCoupon(coupon *domain.Coupon) error {
 	}
 	if coupon.ValidFrom != nil && coupon.ValidUntil != nil && coupon.ValidUntil.Before(*coupon.ValidFrom) {
 		return errors.New("valid_until must be after valid_from")
+	}
+	// Scope decides what the code may buy. Anything unrecognized is treated as
+	// the whole shop rather than silently matching nothing.
+	coupon.Scope = strings.ToLower(strings.TrimSpace(coupon.Scope))
+	switch coupon.Scope {
+	case "", "all":
+		coupon.Scope = "all"
+		coupon.ProductID = nil
+		coupon.CategoryID = nil
+	case "product":
+		coupon.CategoryID = nil
+		if coupon.ProductID == nil || *coupon.ProductID == 0 {
+			return errors.New("a product-scoped coupon needs product_id")
+		}
+	case "category":
+		coupon.ProductID = nil
+		if coupon.CategoryID == nil || *coupon.CategoryID == 0 {
+			return errors.New("a category-scoped coupon needs category_id")
+		}
+	default:
+		return errors.New("scope must be all, product or category")
+	}
+	if coupon.PerUserLimit < 0 {
+		return errors.New("per_user_limit cannot be negative")
+	}
+	if coupon.Description != nil {
+		description := strings.TrimSpace(*coupon.Description)
+		if len([]rune(description)) > 255 {
+			return errors.New("coupon description is too long")
+		}
+		if description == "" {
+			coupon.Description = nil
+		} else {
+			coupon.Description = &description
+		}
 	}
 	return nil
 }

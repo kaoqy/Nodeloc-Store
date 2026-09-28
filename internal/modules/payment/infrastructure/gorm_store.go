@@ -191,6 +191,15 @@ func (s *GormStore) MarkOrderPaid(ctx context.Context, orderNo, transactionID st
 			if err := tx.Model(&order).Updates(updates).Error; err != nil {
 				return err
 			}
+			// A promotion is spent when the money arrives, not when the order is
+			// written: an abandoned checkout must not eat a limited code. This sits
+			// inside the status flip, so a callback NodeLoc sends twice counts once.
+			if order.CouponID != nil && *order.CouponID != 0 {
+				if err := tx.Model(&models.Coupon{}).Where("id = ?", *order.CouponID).
+					UpdateColumn("used_count", gorm.Expr("used_count + 1")).Error; err != nil {
+					return err
+				}
+			}
 		}
 
 		return tx.Preload("Product").Preload("Cards").Preload("Records").First(&paid, order.ID).Error
@@ -251,16 +260,29 @@ func (s *GormStore) ListReconcilableOrders(ctx context.Context, limit int, minAg
 }
 
 func (s *GormStore) MarkOrderRefunded(ctx context.Context, orderNo string) error {
-	result := s.db.WithContext(ctx).Model(&models.Order{}).
-		Where("order_no = ?", strings.TrimSpace(orderNo)).
-		Updates(map[string]any{"status": "refunded", "fulfillment_status": "cancelled"})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return ErrOrderNotFound
-	}
-	return nil
+	orderNo = strings.TrimSpace(orderNo)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order models.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("order_no = ?", orderNo).First(&order).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrOrderNotFound
+			}
+			return err
+		}
+		if err := tx.Model(&order).Updates(map[string]any{
+			"status": "refunded", "fulfillment_status": "cancelled",
+		}).Error; err != nil {
+			return err
+		}
+		// 销量 is a claim about goods the buyer kept. A refund takes it back,
+		// and only if the order had ever added to it.
+		if isDelivered(order.FulfillmentStatus) && order.ProductID != 0 {
+			return tx.Model(&models.Product{}).Where("id = ?", order.ProductID).
+				UpdateColumn("sold_count", gorm.Expr("CASE WHEN sold_count >= ? THEN sold_count - ? ELSE 0 END", order.Quantity, order.Quantity)).Error
+		}
+		return nil
+	})
 }
 
 func (s *GormStore) ListAllOrders(ctx context.Context, limit, offset int, status, search string, buyerID uint, attention string) ([]models.Order, int64, error) {
@@ -327,15 +349,26 @@ func (s *GormStore) UpdateOrderStatus(ctx context.Context, orderNo string, statu
 	return s.GetOrderByNo(ctx, orderNo)
 }
 
+// SetOrderDeliveryContent is a shop owner delivering a manual product by hand.
+// It runs in a transaction because the same write decides whether the sale is
+// new: content edited a second time must not count the goods as leaving twice.
 func (s *GormStore) SetOrderDeliveryContent(ctx context.Context, orderNo string, content string) (*models.Order, error) {
 	orderNo = strings.TrimSpace(orderNo)
 	if orderNo == "" {
 		return nil, ErrOrderNotFound
 	}
 	now := time.Now().UTC()
-	result := s.db.WithContext(ctx).Model(&models.Order{}).
-		Where("order_no = ?", orderNo).
-		Updates(map[string]any{
+	var updated models.Order
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order models.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("order_no = ?", orderNo).First(&order).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrOrderNotFound
+			}
+			return err
+		}
+		if err := tx.Model(&order).Updates(map[string]any{
 			"delivery_content":   content,
 			"fulfillment_status": "delivered",
 			"delivered_at":       now,
@@ -343,14 +376,25 @@ func (s *GormStore) SetOrderDeliveryContent(ctx context.Context, orderNo string,
 			// The queued-for-manual-handling note would otherwise keep showing
 			// next to the delivered content.
 			"delivery_note": nil,
-		})
-	if result.Error != nil {
-		return nil, result.Error
+		}).Error; err != nil {
+			return err
+		}
+		if !isDelivered(order.FulfillmentStatus) && order.ProductID != 0 {
+			if err := tx.Model(&models.Product{}).Where("id = ?", order.ProductID).
+				UpdateColumn("sold_count", gorm.Expr("sold_count + ?", order.Quantity)).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Preload("Product").Preload("User").Preload("Cards").Preload("Records").First(&updated, order.ID).Error
+	})
+	if err != nil {
+		return nil, err
 	}
-	if result.RowsAffected == 0 {
-		return nil, ErrOrderNotFound
-	}
-	return s.GetOrderByNo(ctx, orderNo)
+	return &updated, nil
+}
+
+func isDelivered(status string) bool {
+	return status == "delivered" || status == "completed"
 }
 
 // Fulfill atomically performs automatic card delivery. Manual products are
@@ -490,6 +534,13 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 				UpdateColumn("stock_count", gorm.Expr("CASE WHEN stock_count >= ? THEN stock_count - ? ELSE 0 END", taken, taken)).Error; err != nil {
 				return err
 			}
+		}
+		// 销量 counts what left the shop. It moves with the delivery rather than
+		// with the payment, so an order still waiting for stock is not yet a sale
+		// the storefront can advertise.
+		if err := tx.Model(&models.Product{}).Where("id = ?", current.ProductID).
+			UpdateColumn("sold_count", gorm.Expr("sold_count + ?", current.Quantity)).Error; err != nil {
+			return err
 		}
 
 		if err := record("card", "completed", nil, &deliveryContent, &now); err != nil {

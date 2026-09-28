@@ -95,7 +95,7 @@ func (s *JWTService) Parse(_ context.Context, tokenString string) (*domain.Token
 	return claimsToDomain(claims), nil
 }
 
-func (s *JWTService) Refresh(_ context.Context, refreshToken string) (*domain.TokenPair, error) {
+func (s *JWTService) ParseRefresh(_ context.Context, refreshToken string) (*domain.TokenClaims, error) {
 	claims, err := s.parse(refreshToken)
 	if err != nil {
 		return nil, err
@@ -103,15 +103,7 @@ func (s *JWTService) Refresh(_ context.Context, refreshToken string) (*domain.To
 	if claims.Type != "refresh" {
 		return nil, ErrInvalidToken
 	}
-
-	user := &domain.User{
-		ID:       claims.UserID,
-		Username: claims.Username,
-		Role:     claims.Role,
-		IsAdmin:  claims.IsAdmin,
-		IsActive: true,
-	}
-	return s.Issue(context.Background(), user)
+	return claimsToDomain(claims), nil
 }
 
 func (s *JWTService) sign(user *domain.User, tokenType string, issuedAt, expiresAt time.Time) (string, error) {

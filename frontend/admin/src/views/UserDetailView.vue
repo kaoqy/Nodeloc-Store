@@ -2,11 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { adjustPoints, getUser, setRole, toggleActive, toggleAdmin } from '../api/users'
-import { errorMessage, when } from '../utils/format'
+import { errorMessage, roleMeta, when } from '../utils/format'
+import { useAuthStore } from '../stores/auth'
 import type { User } from '../types'
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 
 const loading = ref(true)
 const busy = ref(false)
@@ -15,15 +17,40 @@ const notice = ref('')
 const user = ref<User | null>(null)
 const delta = ref<number | ''>('')
 
-const roleMeta: Record<string, { label: string; badge: string }> = {
-  super_admin: { label: '超级管理员', badge: 'badge-danger' },
-  admin: { label: '管理员', badge: 'badge-warning' },
-  user: { label: '普通用户', badge: 'badge-neutral' },
-}
-
-const current = computed(() => roleMeta[user.value?.role || 'user'] || roleMeta.user)
+const current = computed(() => roleMeta(user.value?.role))
 const bound = computed(() => Boolean(user.value?.oauth_provider))
 const points = computed(() => Number(delta.value || 0))
+
+const canManageUsers = computed(() => auth.allows('users', 'manage'))
+const canManageRoles = computed(() => auth.allows('roles', 'manage'))
+const isSelf = computed(() => Boolean(user.value && auth.user && user.value.id === auth.user.id))
+// The API refuses to let anyone but a super_admin touch a back-office account,
+// or grant 管理员 at all; the picker says so instead of failing on submit.
+const staffTarget = computed(() => {
+  const role = user.value?.role ?? 'user'
+  return role !== 'user'
+})
+const canChangeRole = computed(() => {
+  if (!canManageRoles.value || isSelf.value || !user.value) return false
+  return auth.isSuperAdmin || !staffTarget.value
+})
+
+// ASSIGNABLE lists what this account may hand out, in role order.
+const ASSIGNABLE = [
+  { role: 'user', label: '普通用户', superOnly: false },
+  { role: 'support', label: '客服', superOnly: false },
+  { role: 'operator', label: '运营', superOnly: false },
+  { role: 'admin', label: '管理员', superOnly: true },
+  { role: 'super_admin', label: '超级管理员', superOnly: true },
+]
+
+const assignable = computed(() => ASSIGNABLE.filter((item) => !item.superOnly || auth.isSuperAdmin))
+
+// The picker must still show a role this account cannot grant, otherwise it
+// would look as though the member held the first option.
+const roleMissing = computed(
+  () => Boolean(user.value) && !assignable.value.some((option) => option.role === user.value?.role),
+)
 
 async function load() {
   loading.value = true
@@ -66,6 +93,7 @@ async function submitPoints() {
 }
 
 function changeRole(event: Event) {
+  if (!canChangeRole.value) return
   const role = (event.target as HTMLSelectElement).value
   run(() => setRole(user.value!.id, role), '角色已更新')
 }
@@ -100,6 +128,7 @@ onMounted(load)
         </div>
       </div>
       <button
+        v-if="canManageUsers"
         class="btn btn-sm"
         :class="user.is_active ? 'btn-danger' : 'btn-secondary'"
         :disabled="busy"
@@ -167,21 +196,33 @@ onMounted(load)
           </dl>
         </div>
 
-        <div class="card">
+        <div v-if="canManageRoles" class="card">
           <h3 class="mb-1 text-sm font-semibold">权限</h3>
-          <p class="quiet mb-4 text-xs">角色决定管理端可见范围；不能修改自己的角色。</p>
+          <p class="quiet mb-4 text-xs">
+            角色决定这个账号在后台能看到哪些页面，具体能做什么由 角色权限 里的细分项决定。{{ canChangeRole ? '' : '当前账号无权调整这名成员的角色。' }}
+          </p>
           <div class="flex flex-wrap items-end gap-3">
             <div>
               <label class="label" for="role">角色</label>
-              <select id="role" class="input w-40" :value="user.role" :disabled="busy" @change="changeRole">
-                <option value="user">普通用户</option>
-                <option value="admin">管理员</option>
-                <option value="super_admin">超级管理员</option>
+              <select
+                id="role"
+                class="input w-40"
+                :value="user.role"
+                :disabled="busy || !canChangeRole"
+                @change="changeRole"
+              >
+                <option v-for="option in assignable" :key="option.role" :value="option.role">
+                  {{ option.label }}
+                </option>
+                <option v-if="roleMissing" :value="user.role" disabled>
+                  {{ current.label }}
+                </option>
               </select>
             </div>
             <button
+              v-if="!staffTarget"
               class="btn btn-secondary btn-sm"
-              :disabled="busy"
+              :disabled="busy || isSelf || !auth.isSuperAdmin"
               @click="run(() => toggleAdmin(user!.id), '管理员标记已更新')"
             >
               {{ user.is_admin ? '取消管理员' : '设为管理员' }}
@@ -189,7 +230,7 @@ onMounted(load)
           </div>
         </div>
 
-        <div class="card">
+        <div v-if="canManageUsers" class="card">
           <h3 class="mb-1 text-sm font-semibold">积分调账</h3>
           <p class="quiet mb-4 text-xs">当前余额 {{ user.points }} 分。扣减不能低于 0。</p>
           <div class="flex flex-wrap items-end gap-3">

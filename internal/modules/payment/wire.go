@@ -49,7 +49,7 @@ func derefString(value *string) string {
 }
 
 // Wire constructs the payment module from shared dependencies.
-func Wire(db *gorm.DB, cfg *config.Config, identityFind func(ctx context.Context, userID uint) (*models.User, error)) (*Module, error) {
+func Wire(db *gorm.DB, cfg *config.Config, identityFind func(ctx context.Context, userID uint) (*models.User, error), coupons contract.CouponPricing) (*Module, error) {
 	store := infrastructure.NewGormStore(db)
 	// payment_orders and transactions are owned by this module, so this module
 	// migrates them; models.Migrate only covers the shared entities.
@@ -68,7 +68,7 @@ func Wire(db *gorm.DB, cfg *config.Config, identityFind func(ctx context.Context
 	// The store owns card allocation and delivery records, so it also performs
 	// fulfillment; keeping both in one transactional implementation avoids the
 	// two divergent delivery paths that used to coexist here.
-	svc := application.NewService(store, gateway, store, lookup, cfg.NodeLoc.PaymentID)
+	svc := application.NewService(store, gateway, store, lookup, coupons, cfg.NodeLoc.PaymentID)
 	handler := http.NewHandler(svc)
 	return &Module{Service: svc, Handler: handler, Gateway: gateway}, nil
 }

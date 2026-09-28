@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	App      AppConfig      `mapstructure:"app"`
+	Features FeaturesConfig `mapstructure:"features"`
 	Database DatabaseConfig `mapstructure:"database"`
 	Server   ServerConfig   `mapstructure:"server"`
 	JWT      JWTConfig      `mapstructure:"jwt"`
@@ -23,6 +24,28 @@ type AppConfig struct {
 	Scheme  string `mapstructure:"scheme"`
 	Domain  string `mapstructure:"domain"`
 	BaseURL string `mapstructure:"-"`
+}
+
+// FeaturesConfig toggles the buyer-facing capabilities the shop owner can turn
+// off from 设置. They are stored in the runtime settings and overlaid by
+// ApplyTo on every rebuild. The flags are inverted so that a zero value, which
+// is what an older config file or a test unmarshals to, leaves every feature on.
+type FeaturesConfig struct {
+	CheckinDisabled     bool `mapstructure:"checkin_disabled"`
+	CouponsDisabled     bool `mapstructure:"coupons_disabled"`
+	StockAlertThreshold int  `mapstructure:"stock_alert_threshold"`
+}
+
+func (f FeaturesConfig) CheckinOn() bool { return !f.CheckinDisabled }
+
+func (f FeaturesConfig) CouponsOn() bool { return !f.CouponsDisabled }
+
+// AlertThreshold is how little stock still counts as 库存告急.
+func (f FeaturesConfig) AlertThreshold() int {
+	if f.StockAlertThreshold > 0 {
+		return f.StockAlertThreshold
+	}
+	return 5
 }
 
 type DatabaseConfig struct {

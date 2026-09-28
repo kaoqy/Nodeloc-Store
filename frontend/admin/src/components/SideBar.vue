@@ -13,42 +13,55 @@ const roleLabel = computed(() => {
   const role = auth.user?.role
   if (role === 'super_admin') return '超级管理员'
   if (role === 'admin') return '管理员'
+  if (role === 'operator') return '运营'
+  if (role === 'support') return '客服'
   return auth.user?.email || '管理员'
 })
 
 const groups = [
-  { label: '概览', items: [{ path: '/', label: '仪表盘' }] },
+  { label: '概览', items: [{ path: '/', label: '仪表盘', permission: 'stats:view' }] },
   {
     label: '运营',
     items: [
-      { path: '/products', label: '商品管理' },
-      { path: '/orders', label: '订单管理' },
-      { path: '/cards', label: '卡密管理' },
-      { path: '/categories', label: '分类管理' },
-      { path: '/coupons', label: '优惠券' },
+      { path: '/products', label: '商品管理', permission: 'products:view' },
+      { path: '/orders', label: '订单管理', permission: 'orders:view' },
+      { path: '/cards', label: '卡密管理', permission: 'cards:view' },
+      { path: '/categories', label: '分类管理', permission: 'categories:view' },
+      { path: '/coupons', label: '优惠券', permission: 'coupons:view' },
     ],
   },
-  { label: '用户', items: [{ path: '/users', label: '用户管理' }] },
+  { label: '用户', items: [{ path: '/users', label: '用户管理', permission: 'users:view' }] },
   {
     label: '系统',
     items: [
-      { path: '/notifications', label: '通知中心' },
-      { path: '/logs', label: '审计日志' },
-      { path: '/settings', label: '系统设置' },
+      { path: '/notifications', label: '通知中心', permission: 'notifications:view' },
+      { path: '/roles', label: '角色权限', permission: 'roles:view' },
+      { path: '/logs', label: '审计日志', permission: 'logs:view' },
+      { path: '/settings', label: '系统设置', permission: 'settings:view' },
     ],
   },
 ]
 
-// A flat, ordered list so each entry can carry a stable two-digit index.
+// A flat, ordered list of only the screens this role may open, so each entry can
+// carry a stable two-digit index. Hiding is presentation: the router guard and
+// the API gate the same routes again.
 const numbered = computed(() => {
   let index = 0
-  return groups.map((group) => ({
-    label: group.label,
-    items: group.items.map((item) => {
-      index += 1
-      return { ...item, index: String(index).padStart(2, '0'), active: item.path === '/' ? route.path === '/' : route.path.startsWith(item.path) }
-    }),
-  }))
+  return groups
+    .map((group) => ({
+      label: group.label,
+      items: group.items
+        .filter((item) => auth.allows(item.permission.split(':')[0], item.permission.split(':')[1]))
+        .map((item) => {
+          index += 1
+          return {
+            ...item,
+            index: String(index).padStart(2, '0'),
+            active: item.path === '/' ? route.path === '/' : route.path.startsWith(item.path),
+          }
+        }),
+    }))
+    .filter((group) => group.items.length)
 })
 </script>
 

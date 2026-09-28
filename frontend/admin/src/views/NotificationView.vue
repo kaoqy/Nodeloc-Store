@@ -3,9 +3,16 @@ import { computed, onMounted, ref } from 'vue'
 import PaginationFooter from '../components/PaginationFooter.vue'
 import { broadcastNotification, listNotifications, markAsRead, sendNotification } from '../api/notifications'
 import { errorMessage, when } from '../utils/format'
+import { useAuthStore } from '../stores/auth'
 import type { Notification } from '../types'
 
 const PageSize = 20
+
+const auth = useAuthStore()
+// Sending and broadcasting are one guarded route pair on the server; the form
+// stays visible so a 客服 account sees what they are missing, but nothing in it
+// is pressable without the grant.
+const canManage = computed(() => auth.allows('notifications', 'manage'))
 
 const loading = ref(true)
 const busy = ref(false)
@@ -105,7 +112,7 @@ onMounted(load)
         <div v-for="i in 5" :key="i" class="skeleton h-20" />
       </div>
       <p v-else-if="!notifications.length" class="card py-14 text-center text-sm quiet">
-        还没有通知。右侧广播一条试试。
+        {{ canManage ? '还没有通知。右侧广播一条试试。' : '还没有通知。' }}
       </p>
       <div
         v-else
@@ -132,8 +139,11 @@ onMounted(load)
     <div class="card h-fit">
       <h2 class="text-base font-semibold">发送通知</h2>
       <p class="quiet mt-1 mb-4 text-xs">填写用户 ID 只通知单个用户，留空则广播给全部用户。</p>
+      <p v-if="!canManage" class="alert alert-info mb-4 text-xs" role="status">
+        当前账号没有「通知管理」权限，只能查看自己的通知。
+      </p>
 
-      <div class="space-y-3">
+      <fieldset class="m-0 space-y-3 border-0 p-0" :disabled="!canManage">
         <div>
           <label class="label" for="n-type">类型</label>
           <select id="n-type" v-model="form.type" class="input">
@@ -158,13 +168,13 @@ onMounted(load)
           <label class="label" for="n-link">链接</label>
           <input id="n-link" v-model="form.link" class="input mono text-xs" placeholder="/orders 或 https://…" />
         </div>
-      </div>
 
-      <p v-if="notice" class="alert alert-success mt-4" role="status">{{ notice }}</p>
+        <p v-if="notice" class="alert alert-success mt-4" role="status">{{ notice }}</p>
 
-      <button class="btn btn-primary mt-4 w-full" :disabled="busy || !form.title.trim()" @click="publish">
-        {{ busy ? '发送中…' : '发送' }}
-      </button>
+        <button class="btn btn-primary mt-4 w-full" :disabled="busy || !form.title.trim()" @click="publish">
+          {{ busy ? '发送中…' : '发送' }}
+        </button>
+      </fieldset>
     </div>
   </section>
 </template>

@@ -2,7 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { createCategory, deleteCategory, listCategories, updateCategory } from '../api/categories'
 import { errorMessage } from '../utils/format'
+import { useAuthStore } from '../stores/auth'
 import type { Category } from '../types'
+
+const auth = useAuthStore()
+const canManage = computed(() => auth.allows('categories', 'manage'))
 
 const loading = ref(true)
 const busy = ref(false)
@@ -78,6 +82,7 @@ onMounted(load)
     <div class="flex flex-wrap items-center justify-between gap-3">
       <p class="quiet text-sm">前台分类导航的顺序与显隐在这里维护。</p>
       <button
+        v-if="canManage"
         class="btn btn-primary btn-sm"
         @click="editing = { name: '', slug: '', description: '', icon: '', sort_order: 0, is_visible: true }"
       >
@@ -127,8 +132,9 @@ onMounted(load)
               </span>
             </td>
             <td class="whitespace-nowrap text-right">
-              <button class="btn btn-ghost btn-sm" @click="editing = { ...category }">编辑</button>
-              <button class="btn btn-ghost btn-sm text-[var(--danger)]" @click="remove(category)">删除</button>
+              <button v-if="canManage" class="btn btn-ghost btn-sm" @click="editing = { ...category }">编辑</button>
+              <button v-if="canManage" class="btn btn-ghost btn-sm text-[var(--danger)]" @click="remove(category)">删除</button>
+              <span v-if="!canManage" class="quiet text-xs">只读</span>
             </td>
           </tr>
         </tbody>

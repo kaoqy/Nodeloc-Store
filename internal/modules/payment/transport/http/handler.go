@@ -26,10 +26,11 @@ type createPaymentRequest struct {
 }
 
 type createOrderRequest struct {
-	Slug     string `json:"slug" binding:"required"`
-	Quantity int    `json:"quantity"`
-	Contact  string `json:"contact"`
-	Note     string `json:"note"`
+	Slug       string `json:"slug" binding:"required"`
+	Quantity   int    `json:"quantity"`
+	Contact    string `json:"contact"`
+	Note       string `json:"note"`
+	CouponCode string `json:"coupon_code"`
 }
 
 func NewHandler(service *application.Service) *Handler {
@@ -49,21 +50,26 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	payment.POST("/orders/:order_no/reconcile", h.ReconcileOrder)
 	payment.GET("/orders", h.ListOrders)
 
-	// Admin order management
+	// Admin order management. Each route names the permission it needs, so 客服
+	// can look orders up and 运营 can work them without either holding 设置.
+	guard := func(resource, action string) gin.HandlerFunc {
+		return middleware.RequirePermission(accounts, resource, action)
+	}
+
 	adminOrders := router.Group("/api/v1/admin/orders")
-	adminOrders.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin(accounts))
-	adminOrders.GET("", h.AdminListOrders)
-	adminOrders.GET("/:order_no", h.AdminGetOrder)
-	adminOrders.POST("/:order_no/cancel", h.AdminCancelOrder)
-	adminOrders.POST("/:order_no/deliver", h.AdminDeliverOrder)
-	adminOrders.POST("/:order_no/refund", h.AdminRefundOrder)
-	adminOrders.POST("/:order_no/fulfill", h.AdminFulfillOrder)
-	adminOrders.POST("/:order_no/reconcile", h.AdminReconcileOrder)
+	adminOrders.Use(middleware.JWTMiddleware(jwtConfig))
+	adminOrders.GET("", guard("orders", "view"), h.AdminListOrders)
+	adminOrders.GET("/:order_no", guard("orders", "view"), h.AdminGetOrder)
+	adminOrders.POST("/:order_no/cancel", guard("orders", "manage"), h.AdminCancelOrder)
+	adminOrders.POST("/:order_no/deliver", guard("orders", "manage"), h.AdminDeliverOrder)
+	adminOrders.POST("/:order_no/refund", guard("orders", "manage"), h.AdminRefundOrder)
+	adminOrders.POST("/:order_no/fulfill", guard("orders", "manage"), h.AdminFulfillOrder)
+	adminOrders.POST("/:order_no/reconcile", guard("orders", "manage"), h.AdminReconcileOrder)
 
 	// A separate group because /orders/:order_no/... already owns that segment.
 	adminReconcile := router.Group("/api/v1/admin/reconcile")
-	adminReconcile.Use(middleware.JWTMiddleware(jwtConfig), middleware.RequireAdmin(accounts))
-	adminReconcile.POST("/pending", h.AdminReconcilePending)
+	adminReconcile.Use(middleware.JWTMiddleware(jwtConfig))
+	adminReconcile.POST("/pending", guard("orders", "manage"), h.AdminReconcilePending)
 
 	// NodeLoc notifies via a browser GET redirect (signature-verified); POST is
 	// accepted as well for server-push style integrations.
@@ -85,11 +91,12 @@ func (h *Handler) CreateOrder(c *gin.Context) {
 	}
 
 	order, err := h.service.CreateOrder(c.Request.Context(), application.CreateOrderInput{
-		UserID:   userID,
-		Slug:     strings.TrimSpace(request.Slug),
-		Quantity: request.Quantity,
-		Contact:  strings.TrimSpace(request.Contact),
-		Note:     strings.TrimSpace(request.Note),
+		UserID:     userID,
+		Slug:       strings.TrimSpace(request.Slug),
+		Quantity:   request.Quantity,
+		Contact:    strings.TrimSpace(request.Contact),
+		Note:       strings.TrimSpace(request.Note),
+		CouponCode: strings.TrimSpace(request.CouponCode),
 	})
 	if err != nil {
 		writeError(c, err)

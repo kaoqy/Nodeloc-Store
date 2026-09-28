@@ -11,13 +11,15 @@
 - 🚀 **首次访问即安装** — 引导式配置数据库 + Admin 账号 + NodeLoc OAuth + 支付凭据
 - 🔐 **双通道登录** — NodeLoc OAuth2 一键登录 / 邮箱注册登录，Scope 感知（`email` 未授权时自动隐藏）
 - 💎 **精美 UI** — Tailwind + 玻璃拟态 + 渐变设计，深色主题，响应式
-- 📦 **商品管理** — 卡密商品与人工交付商品、图片、定价、交付说明、联系方式要求、库存可见性和上下架
-- 🎫 **卡密系统** — 批量导入（每行一个）、状态管理（可用/已售/禁用）、库存自动同步
+- 📦 **商品管理** — 卡密商品与人工交付商品、图片、定价、交付说明、联系方式要求、库存可见性和上下架；销量计数，列表支持搜索、排序（销量/价格/最新）与分页
+- 🎫 **卡密系统** — 批量导入（每行一个，自动跳过重复）、内置生成器、按商品与状态筛选、关键字搜索、批量启用/停用、批量删除、CSV 导出，库存自动同步
 - 💰 **Nodeloc Payments** — 所有订单统一走 Nodeloc Payments，支持多种回调参数、HMAC-SHA256 验签和幂等履约
 - 🚚 **统一履约** — 卡密自动发货、缺货等待补货、人工交付、交付内容与备注、用户侧履约状态查询
-- 👥 **角色权限** — 超级管理员、管理员、运营、客服和普通用户五级权限
-- 🎁 **用户运营** — 每日签到、积分、连续签到奖励、站点公告与客服信息
-- 📊 **Admin 后台** — 概览统计、商品/卡密/订单/用户管理、操作审计日志、退款
+- 🏷️ **促销与优惠码** — 百分比/固定金额两种码，全场/指定商品/指定分类三种范围，生效窗口、最低消费、总量限用、每人限用；下单前可先试算，折扣直接参与 NodeLoc 收款金额
+- 👥 **角色权限** — 超级管理员、管理员、运营、客服和普通用户五级角色，后台按 11 项资源 × 查看/管理逐项授权，权限矩阵由服务端目录驱动，越权的按钮不会出现在页面上
+- 🎁 **用户运营** — 每日签到、连续签到奖励、积分流水、站点公告与客服信息；个人中心可改昵称/简介/联系邮箱、从 NodeLoc 同步头像、绑定或换绑 NodeLoc 身份
+- 📊 **Admin 后台** — 概览看板（趋势图、订单结构、热销商品、买家排行、库存预警、优惠码成效、卡密健康、买家活跃）、商品/卡密/订单/用户/通知管理、操作审计日志、退款
+- 🧭 **店招与页脚** — 后台直接编辑商店名称、Logo、公告、页脚文案与最多 8 条页脚链接，保存后前台立即生效
 - 🛠️ **OpenResty 反代** — 适合用 OpenResty 跑其他服务、复用现有 vhost 的部署场景
 - 🔒 **安全** — bcrypt 密码哈希、回调 HMAC 验签、Casbin RBAC、操作审计日志
 
@@ -168,6 +170,29 @@ sudo mysql -e "
 
 因此后台的「需处理交付」队列（`?attention=undelivered`）只应包含自动重试搞不定、需要人来做的部分：人工发货、以及 NodeLoc 尚未确认到账的单子。
 
+#### 2.5 优惠码的拒绝原因
+
+试算与下单走的是同一套规则，因此两边返回的 `code` 完全一致——买家不会在输入框里看到「还能用」，按下付款却被换成另一句理由。响应结构与支付类相同（`error` / `code` / `message`），HTTP 状态一律 `422`：
+
+| `code` | 含义 | 买家看到的话 |
+|---|---|---|
+| `coupon_not_found` | 没有这个码 | 没有这个优惠码，检查有没有打错。 |
+| `coupon_inactive` | 店家把码关掉了 | 这个优惠码已被店家停用。 |
+| `coupon_not_started` | 还没到生效时间 | 这个优惠码还没到生效时间。 |
+| `coupon_expired` | 过了失效时间 | 这个优惠码已经过期了。 |
+| `coupon_exhausted` | 总量额度已被占满 | 这个优惠码的额度已经用完了。 |
+| `coupon_used` | 该账号已用过（含尚未支付的单） | 你的账号已经用过这个优惠码。 |
+| `coupon_min_amount` | 订单金额未达门槛 | 订单金额还没达到这个优惠码的使用条件。 |
+| `coupon_not_applicable` | 范围不含本商品 | 这个优惠码不能用在当前商品上。 |
+| `coupon_disabled` | 商店关掉了优惠码功能 | 商店暂未开启优惠码。 |
+| `coupon_invalid` | 其他内部错误（不该出现） | 优惠码无法使用。 |
+
+限用的口径值得说清楚，因为它是店家真金白银的预算：
+
+- **每人限用**统计该账号名下仍在的单（待支付也算），已取消的不算。买家下了单又没付款，额度已经占住，取消后自动释放。
+- **总量限用**同样按仍在的单计算，而不是等 NodeLoc 确认收款才扣。否则一张「全网限 1 份」的码在付款确认之前会被卖给每一个来问的人。
+- **100% 折扣不会把订单压成 0 元**：NodeLoc 收不到 0 元付款，所以最多减到只剩 **1 分**，订单照常走支付与交付。
+
 ### Step 3 · 启动商店（Docker）
 
 推荐直接使用 Docker Hub 已发布镜像一键部署（应用监听 **8080**，SQLite 数据落在当前目录 `./data`，商品图片落在 `./uploads`）：
@@ -260,6 +285,49 @@ sudo openresty -t && sudo openresty -s reload
 3. 下单购买 → 跳转到 NodeLoc 支付页 → 用积分支付
 4. 支付完成后浏览器会跳转回你的 `/api/v1/payment/callback`，自动发货，卡密会显示在订单详情
 
+## 🔌 接口一览
+
+所有接口都挂在 `/api/v1` 下。标注「公开」的不需要登录，其余需要 `Authorization: Bearer <access_token>`；后台接口在此之上还要该项资源的 Casbin 授权，被拒时 `403` 的响应体会带 `permission` 与 `your_role`，后台页面正是据此把按钮藏起来的。
+
+| 分组 | 路由 | 需要的授权 |
+|---|---|---|
+| 商店状态 | `GET /system/status`（公开） | — 返回安装状态、商店名/Logo/公告/页脚文案与链接，以及注册、签到、优惠码三个开关 |
+| | `POST /system/install`（公开，仅未安装时可用） | — |
+| 会话 | `POST /auth/register`、`POST /auth/login`、`POST /auth/logout`、`POST /auth/refresh` | 登录（refresh 用 refresh_token 换新的 access/refresh 对） |
+| | `GET /auth/oauth/initiate`、`GET /auth/oauth/callback`（公开） | — 见 2.3 |
+| 买家资料 | `GET /auth/me`、`PATCH /auth/me`（昵称、简介、联系邮箱、头像） | 登录 |
+| | `GET /auth/me/permissions` | 登录 返回 `is_staff`、当前角色与逐项授权，前端权限的唯一来源 |
+| | `GET /auth/me/points` | 登录 积分流水，分页 |
+| | `GET /auth/checkin/status`、`GET /auth/checkin/history`、`POST /auth/checkin` | 登录 签到状态、日历与当日签到 |
+| | `POST /auth/bind-oauth`、`DELETE /auth/unbind-oauth`、`POST /auth/me/sync-oauth` | 登录 绑定/解绑 NodeLoc，并把手上的授权换成正经身份 |
+| 商店目录 | `GET /store/products`、`GET /store/products/:slug`、`GET /store/categories`、`GET /store/stats`（公开） | — 列表支持 `q`、`sort`（留空按店家排序，另可选 `sales` / `price_asc` / `price_desc` / `newest`，写错直接 `400`）、`category`、`featured`、`in_stock`、`limit`/`offset` |
+| | `POST /store/coupons/quote` | 登录 试算优惠码，返回 `discount` / `payable` / `original_total`；失败见 2.5 |
+| 下单支付 | `POST /payment/orders`、`POST /payment/create`、`GET /payment/orders`、`GET /payment/orders/:order_no`、`POST /payment/orders/:order_no/reconcile` | 登录 下单时可带 `coupon_code`，折扣直接进入 NodeLoc 收款金额 |
+| 后台商品 | `GET /admin/products`、`GET /admin/products/:id` | `products:view` |
+| | `POST` / `PUT` / `DELETE /admin/products[/:id]` | `products:manage` |
+| | `GET /admin/low-stock` | `products:view` 按后台设置的阈值列出待补货商品 |
+| | `GET` / `POST` / `PUT` / `DELETE /admin/categories[/:id]` | `categories:view` / `categories:manage` |
+| 后台卡密 | `GET /admin/cards` | `cards:view` 跨商品视图，支持 `product_id`、`status`、`q`、分页 |
+| | `GET /admin/cards/export` | `cards:manage` 带 BOM 的 UTF-8 CSV，Excel 直接双击可开 |
+| | `GET /admin/products/:id/cards` | `cards:view` |
+| | `POST /admin/products/:id/cards`、`.../cards/batch-add`、`.../cards/generate` | `cards:manage` 导入会跳过该商品已有的卡 |
+| | `POST .../cards/batch-status`、`.../cards/batch-delete`、`PUT` / `DELETE .../cards/:card_id` | `cards:manage` 批量删除只动未售出的卡，已售出的属于买家订单 |
+| 后台优惠码 | `GET /admin/coupons` | `coupons:view` |
+| | `POST` / `PUT` / `DELETE /admin/coupons[/:id]` | `coupons:manage` |
+| 后台订单 | `GET /admin/orders`、`GET /admin/orders/:order_no` | `orders:view` 列表支持 `status`、`user`、`q`、`attention=undelivered` |
+| | `POST /admin/orders/:order_no/cancel`、`/deliver`、`/refund`、`/fulfill`、`/reconcile`、`POST /admin/reconcile/pending` | `orders:manage` |
+| 后台用户 | `GET /admin/users`、`GET /admin/users/:id` | `users:view` |
+| | `POST /admin/users/:id/toggle-active`、`/points` | `users:manage` |
+| | `POST /admin/users/:id/role`、`/toggle-admin` | `roles:manage` 改角色就是改权限，所以归到角色授权；且只有超级管理员能动后台账号 |
+| 通知 | `GET /notifications`、`POST /notifications/:id/read` | 登录 只返回自己的通知 |
+| | `POST /notifications`、`POST /admin/notifications/broadcast` | `notifications:manage` 定向发送 / 全量广播 |
+| 看板与设置 | `GET /admin/stats` | `stats:view` 概览全部面板（含上期对比、优惠码成效、卡密健康）都走这一个接口 |
+| | `GET /admin/settings` | `settings:view` 密钥以 `********` 回显，原样提交即保留原值 |
+| | `PUT` / `POST /admin/settings`、`POST /admin/settings/oauth-test`、`/payment-test` | `settings:manage` |
+| 权限目录 | `GET /admin/permissions`、`GET /admin/roles` | `roles:view` 目录由服务端给出，前端不写死资源清单 |
+| | `PUT /admin/roles/:role/permissions` | `roles:manage` `super_admin` 拒绝被修改，避免店家把自己锁在门外 |
+| 审计 | `GET /admin/audit-logs` | `logs:view` |
+
 ## 🛠️ 常用运维
 
 ```bash
@@ -333,6 +401,8 @@ Nodeloc-Store/
 | 邮件没拿到 | NodeLoc OAuth `email` scope 需审核通过；未通过时 token 只有 `openid` |
 | 前台确认支付结果不通过 | 页面会给出具体原因码（见 2.4）：`unsettled` / `provider_unreachable` 属可重试，稍后再查即可；`no_transaction` 表示这单根本没到 NodeLoc，要点「继续支付」重新发起；`amount_mismatch` / `foreign_transaction` 会停止自动入账，只能店家核对。后台日志里同一笔会带上 NodeLoc 的原文 |
 | 卡密一直没发货 | 先看后台订单列表的「需处理交付」队列：`waiting_stock` 会在补货后由 3 分钟一轮的自动重试释放，`manual_pending` 需要店家点「标记已发货」；再查 Admin → 日志 的 `payment.stock_warning`，确认有可用卡密 |
+| 升级后概览或角色页 403 | 不用手工补：容器启动时会把授权目录升到当前版本（旧的 `dashboard:view` 自动迁成 `stats:view`，并补齐各角色缺失的那几项），已在**后台 → 角色**里主动关掉的权利不会被重新打开 |
+| 某个后台账号看不见某个页面 | 后台所有按钮都以 `GET /auth/me/permissions` 为准。让超级管理员到 **角色** 里给该角色勾上对应资源，或直接看 403 响应里的 `permission` 字段缺哪一项 |
 | 重启后丢失初始化状态 | `./data` 没挂载持久卷，按 Step 3 补上 `-v "$PWD/data:/app/data"` 重新起 |
 | 上传图片 413 | OpenResty 的 `client_max_body_size` 与应用一致（默认 8M） |
 

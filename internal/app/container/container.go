@@ -79,11 +79,13 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 			OAuthUsername: user.OAuthUsername,
 		}, nil
 	}
-	paymentMod, err := payment.Wire(db, cfg, identityFind)
+	// Catalogue first: checkout asks it what a 优惠码 is worth, so payment is
+	// wired against the module that already exists.
+	catalogMod := catalog.Wire(db, cfg)
+	paymentMod, err := payment.Wire(db, cfg, identityFind, catalogMod.Service)
 	if err != nil {
 		return nil, err
 	}
-	catalogMod := catalog.Wire(db)
 	notificationMod := notification.Wire(db)
 	auditMod := audit.Wire(db)
 

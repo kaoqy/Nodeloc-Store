@@ -20,6 +20,15 @@ type Failure struct {
 	Detail    string `json:"detail,omitempty"`
 }
 
+// couponRefusal is the shape the catalogue's coupon errors happen to have.
+// Declaring it here instead of importing that package keeps the modules apart:
+// payment only needs the reason a code was refused, whatever produced it.
+type couponRefusal interface {
+	error
+	CouponCode() string
+	CouponMessage() string
+}
+
 // Classify maps a payment error to its Failure. Anything unrecognised stays a
 // 500 with a generic buyer message: a Go error string is written for the log,
 // not for a storefront.
@@ -46,6 +55,16 @@ func Classify(err error) *Failure {
 		return &Failure{Code: "not_complete", Status: http.StatusConflict, Message: "NodeLoc 回报这笔支付尚未完成。", Retryable: true, Detail: err.Error()}
 	case errors.Is(err, ErrRefundRecipientUnknown):
 		return &Failure{Code: "refund_recipient_unknown", Status: http.StatusConflict, Message: err.Error()}
+	case errors.Is(err, ErrCouponUnavailable):
+		// Checkout and the quote box run the same coupon rules, so the refusal the
+		// catalogue already worded for the buyer is reused verbatim instead of a
+		// second, vaguer sentence written here. A code that carries no reason (the
+		// pricing port is not wired at all) keeps the catch-all wording.
+		var refusal couponRefusal
+		if errors.As(err, &refusal) {
+			return &Failure{Code: refusal.CouponCode(), Status: http.StatusUnprocessableEntity, Message: refusal.CouponMessage()}
+		}
+		return &Failure{Code: "coupon_unavailable", Status: http.StatusUnprocessableEntity, Message: "优惠码已经用不了了（可能过期、额度用满或不适用于本单），请重新确认后再下单。"}
 	case errors.Is(err, domain.ErrPaymentNotConfigured):
 		return &Failure{Code: "not_configured", Status: http.StatusServiceUnavailable, Message: "商店的 NodeLoc 支付还没有配置好，请稍后再试或联系店家。", Detail: err.Error()}
 	case errors.Is(err, domain.ErrProviderUnreachable):

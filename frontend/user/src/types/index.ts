@@ -10,6 +10,8 @@ export interface User {
   is_active?: boolean
   points: number
   consecutive_days?: number
+  total_checkins?: number
+  last_checkin_date?: string | null
   created_at?: string
   last_login_at?: string | null
   oauth_provider?: string | null
@@ -26,6 +28,12 @@ export interface Category {
   name: string
   slug: string
   description?: string | null
+  icon?: string | null
+  sort_order?: number
+  is_visible?: boolean
+  // The storefront's category list is counted server-side, so a chip can show
+  // how many products a buyer would actually reach.
+  product_count?: number
 }
 
 export type ProductType = 'card' | 'manual'
@@ -43,12 +51,21 @@ export interface Product {
   original_price?: number | null
   stock_visible: boolean
   stock_count: number
+  sold_count?: number
+  is_featured?: boolean
   auto_deliver: boolean
   is_published: boolean
   sort_order?: number
   category_id?: number | null
   category?: Category | null
   created_at?: string
+}
+
+export interface StoreStats {
+  products: number
+  stock: number
+  sales: number
+  categories: number
 }
 
 export interface Order {
@@ -58,6 +75,8 @@ export interface Order {
   product_id: number
   quantity: number
   unit_price: number
+  discount_amount?: number
+  coupon_code?: string
   total_amount: number
   status: string
   fulfillment_status: string
@@ -84,6 +103,15 @@ export interface PaymentOrder {
   provider_transaction_id?: string | null
 }
 
+export interface CouponQuote {
+  code: string
+  accepted: boolean
+  discount: number
+  payable: number
+  original_total: number
+  description?: string
+}
+
 export interface AuthTokens {
   access_token: string
   refresh_token?: string
@@ -96,6 +124,55 @@ export interface AuthResponse {
   tokens: AuthTokens
 }
 
+export interface CheckinStatus {
+  enabled: boolean
+  checked_in_today: boolean
+  consecutive_days: number
+  total_checkins: number
+  points: number
+}
+
+export interface CheckinResult extends CheckinStatus {
+  reward: number
+  user: User
+}
+
+export interface CheckinRecord {
+  id: number
+  checkin_date: string
+  reward_points: number
+  consecutive_days: number
+}
+
+export interface PointEntry {
+  id: number
+  delta: number
+  balance_after: number
+  reason: string
+  created_at: string
+}
+
+export interface MyPermissions {
+  role: string
+  is_staff: boolean
+  permissions: string[]
+}
+
+export interface AppNotification {
+  id: number
+  type: string
+  title: string
+  content?: string | null
+  link?: string | null
+  is_read: boolean
+  created_at: string
+}
+
+export interface FooterLink {
+  label: string
+  url: string
+}
+
 export interface SiteStatus {
   initialized: boolean
   version: string
@@ -104,5 +181,14 @@ export interface SiteStatus {
     slogan?: string
     description?: string
     logo?: string
+    footer_text?: string
+    footer_note?: string
+    footer_links?: FooterLink[]
+    announcement?: string
+  }
+  features?: {
+    registration?: boolean
+    checkin?: boolean
+    coupons?: boolean
   }
 }

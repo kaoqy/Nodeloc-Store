@@ -1,28 +1,69 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { listCategories } from '../api/categories'
 import { createCoupon, deleteCoupon, listCoupons, updateCoupon } from '../api/coupons'
+import { listProducts } from '../api/products'
 import { errorMessage, money, when } from '../utils/format'
-import type { Coupon } from '../types'
+import { useAuthStore } from '../stores/auth'
+import type { Category, Coupon, Product } from '../types'
+
+const auth = useAuthStore()
+const canManage = computed(() => auth.allows('coupons', 'manage'))
 
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const coupons = ref<Coupon[]>([])
+const categories = ref<Category[]>([])
+const products = ref<Product[]>([])
 const editing = ref<Partial<Coupon> | null>(null)
+
+const SCOPE_LABEL: Record<string, string> = {
+  all: '全场可用',
+  category: '限定分类',
+  product: '限定商品',
+}
+
+const scopeProducts = computed(() => {
+  if (!editing.value) return []
+  if (editing.value.scope !== 'category') return products.value
+  const categoryID = Number(editing.value.category_id) || 0
+  if (!categoryID) return products.value
+  return products.value.filter((item) => Number(item.category_id) === categoryID)
+})
+
+function scopeLabel(coupon: Coupon): string {
+  const scope = coupon.scope && SCOPE_LABEL[coupon.scope] ? coupon.scope : 'all'
+  if (scope === 'product') {
+    const product = products.value.find((item) => item.id === Number(coupon.product_id))
+    return `限 ${product?.name || `商品 #${coupon.product_id ?? '—'}`}`
+  }
+  if (scope === 'category') {
+    const category = categories.value.find((item) => item.id === Number(coupon.category_id))
+    return `限 ${category?.name || `分类 #${coupon.category_id ?? '—'}`}`
+  }
+  return SCOPE_LABEL.all
+}
 
 const canSave = computed(() => {
   const item = editing.value
   if (!item) return false
   const value = Number(item.discount_value)
   if (!item.code?.trim() || !value || value <= 0) return false
-  return item.discount_type !== 'percent' || value <= 100
+  if (item.discount_type === 'percent' && value > 100) return false
+  if (item.scope === 'product' && !Number(item.product_id)) return false
+  if (item.scope === 'category' && !Number(item.category_id)) return false
+  return true
 })
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    coupons.value = await listCoupons()
+    const [rows, categoryRows, productRows] = await Promise.all([listCoupons(), listCategories(), listProducts()])
+    coupons.value = rows
+    categories.value = categoryRows
+    products.value = productRows
   } catch (err) {
     error.value = errorMessage(err, '加载优惠券失败')
   } finally {
@@ -41,7 +82,21 @@ function startCreate() {
     is_active: true,
     valid_from: null,
     valid_until: null,
+    description: '',
+    scope: 'all',
+    category_id: null,
+    product_id: null,
+    per_user_limit: 0,
   }
+}
+
+function changeScope(value: string) {
+  if (!editing.value) return
+  editing.value.scope = value
+  // The server clears the unused half of the scope, but the form should not
+  // carry a stale id into the next save either.
+  if (value !== 'category') editing.value.category_id = null
+  if (value !== 'product') editing.value.product_id = null
 }
 
 // Dates are calendar days chosen in the admin's timezone: convert with local
@@ -65,7 +120,7 @@ async function save() {
   busy.value = true
   error.value = ''
   try {
-    const payload = {
+    const payload: Partial<Coupon> = {
       code: item.code?.trim().toUpperCase(),
       discount_type: item.discount_type,
       discount_value: Number(item.discount_value),
@@ -75,6 +130,11 @@ async function save() {
       is_active: item.is_active ?? true,
       valid_from: item.valid_from || null,
       valid_until: item.valid_until || null,
+      description: item.description?.trim() || null,
+      scope: item.scope || 'all',
+      category_id: item.scope === 'category' ? Number(item.category_id) || null : null,
+      product_id: item.scope === 'product' ? Number(item.product_id) || null : null,
+      per_user_limit: Number(item.per_user_limit) || 0,
     }
     if (item.id) {
       await updateCoupon(item.id, payload)
@@ -105,15 +165,24 @@ function discountLabel(coupon: Coupon): string {
   return coupon.discount_type === 'percent' ? `立减 ${coupon.discount_value}%` : `立减 ${money(coupon.discount_value)}`
 }
 
+function expiry(coupon: Coupon): string {
+  if (!coupon.valid_from && !coupon.valid_until) return '长期有效'
+  return `${toDateInput(coupon.valid_from) || '立即'} → ${toDateInput(coupon.valid_until) || '长期'}`
+}
+
 onMounted(load)
 </script>
 
 <template>
   <section class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <p class="quiet text-sm">优惠码目前独立维护，尚未参与下单金额计算。</p>
-      <button class="btn btn-primary btn-sm" @click="startCreate">+ 新建优惠券</button>
+      <p class="quiet text-sm">
+        优惠码在下单时参与计价：买家在商品页输入后，折扣会直接从应付金额里扣掉。
+      </p>
+      <button v-if="canManage" class="btn btn-primary btn-sm" @click="startCreate">+ 新建优惠券</button>
     </div>
+
+    <p v-if="!canManage" class="quiet text-xs">当前角色只能查看优惠码，新建与修改需要「优惠码管理」权限。</p>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
@@ -123,6 +192,7 @@ onMounted(load)
           <tr>
             <th>优惠码</th>
             <th>折扣</th>
+            <th>适用范围</th>
             <th>最低消费</th>
             <th>使用情况</th>
             <th>有效期</th>
@@ -133,36 +203,41 @@ onMounted(load)
         <tbody>
           <template v-if="loading">
             <tr v-for="i in 5" :key="`skeleton-${i}`">
-              <td colspan="7"><div class="skeleton h-6" /></td>
+              <td colspan="8"><div class="skeleton h-6" /></td>
             </tr>
           </template>
           <tr v-else-if="!coupons.length">
-            <td colspan="7">
+            <td colspan="8">
               <div class="empty-state">
                 <p class="empty-glyph" aria-hidden="true">◌</p>
-                <p class="empty-title">还没有优惠券</p>
+                <p class="empty-title">还没有优惠码</p>
+                <p v-if="canManage" class="empty-hint">新建一个码，买家在商品详情页就能用它试算折扣。</p>
               </div>
             </td>
           </tr>
           <tr v-for="coupon in coupons" :key="coupon.id">
-            <td><code class="mono text-sm">{{ coupon.code }}</code></td>
+            <td>
+              <code class="mono text-sm">{{ coupon.code }}</code>
+              <p v-if="coupon.description" class="quiet max-w-[220px] truncate text-xs">{{ coupon.description }}</p>
+            </td>
             <td class="nums text-sm">{{ discountLabel(coupon) }}</td>
+            <td class="text-sm muted">{{ scopeLabel(coupon) }}</td>
             <td class="nums text-sm muted">{{ coupon.min_order_amount ? money(coupon.min_order_amount) : '不限' }}</td>
             <td class="nums text-sm">
-              {{ coupon.used_count }} / {{ coupon.max_uses || '∞' }}
+              <p>{{ coupon.used_count }} / {{ coupon.max_uses || '∞' }}</p>
+              <p v-if="coupon.per_user_limit" class="quiet text-xs">每人 {{ coupon.per_user_limit }} 次</p>
             </td>
-            <td class="text-xs quiet">
-              {{ coupon.valid_from || coupon.valid_until ? `${toDateInput(coupon.valid_from) || '立即'} → ${toDateInput(coupon.valid_until) || '长期'}` : '长期有效' }}
-            </td>
+            <td class="text-xs quiet">{{ expiry(coupon) }}</td>
             <td>
               <span class="badge" :class="coupon.is_active ? 'badge-success' : 'badge-neutral'">
                 {{ coupon.is_active ? '启用' : '停用' }}
               </span>
             </td>
-            <td class="whitespace-nowrap text-right">
+            <td v-if="canManage" class="whitespace-nowrap text-right">
               <button class="btn btn-ghost btn-sm" @click="editing = { ...coupon }">编辑</button>
               <button class="btn btn-ghost btn-sm text-[var(--danger)]" @click="remove(coupon)">删除</button>
             </td>
+            <td v-else class="text-right"><span class="quiet text-xs">只读</span></td>
           </tr>
         </tbody>
       </table>
@@ -173,12 +248,16 @@ onMounted(load)
       class="overlay" role="dialog" aria-modal="true" aria-label="优惠券表单"
       @click.self="editing = null"
     >
-      <div class="card w-full max-w-md !p-5">
+      <div class="card w-full max-w-lg !p-5">
         <h3 class="text-base font-semibold">{{ editing.id ? '编辑优惠券' : '新建优惠券' }}</h3>
         <div class="mt-4 space-y-3">
           <div>
             <label class="label" for="k-code">优惠码 *</label>
             <input id="k-code" v-model="editing.code" class="input mono uppercase" placeholder="SUMMER10" />
+          </div>
+          <div>
+            <label class="label" for="k-desc">说明（买家可见）</label>
+            <input id="k-desc" v-model="editing.description" class="input" placeholder="新人首单立减 10 元" />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -199,9 +278,46 @@ onMounted(load)
               <input id="k-min" v-model.number="editing.min_order_amount" type="number" min="0" class="input nums" />
             </div>
             <div>
-              <label class="label" for="k-max">最大次数（0=不限）</label>
+              <label class="label" for="k-max">总次数上限（0=不限）</label>
               <input id="k-max" v-model.number="editing.max_uses" type="number" min="0" class="input nums" />
             </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="k-per">每人可用次数（0=不限）</label>
+              <input id="k-per" v-model.number="editing.per_user_limit" type="number" min="0" class="input nums" />
+            </div>
+            <div>
+              <label class="label" for="k-scope">适用范围</label>
+              <select
+                id="k-scope"
+                class="input"
+                :value="editing.scope || 'all'"
+                @change="changeScope(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="all">全场</option>
+                <option value="category">指定分类</option>
+                <option value="product">指定商品</option>
+              </select>
+            </div>
+          </div>
+          <div v-if="editing.scope === 'category'">
+            <label class="label" for="k-category">分类 *</label>
+            <select id="k-category" v-model.number="editing.category_id" class="input">
+              <option :value="null" disabled>请选择分类</option>
+              <option v-for="category in categories" :key="category.id" :value="category.id">
+                {{ category.name }}
+              </option>
+            </select>
+          </div>
+          <div v-if="editing.scope === 'product'">
+            <label class="label" for="k-product">商品 *</label>
+            <select id="k-product" v-model.number="editing.product_id" class="input">
+              <option :value="null" disabled>请选择商品</option>
+              <option v-for="product in scopeProducts" :key="product.id" :value="product.id">
+                {{ product.name }}
+              </option>
+            </select>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>

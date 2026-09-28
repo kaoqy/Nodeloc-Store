@@ -4,11 +4,14 @@ import { useRouter } from 'vue-router'
 import PaginationFooter from '../components/PaginationFooter.vue'
 import { deleteProduct, listProducts, updateProduct } from '../api/products'
 import { errorMessage, money, when } from '../utils/format'
+import { useAuthStore } from '../stores/auth'
 import type { Product } from '../types'
 
 const PageSize = 12
 
 const router = useRouter()
+const auth = useAuthStore()
+const canManage = computed(() => auth.allows('products', 'manage'))
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
@@ -113,7 +116,8 @@ onMounted(load)
           {{ option.label }}
         </button>
       </div>
-      <RouterLink to="/products/new" class="btn btn-primary btn-sm">+ 新建商品</RouterLink>
+      <RouterLink v-if="canManage" to="/products/new" class="btn btn-primary btn-sm">+ 新建商品</RouterLink>
+      <p v-else class="quiet text-xs">当前角色只能查看商品，上下架与编辑需要「商品管理」权限。</p>
     </div>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
@@ -189,11 +193,12 @@ onMounted(load)
               <RouterLink v-if="product.product_type === 'card'" :to="`/cards/${product.id}`" class="btn btn-ghost btn-sm">
                 卡密
               </RouterLink>
-              <button class="btn btn-ghost btn-sm" :disabled="busy" @click="togglePublished(product)">
+              <button v-if="canManage" class="btn btn-ghost btn-sm" :disabled="busy" @click="togglePublished(product)">
                 {{ product.is_published ? '下架' : '上架' }}
               </button>
-              <RouterLink :to="`/products/${product.id}/edit`" class="btn btn-ghost btn-sm">编辑</RouterLink>
+              <RouterLink v-if="canManage" :to="`/products/${product.id}/edit`" class="btn btn-ghost btn-sm">编辑</RouterLink>
               <button
+                v-if="canManage"
                 class="btn btn-ghost btn-sm text-[var(--danger)]"
                 :disabled="busy"
                 @click="removeProduct(product)"

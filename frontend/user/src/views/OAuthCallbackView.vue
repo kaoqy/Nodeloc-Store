@@ -22,7 +22,7 @@ onMounted(async () => {
   const token = fragment.get('access_token') || ''
   if (token) {
     history.replaceState(null, '', window.location.pathname)
-    auth.saveSession(token)
+    auth.saveSession(token, null, fragment.get('refresh_token') || undefined)
     try {
       await auth.fetchUser()
       await router.replace(target())
@@ -43,7 +43,7 @@ onMounted(async () => {
   }
   try {
     const response = await oauthCallback(code, state)
-    auth.saveSession(response.tokens.access_token, response.user)
+    auth.saveSession(response.tokens.access_token, response.user, response.tokens.refresh_token)
     await router.replace(target())
   } catch {
     sessionStorage.removeItem('oauth_redirect')

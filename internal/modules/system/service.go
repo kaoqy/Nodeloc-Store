@@ -97,6 +97,17 @@ func (s *Service) Status() map[string]any {
 			app["slogan"] = rt.App.Slogan
 			app["description"] = rt.App.Description
 			app["logo"] = rt.App.Logo
+			// The storefront renders whatever the shop owner typed into 设置, so
+			// the footer and the announcement travel with the site identity.
+			app["footer_text"] = rt.App.FooterText
+			app["footer_note"] = rt.App.FooterNote
+			app["footer_links"] = rt.App.FooterLinks
+			app["announcement"] = rt.App.Announcement
+			status["features"] = map[string]any{
+				"registration": rt.Features.RegistrationEnabled,
+				"checkin":      rt.Features.CheckinEnabled(),
+				"coupons":      rt.Features.CouponsEnabled(),
+			}
 		}
 		status["app"] = app
 	}
@@ -413,7 +424,19 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	// surface the gateway's actionable error instead of quietly flipping the
 	// admin's own switch off.
 	next.Payment.Enabled = next.Payment.Enabled && next.Payment.PaymentID != "" && next.Payment.SecretKey != ""
+	// A settings document that does not mention a switch at all is an older one,
+	// not an instruction to turn it on, so the stored value carries over first.
+	if next.Features.Checkin == nil {
+		next.Features.Checkin = existing.Features.Checkin
+	}
+	if next.Features.Coupons == nil {
+		next.Features.Coupons = existing.Features.Coupons
+	}
+	if next.Features.StockAlertThreshold == nil {
+		next.Features.StockAlertThreshold = existing.Features.StockAlertThreshold
+	}
 	next.MergeDefaults()
+	next.Normalize()
 	if next.App.Domain == "" {
 		next.App.Domain = existing.App.Domain
 	}

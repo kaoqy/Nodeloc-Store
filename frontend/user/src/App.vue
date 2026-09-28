@@ -43,15 +43,37 @@ onMounted(async () => {
       </div>
     </main>
 
-    <footer class="mt-20 border-t border-[var(--stroke)] py-8">
-      <div class="mx-auto flex w-full max-w-6xl flex-col items-center gap-1.5 px-4 text-center sm:px-6">
-        <p class="text-[13px] text-[var(--text-quiet)]">
-          {{ site.name }}
-          <template v-if="site.slogan"> · {{ site.slogan }}</template>
+    <footer class="mt-20 border-t border-[var(--stroke)] py-9">
+      <div class="mx-auto flex w-full max-w-6xl flex-col items-center gap-3 px-4 text-center sm:px-6">
+        <nav
+          v-if="site.footerLinks.length"
+          class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13px]"
+          aria-label="页脚链接"
+        >
+          <a
+            v-for="link in site.footerLinks"
+            :key="link.url + link.label"
+            :href="link.url"
+            class="text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {{ link.label }}
+          </a>
+        </nav>
+
+        <p class="max-w-2xl text-[13px] leading-relaxed text-[var(--text-dim)]">
+          {{ site.footerText || site.name }}
+          <template v-if="!site.footerText && site.slogan"> · {{ site.slogan }}</template>
         </p>
+
         <p class="text-xs text-[var(--text-quiet)]/80">
-          NodeLoc OAuth2 登录 · Nodeloc Payments 支付 · 卡密自动交付
+          {{ site.footerNote || 'NodeLoc OAuth2 登录 · Nodeloc Payments 支付 · 卡密自动交付' }}
           <span v-if="site.version" class="nums"> · v{{ site.version }}</span>
+        </p>
+
+        <p v-if="site.footerLinks.length || site.footerText" class="text-xs text-[var(--text-quiet)]/70">
+          {{ site.name }}
         </p>
       </div>
     </footer>

@@ -41,7 +41,7 @@ func Wire(db *gorm.DB, cfg *config.Config) *Module {
 		panic("identity: failed to create JWT service: " + err.Error())
 	}
 
-	svc, err := application.NewService(repo, oauth, tokens)
+	svc, err := application.NewService(repo, oauth, tokens, cfg.Features)
 	if err != nil {
 		panic("identity: failed to create service: " + err.Error())
 	}
