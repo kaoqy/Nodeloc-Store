@@ -23,6 +23,7 @@ const points = computed(() => Number(delta.value || 0))
 
 const canManageUsers = computed(() => auth.allows('users', 'manage'))
 const canManageRoles = computed(() => auth.allows('roles', 'manage'))
+const canViewLogs = computed(() => auth.allows('logs', 'view'))
 const isSelf = computed(() => Boolean(user.value && auth.user && user.value.id === auth.user.id))
 // The API refuses to let anyone but a super_admin touch a back-office account,
 // or grant 管理员 at all; the picker says so instead of failing on submit.
@@ -126,7 +127,17 @@ onMounted(load)
   <section v-else class="space-y-5">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <RouterLink to="/users" class="quiet text-xs hover:text-[var(--text)]">← 返回用户列表</RouterLink>
+        <div class="flex flex-wrap items-center gap-3">
+          <RouterLink to="/users" class="quiet text-xs hover:text-[var(--text)]">← 返回用户列表</RouterLink>
+          <RouterLink
+            v-if="canViewLogs"
+            :to="`/logs?actor=${user.id}`"
+            class="quiet text-xs hover:text-[var(--text)]"
+            title="只看这名成员在后台留下的操作记录"
+          >
+            查看其操作记录 →
+          </RouterLink>
+        </div>
         <div class="mt-1.5 flex flex-wrap items-center gap-2.5">
           <h2 class="truncate text-xl font-bold">{{ user.username }}</h2>
           <span class="badge" :class="current.badge">{{ current.label }}</span>

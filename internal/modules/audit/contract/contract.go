@@ -10,4 +10,7 @@ import (
 type AuditRepo interface {
 	Create(ctx context.Context, log *domain.AuditLog) error
 	List(ctx context.Context, filter domain.LogFilter) ([]domain.AuditLog, int64, error)
+	// Actions lists the distinct action names already recorded, so the log page
+	// can offer the filters the shop has actually used.
+	Actions(ctx context.Context) ([]string, error)
 }

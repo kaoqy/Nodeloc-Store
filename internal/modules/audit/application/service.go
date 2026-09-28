@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit/contract"
@@ -13,6 +14,9 @@ const (
 	defaultPage  = 1
 	defaultLimit = 20
 	maxLimit     = 100
+	// maxSearchLen keeps a keyword from turning into a full-table pattern match
+	// on the longest text column the log row carries.
+	maxSearchLen = 64
 )
 
 var ErrActionRequired = errors.New("audit action is required")
@@ -50,6 +54,10 @@ func (s *Service) LogAction(ctx context.Context, input domain.LogActionInput) (*
 
 func (s *Service) QueryLogs(ctx context.Context, filter domain.LogFilter) (domain.Page, error) {
 	filter.Action = strings.TrimSpace(filter.Action)
+	filter.Search = strings.TrimSpace(filter.Search)
+	if runes := []rune(filter.Search); len(runes) > maxSearchLen {
+		filter.Search = string(runes[:maxSearchLen])
+	}
 	if filter.Page < 1 {
 		filter.Page = defaultPage
 	}
@@ -71,6 +79,17 @@ func (s *Service) QueryLogs(ctx context.Context, filter domain.LogFilter) (domai
 		Items: items, Total: total, Page: filter.Page,
 		Limit: filter.Limit, TotalPages: totalPages,
 	}, nil
+}
+
+// ListActions names the actions this shop has recorded, so the log page can
+// offer filters that match real history instead of a hand-written guess.
+func (s *Service) ListActions(ctx context.Context) ([]string, error) {
+	actions, err := s.repo.Actions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(actions)
+	return actions, nil
 }
 
 func trimOptional(value *string) *string {

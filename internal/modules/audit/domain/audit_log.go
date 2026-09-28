@@ -1,6 +1,10 @@
 package domain
 
-import "github.com/kaoqy/Nodeloc-Store/internal/models"
+import (
+	"time"
+
+	"github.com/kaoqy/Nodeloc-Store/internal/models"
+)
 
 // AuditLog is the audit module's domain entity. The canonical persistence
 // model is shared with the rest of the application through internal/models.
@@ -16,10 +20,20 @@ type LogActionInput struct {
 }
 
 // LogFilter controls audit-log queries.
+//
+// Search matches a substring of the action, target or detail. Since is an
+// inclusive lower bound and Before an exclusive upper bound, so an "until
+// today" pick still keeps today's entries — that is the pairing the log page's
+// date range relies on.
 type LogFilter struct {
-	Action string
-	Page   int
-	Limit  int
+	Action     string
+	Search     string
+	ActorID    *uint
+	SystemOnly bool
+	Since      *time.Time
+	Before     *time.Time
+	Page       int
+	Limit      int
 }
 
 // Page is a paginated collection of audit logs.
