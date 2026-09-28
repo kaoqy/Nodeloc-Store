@@ -308,7 +308,7 @@ func (s *Service) AdminGetUser(ctx context.Context, userID uint) (*domain.User, 
 func (s *Service) AdminSetRole(ctx context.Context, actorID uint, actorRole string, userID uint, role string) (*domain.User, error) {
 	role = strings.TrimSpace(role)
 	if actorID == userID {
-		return nil, fmt.Errorf("%w: you cannot change your own role", domain.ErrInvalidInput)
+		return nil, fmt.Errorf("%w: 不能修改自己的角色，请让另一位超级管理员来调整", domain.ErrInvalidInput)
 	}
 	if !domain.ValidRole(role) {
 		return nil, fmt.Errorf("%w: 未知的角色 %q", domain.ErrInvalidInput, role)
@@ -348,7 +348,7 @@ func (s *Service) AdminToggleAdmin(ctx context.Context, actorID uint, actorRole 
 
 func (s *Service) AdminToggleActive(ctx context.Context, actorID, userID uint) (*domain.User, error) {
 	if actorID == userID {
-		return nil, fmt.Errorf("%w: you cannot disable your own account", domain.ErrInvalidInput)
+		return nil, fmt.Errorf("%w: 不能停用自己的账号", domain.ErrInvalidInput)
 	}
 	user, err := s.repo.FindByID(ctx, userID)
 	if err != nil {
@@ -377,7 +377,7 @@ func (s *Service) adjustPoints(ctx context.Context, user *domain.User, delta int
 	}
 	balance := user.Points + delta
 	if balance < 0 {
-		return nil, fmt.Errorf("%w: balance would drop below zero", domain.ErrInvalidInput)
+		return nil, fmt.Errorf("%w: 要扣的积分比账号现有的还多，当前余额 %d 分", domain.ErrInvalidInput, user.Points)
 	}
 	user.Points = balance
 	entry := &domain.PointEntry{

@@ -46,6 +46,14 @@ const ASSIGNABLE = [
 
 const assignable = computed(() => ASSIGNABLE.filter((item) => !item.superOnly || auth.isSuperAdmin))
 
+// The picker is disabled for two different reasons, and telling them apart is
+// what stops the owner hunting for a permission they really do hold.
+const roleHint = computed(() => {
+  if (canChangeRole.value) return ''
+  if (isSelf.value) return '这是你自己的账号，改自己的角色要由另一位超级管理员来操作。'
+  return '当前账号无权调整这名成员的角色。'
+})
+
 // The picker must still show a role this account cannot grant, otherwise it
 // would look as though the member held the first option.
 const roleMissing = computed(
@@ -199,7 +207,7 @@ onMounted(load)
         <div v-if="canManageRoles" class="card">
           <h3 class="mb-1 text-sm font-semibold">权限</h3>
           <p class="quiet mb-4 text-xs">
-            角色决定这个账号在后台能看到哪些页面，具体能做什么由 角色权限 里的细分项决定。{{ canChangeRole ? '' : '当前账号无权调整这名成员的角色。' }}
+            角色决定这个账号在后台能看到哪些页面，具体能做什么由 角色权限 里的细分项决定。{{ roleHint }}
           </p>
           <div class="flex flex-wrap items-end gap-3">
             <div>

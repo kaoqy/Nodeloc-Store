@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -57,14 +59,14 @@ const multipartSlack = 64 << 10
 // receiveImage answers with the address to paste into an image field.
 func receiveImage(store *upload.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		data, status, message := readImage(c)
-		if status != 0 {
-			c.JSON(status, gin.H{"error": message})
+		data, err := readImage(c)
+		if err != nil {
+			refuse(c, err)
 			return
 		}
 		result, err := store.Save(data)
 		if err != nil {
-			c.JSON(refusalStatus(err), gin.H{"error": err.Error()})
+			refuse(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, result)
@@ -77,25 +79,26 @@ func receiveImage(store *upload.Store) gin.HandlerFunc {
 // old one is only ever deleted once nothing refers to it any more.
 func receiveAvatar(store *upload.Store, profiles avatarAccounts) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		data, status, message := readImage(c)
-		if status != 0 {
-			c.JSON(status, gin.H{"error": message})
+		data, err := readImage(c)
+		if err != nil {
+			refuse(c, err)
 			return
 		}
 		result, err := store.Save(data)
 		if err != nil {
-			c.JSON(refusalStatus(err), gin.H{"error": err.Error()})
+			refuse(c, err)
 			return
 		}
 
 		userID, ok := userIDOf(c)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录，再上传头像。", "code": "unauthenticated"})
 			return
 		}
 		current, err := profiles.Me(c.Request.Context(), userID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取账号资料失败"})
+			log.Printf("[upload] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取账号资料失败，请稍后再试。", "code": "internal_error"})
 			return
 		}
 		user, err := profiles.UpdateProfile(c.Request.Context(), userID, domain.ProfileEdit{AvatarURL: &result.URL})
@@ -103,7 +106,7 @@ func receiveAvatar(store *upload.Store, profiles avatarAccounts) gin.HandlerFunc
 			// The new file is on disk but unreferenced; a refusal here would leave
 			// the shop with a picture nobody points at, so the bytes are dropped too.
 			store.Remove(result.URL)
-			c.JSON(statusOfProfileError(err), gin.H{"error": err.Error()})
+			refuse(c, err)
 			return
 		}
 		store.Remove(current.AvatarURL)
@@ -123,25 +126,22 @@ func userIDOf(c *gin.Context) (uint, bool) {
 	return userID, ok && userID != 0
 }
 
-// readImage pulls the one file field an upload form carries. It answers with the
-// bytes, or with the status and message to send back when there are none worth
-// sending.
-func readImage(c *gin.Context) (data []byte, status int, message string) {
+// readImage pulls the one file field an upload form carries and answers with the
+// bytes, or with the reason there are none worth sending.
+func readImage(c *gin.Context) ([]byte, error) {
 	if c.Request.ContentLength > upload.MaxBytes+multipartSlack {
-		return nil, http.StatusRequestEntityTooLarge, upload.ErrTooLarge.Error()
+		return nil, upload.ErrTooLarge
 	}
 
 	reader, err := c.Request.MultipartReader()
 	if err != nil {
-		return nil, http.StatusBadRequest, upload.ErrEmpty.Error()
+		return nil, upload.ErrEmpty
 	}
 	for {
 		part, err := reader.NextPart()
-		if errors.Is(err, io.EOF) {
-			return nil, http.StatusBadRequest, upload.ErrEmpty.Error()
-		}
 		if err != nil {
-			return nil, http.StatusBadRequest, upload.ErrEmpty.Error()
+			// io.EOF means the form carried no image field at all.
+			return nil, upload.ErrEmpty
 		}
 		if part.FormName() != "image" {
 			continue
@@ -149,29 +149,49 @@ func readImage(c *gin.Context) (data []byte, status int, message string) {
 		// One byte over the limit is enough to know: ReadAll stops after
 		// MaxBytes+1 so a 4 GB body cannot be streamed into memory to be
 		// refused afterwards.
-		data, err = io.ReadAll(io.LimitReader(part, upload.MaxBytes+1))
+		data, err := io.ReadAll(io.LimitReader(part, upload.MaxBytes+1))
 		if err != nil {
-			return nil, http.StatusBadRequest, upload.ErrEmpty.Error()
+			return nil, upload.ErrEmpty
 		}
 		if len(data) == 0 {
-			return nil, http.StatusBadRequest, upload.ErrEmpty.Error()
+			return nil, upload.ErrEmpty
 		}
-		return data, 0, ""
+		return data, nil
 	}
 }
 
-func refusalStatus(err error) int {
-	if errors.Is(err, upload.ErrTooLarge) {
-		return http.StatusRequestEntityTooLarge
+// refuse is the one answer every upload route gives. The reasons the platform
+// package names are already the shop's own words, so this only adds the status
+// and the machine code, keeps a rejected profile edit to the part after the
+// sentinel, and turns an unrecognised fault into a plain 500 whose cause stays in
+// the log instead of on the page.
+func refuse(c *gin.Context, err error) {
+	status, code := uploadRefusal(err)
+	message := err.Error()
+	if _, tail, found := strings.Cut(message, ": "); code == "invalid_input" && found && strings.TrimSpace(tail) != "" {
+		message = tail
 	}
-	return http.StatusBadRequest
+	if code == "internal_error" {
+		log.Printf("[upload] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+		message = "这张图片没能存进商店的文件里，请稍后再试。"
+	}
+	c.JSON(status, gin.H{"error": message, "code": code})
 }
 
-// statusOfProfileError keeps a rejected profile edit the buyer's problem (400)
-// and a failed write the shop's (500), because the two ask for different retries.
-func statusOfProfileError(err error) int {
-	if errors.Is(err, domain.ErrInvalidInput) {
-		return http.StatusBadRequest
+// uploadRefusal maps each refusal to the status the page retries on: an
+// over-sized file is the buyer's or the shop's own to shrink (413), a file that
+// is not a picture is a bad submission (400), anything else is the shop's fault
+// and says so as a 500.
+func uploadRefusal(err error) (int, string) {
+	switch {
+	case errors.Is(err, upload.ErrEmpty):
+		return http.StatusBadRequest, "empty_upload"
+	case errors.Is(err, upload.ErrTooLarge):
+		return http.StatusRequestEntityTooLarge, "image_too_large"
+	case errors.Is(err, upload.ErrNotImage), errors.Is(err, upload.ErrHuge):
+		return http.StatusBadRequest, "invalid_image"
+	case errors.Is(err, domain.ErrInvalidInput):
+		return http.StatusBadRequest, "invalid_input"
 	}
-	return http.StatusInternalServerError
+	return http.StatusInternalServerError, "internal_error"
 }

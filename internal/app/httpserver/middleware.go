@@ -23,13 +23,13 @@ func JWTMiddleware(cfg *config.JWTConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "请先登录，再打开这个页面。", "code": "unauthenticated"})
 			return
 		}
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "登录凭证的格式不对，请重新登录。", "code": "invalid_token"})
 			return
 		}
 
@@ -44,7 +44,7 @@ func JWTMiddleware(cfg *config.JWTConfig) gin.HandlerFunc {
 		})
 
 		if err != nil || !token.Valid {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "登录状态已失效，请重新登录。", "code": "invalid_token"})
 			return
 		}
 
@@ -86,7 +86,7 @@ func RequirePermission(reader AccountReader, resource, action string) gin.Handle
 	return func(c *gin.Context) {
 		userID := contextUserID(c)
 		if userID == 0 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "请先登录，再打开这个页面。", "code": "unauthenticated"})
 			return
 		}
 
@@ -95,10 +95,10 @@ func RequirePermission(reader AccountReader, resource, action string) gin.Handle
 			state, found := reader(c.Request.Context(), userID)
 			switch {
 			case !found:
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "账号已不存在，请重新登录"})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "账号已不存在，请重新登录", "code": "account_missing"})
 				return
 			case !state.IsActive:
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "账号已被禁用"})
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "账号已被停用，请联系管理员", "code": "account_disabled"})
 				return
 			}
 			role = state.Role

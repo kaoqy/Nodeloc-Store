@@ -1,6 +1,7 @@
 package http
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -37,12 +38,12 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 func (h *Handler) ListAuditLogs(c *gin.Context) {
 	page, err := positiveIntQuery(c, "page", 1)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "invalid_query"})
 		return
 	}
 	limit, err := positiveIntQuery(c, "limit", 20)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "invalid_query"})
 		return
 	}
 
@@ -52,7 +53,10 @@ func (h *Handler) ListAuditLogs(c *gin.Context) {
 		Limit:  limit,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query audit logs"})
+		// The log page is the shop's own record of what happened, so a failure here
+		// is worth a line of server log rather than only a bare 500.
+		log.Printf("[audit] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "审计日志暂时读不出来，请稍后再试。", "code": "internal_error"})
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -72,4 +76,12 @@ func positiveIntQuery(c *gin.Context, name string, fallback int) (int, error) {
 
 type queryError struct{ name string }
 
-func (e *queryError) Error() string { return e.name + " must be a positive integer" }
+// Written for the person reading the log page: the pagination parameters come
+// from the browser's address bar, so the sentence names the page rather than
+// repeating the raw query key.
+func (e *queryError) Error() string {
+	if e.name == "limit" {
+		return "每页条数要是 1 以上的整数。"
+	}
+	return "页码要是 1 以上的整数。"
+}

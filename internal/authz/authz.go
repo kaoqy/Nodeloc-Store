@@ -327,13 +327,13 @@ func PermissionsOf(role string) []string {
 // out of the shop with no way back in except the database.
 func SetRolePermissions(role string, permissions []string) error {
 	if Enforcer == nil {
-		return fmt.Errorf("authz: enforcer is not initialized")
+		return ErrEnforcerNotReady
 	}
 	if role == "super_admin" {
-		return fmt.Errorf("authz: the super_admin role cannot be edited")
+		return ErrSuperAdminLocked
 	}
 	if !knownRole(role) {
-		return fmt.Errorf("authz: unknown role %q", role)
+		return fmt.Errorf("%w: %q", ErrUnknownRole, role)
 	}
 	// Validated up front: the old policies are already gone by the time the
 	// writes start, so a bad entry found halfway would leave the role empty.
@@ -341,10 +341,10 @@ func SetRolePermissions(role string, permissions []string) error {
 	for _, permission := range permissions {
 		obj, act, ok := splitPermission(permission)
 		if !ok {
-			return fmt.Errorf("authz: malformed permission %q", permission)
+			return fmt.Errorf("%w: %q", ErrMalformedPermission, permission)
 		}
 		if !grantable(obj, act) {
-			return fmt.Errorf("authz: %q is not a permission this application knows", permission)
+			return fmt.Errorf("%w: %q", ErrUnknownPermission, permission)
 		}
 		grants = append(grants, [2]string{obj, act})
 	}

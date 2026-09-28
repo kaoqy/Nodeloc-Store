@@ -18,7 +18,9 @@ const auth = useAuthStore()
 const loading = ref(true)
 const saving = ref(false)
 const message = ref('')
-const messageType = ref<'ok' | 'err'>('ok')
+// 'warn' is for a save that landed but cannot take effect yet, which is neither
+// a success nor a failure.
+const messageType = ref<'ok' | 'err' | 'warn'>('ok')
 const oauth = ref<Probe | null>(null)
 const payment = ref<Probe | null>(null)
 const testingOAuth = ref(false)
@@ -132,7 +134,7 @@ async function save() {
   saving.value = true
   message.value = ''
   try {
-    await saveRuntimeSettings(JSON.parse(JSON.stringify(settings)))
+    const result = await saveRuntimeSettings(JSON.parse(JSON.stringify(settings)))
     snapshot.value = JSON.stringify(settings)
     // Committing writes the shared key, so even the storefront's boot splash
     // wears the new colour before it has asked the API anything.
@@ -141,8 +143,15 @@ async function save() {
     // Renaming the shop renames its browser tabs and its door plate, here and
     // in the storefront.
     applyShopIdentity(settings.app.site_name, settings.app.site_logo)
-    message.value = '已保存，运行时配置已重建并立即生效'
-    messageType.value = 'ok'
+    // The server wrote the row but could not rebuild the runtime, so claiming
+    // 「立即生效」 here would point the owner at a change that is not live.
+    if (result?.restart_pending) {
+      message.value = result.message || '设置已保存，但这一项要等容器重启后才生效'
+      messageType.value = 'warn'
+    } else {
+      message.value = '已保存，运行时配置已重建并立即生效'
+      messageType.value = 'ok'
+    }
   } catch (err) {
     // The saved colour is still the truth, so the page puts on it again. The
     // picker keeps the rejected choice: the save usually fails for a different
@@ -214,7 +223,14 @@ onMounted(load)
       </div>
     </div>
 
-    <p v-if="message" :class="['alert', messageType === 'ok' ? 'alert-success' : 'alert-danger']">{{ message }}</p>
+    <p
+      v-if="message"
+      :class="[
+        'alert',
+        messageType === 'ok' ? 'alert-success' : messageType === 'warn' ? 'alert-warning' : 'alert-danger',
+      ]"
+      >{{ message }}</p
+    >
     <p v-if="!canManage" class="alert alert-warning" role="alert">
       当前账号只有查看系统设置的权限，所有字段均为只读。需要改动时请联系超级管理员授予「设置 · 管理」。
     </p>

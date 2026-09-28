@@ -287,7 +287,7 @@ func registerSPA(router *gin.Engine, rootDir string, sysSvc *system.Service) {
 	router.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		if strings.HasPrefix(path, "/api/") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "这个接口不存在，页面可能还停留在旧版商店，请刷新后重试。", "code": "not_found"})
 			return
 		}
 		// Product images live outside both bundles: files dropped into ./uploads

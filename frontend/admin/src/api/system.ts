@@ -88,8 +88,12 @@ export async function install(payload: InstallPayload): Promise<void> {
 export const getRuntimeSettings = () =>
   client.get<{ settings: RuntimeSettings }>('/admin/settings').then((r) => r.data.settings)
 
+// `restart_pending` tells the page that the row is on disk but the runtime
+// rebuild failed, so it must not claim the change is live already.
 export const saveRuntimeSettings = (settings: RuntimeSettings) =>
-  client.put<{ ok: boolean }>('/admin/settings', { settings }).then((r) => r.data)
+  client
+    .put<{ ok: boolean; restart_pending?: boolean; message?: string }>('/admin/settings', { settings })
+    .then((r) => r.data)
 
 export const testOAuth = () =>
   client.post<{ ok: boolean; authorize_url?: string; msg?: string }>('/admin/settings/oauth-test').then((r) => r.data)
