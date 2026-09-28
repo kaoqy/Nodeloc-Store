@@ -69,6 +69,19 @@ async function togglePublished(product: Product) {
   }
 }
 
+async function toggleFeatured(product: Product) {
+  busy.value = true
+  error.value = ''
+  try {
+    const next = await updateProduct(product.id, { ...product, is_featured: !product.is_featured })
+    products.value = products.value.map((item) => (item.id === next.id ? next : item))
+  } catch (err) {
+    error.value = errorMessage(err, '更新推荐状态失败')
+  } finally {
+    busy.value = false
+  }
+}
+
 function applyFilters() {
   page.value = 1
 }
@@ -187,6 +200,7 @@ onMounted(load)
               <span class="badge" :class="product.is_published ? 'badge-success' : 'badge-neutral'">
                 {{ product.is_published ? '已上架' : '已下架' }}
               </span>
+              <span v-if="product.is_featured" class="badge badge-accent ml-1">推荐</span>
             </td>
             <td class="whitespace-nowrap text-sm quiet">{{ when(product.created_at) }}</td>
             <td class="whitespace-nowrap text-right">
@@ -195,6 +209,9 @@ onMounted(load)
               </RouterLink>
               <button v-if="canManage" class="btn btn-ghost btn-sm" :disabled="busy" @click="togglePublished(product)">
                 {{ product.is_published ? '下架' : '上架' }}
+              </button>
+              <button v-if="canManage" class="btn btn-ghost btn-sm" :disabled="busy" @click="toggleFeatured(product)">
+                {{ product.is_featured ? '取消推荐' : '推荐' }}
               </button>
               <RouterLink v-if="canManage" :to="`/products/${product.id}/edit`" class="btn btn-ghost btn-sm">编辑</RouterLink>
               <button

@@ -31,6 +31,7 @@ const form = reactive({
   stock_visible: true,
   require_contact: false,
   is_published: true,
+  is_featured: false,
   is_archived: false,
   sort_order: 0,
   category_id: null as number | null,
@@ -57,6 +58,7 @@ function payload(): Partial<Product> {
     stock_visible: form.stock_visible,
     stock_count: form.stock_count,
     is_published: form.is_published,
+    is_featured: form.is_featured,
     is_archived: form.is_archived,
     sort_order: Number(form.sort_order) || 0,
     category_id: form.category_id,
@@ -90,6 +92,7 @@ async function load() {
         stock_visible: product.stock_visible ?? true,
         require_contact: product.require_contact ?? false,
         is_published: product.is_published,
+        is_featured: product.is_featured ?? false,
         is_archived: product.is_archived ?? false,
         sort_order: product.sort_order ?? 0,
         category_id: product.category_id ?? null,
@@ -252,6 +255,13 @@ onMounted(load)
             <div class="flex items-center justify-between">
               <span class="text-sm">需要买家联系方式</span>
               <input v-model="form.require_contact" type="checkbox" class="accent-[var(--accent)]" />
+            </div>
+            <div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm">前台推荐（首页「店长推荐」筛选）</span>
+                <input v-model="form.is_featured" type="checkbox" class="accent-[var(--accent)]" />
+              </div>
+              <p class="hint mt-1.5">推荐位只在上架商品里生效。</p>
             </div>
             <div class="flex items-center justify-between">
               <span class="text-sm">归档（不在前台显示）</span>
