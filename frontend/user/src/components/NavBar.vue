@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useSiteStore } from '../stores/site'
@@ -10,6 +10,13 @@ const site = useSiteStore()
 const theme = useThemeStore()
 const router = useRouter()
 const menuOpen = ref(false)
+
+// The account's own picture, whichever side it came from: an uploaded or edited
+// avatar wins, a bound NodeLoc account shows the forum's copy.
+const avatar = computed(() => auth.user?.avatar_url || auth.user?.oauth_avatar || '')
+const initial = computed(() =>
+  (auth.user?.nickname || auth.user?.username || '我').slice(0, 1).toUpperCase(),
+)
 
 async function logout() {
   menuOpen.value = false
@@ -46,8 +53,12 @@ async function logout() {
         </button>
 
         <template v-if="auth.isAuthenticated">
-          <RouterLink to="/profile" class="btn btn-quiet btn-sm max-w-[10rem] truncate">
-            {{ auth.user?.nickname || auth.user?.username || '我的账户' }}
+          <RouterLink to="/profile" class="btn btn-quiet btn-sm max-w-[12rem] gap-2">
+            <span class="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--surface-hi)] text-[11px] font-bold">
+              <img v-if="avatar" :src="avatar" alt="" class="size-full object-cover" />
+              <span v-else>{{ initial }}</span>
+            </span>
+            <span class="truncate">{{ auth.user?.nickname || auth.user?.username || '我的账户' }}</span>
           </RouterLink>
           <!-- Plain anchor: /admin is a separate SPA, so it needs a full load. -->
           <a v-if="auth.canEnterAdmin" href="/admin/" class="btn btn-quiet btn-sm">进入后台</a>
