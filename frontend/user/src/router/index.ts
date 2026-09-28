@@ -9,6 +9,7 @@ import OrderListView from '../views/OrderListView.vue'
 import OrderDetailView from '../views/OrderDetailView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import OAuthCallbackView from '../views/OAuthCallbackView.vue'
+import NotFoundView from '../views/NotFoundView.vue'
 
 // meta.title is the words this page puts in front of the shop's name on the
 // browser tab. The two detail screens leave it out and set it themselves once
@@ -24,6 +25,9 @@ const router = createRouter({
     { path: '/orders/:orderNo', name: 'order-detail', component: OrderDetailView, meta: { requiresAuth: true } },
     { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true, title: '个人中心' } },
     { path: '/oauth/callback', name: 'oauth-callback', component: OAuthCallbackView, meta: { title: '登录中' } },
+    // Last, so a named route never loses to it. Without this an address the shop
+    // does not have leaves the page body empty, which reads as a broken store.
+    { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { title: '页面不存在' } },
   ],
   scrollBehavior: () => ({ top: 0 }),
 })

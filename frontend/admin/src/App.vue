@@ -28,9 +28,16 @@ const titles: Record<string, string> = {
 
 const label = (segment: string) => titles['/' + segment] || segment
 
-const pageTitle = computed(() => label(route.path.split('/').filter(Boolean)[0] ?? '') || '仪表盘')
+// The catch-all has no section to name, and its raw path would otherwise sit in
+// the header as if it were a screen the shop has.
+const pageTitle = computed(() =>
+  route.name === 'not-found'
+    ? '页面不存在'
+    : label(route.path.split('/').filter(Boolean)[0] ?? '') || '仪表盘',
+)
 
 const breadcrumb = computed(() => {
+  if (route.name === 'not-found') return []
   const segments = route.path.split('/').filter(Boolean)
   return segments.map((segment, index) => ({
     label: label(segment),

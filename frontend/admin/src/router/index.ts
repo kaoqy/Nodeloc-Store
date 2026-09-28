@@ -31,6 +31,9 @@ const routes = [
   { path: '/settings', component: () => import('../views/SettingsView.vue'), meta: { permission: 'settings:view', title: '系统设置' } },
   { path: '/roles', component: () => import('../views/RoleListView.vue'), meta: { permission: 'roles:view', title: '角色权限' } },
   { path: '/forbidden', component: () => import('../views/ForbiddenView.vue'), meta: { staffOnly: true, title: '无访问权限' } },
+  // Last, so a declared route never loses to it. An address the back office does
+  // not have used to render the shell around an empty panel.
+  { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/NotFoundView.vue'), meta: { staffOnly: true, title: '页面不存在' } },
 ]
 
 const router = createRouter({ history: createWebHistory(import.meta.env.BASE_URL), routes })
