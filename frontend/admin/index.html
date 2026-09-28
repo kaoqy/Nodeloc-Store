@@ -15,10 +15,11 @@
         localStorage.getItem('store-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
       var brand = localStorage.getItem('store-brand');
       if (brand && /^#[0-9a-f]{6}$/i.test(brand)) root.style.setProperty('--brand', brand);
-      // The back office belongs to a named shop, and the tab should say so from
-      // the first frame rather than after the status request lands.
+      // The server stamps the tab with the shop's own name; the value the last
+      // visit cached stands in only for the rare document that could not read
+      // the settings, and never overrules a name the server already knew.
       var shop = localStorage.getItem('store-name');
-      if (shop) document.title = shop + ' 管理后台';
+      if (shop && document.title.indexOf('Nodeloc Store') === 0) document.title = shop + ' 管理后台';
     </script>
     <style>
       /* Boot splash: the back office lazy-loads every view, so the first open

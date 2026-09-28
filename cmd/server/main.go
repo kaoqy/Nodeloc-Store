@@ -246,7 +246,7 @@ func buildBootstrapRouter(sysSvc *system.Service, dataDir string) *gin.Engine {
 	router.Use(gin.Logger(), gin.Recovery())
 	router.GET("/api/health", healthHandler)
 	sysSvc.Handler().RegisterPublicRoutes(router)
-	registerSPA(router, filepath.Dir(dataDir))
+	registerSPA(router, filepath.Dir(dataDir), sysSvc)
 	return router
 }
 
@@ -265,7 +265,7 @@ func buildFullRouter(ctn *container.Container, sysSvc *system.Service, dataDir s
 	ctn.Audit.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
 	sysSvc.Handler().RegisterRoutes(router, &cfg.JWT, accounts)
 
-	registerSPA(router, filepath.Dir(dataDir))
+	registerSPA(router, filepath.Dir(dataDir), sysSvc)
 	return router
 }
 
@@ -275,9 +275,11 @@ func healthHandler(c *gin.Context) {
 
 // registerSPA serves the built storefront at / and the admin panel at /admin,
 // with history-mode fallbacks. Every SPA path goes through one handler so the
-// HTML can be marked non-cacheable: it names hashed bundles, and a cached copy
-// would 404 all of them after an upgrade.
-func registerSPA(router *gin.Engine, rootDir string) {
+// HTML can be marked non-cacheable, which it needs twice over: it names hashed
+// bundles, so a stale copy would 404 all of them after an upgrade, and it
+// carries the shop's own words, so a stale copy would keep describing the shop
+// the way it did before the owner renamed it.
+func registerSPA(router *gin.Engine, rootDir string, sysSvc *system.Service) {
 	userDir := resolveDir(rootDir, "web/user")
 	adminDir := resolveDir(rootDir, "web/admin")
 
@@ -320,21 +322,40 @@ func registerSPA(router *gin.Engine, rootDir string) {
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 				if strings.Contains(filepath.ToSlash(candidate), "/assets/") {
 					c.Header("Cache-Control", "public, max-age=31536000, immutable")
-				} else {
-					c.Header("Cache-Control", "no-cache")
+					c.File(candidate)
+					return
 				}
-				c.File(candidate)
+				serveDocument(c, candidate, sysSvc, dir == adminDir)
 				return
 			}
 		}
 		index := filepath.Join(dir, "index.html")
 		if _, err := os.Stat(index); err == nil {
-			c.Header("Cache-Control", "no-cache")
-			c.File(index)
+			serveDocument(c, index, sysSvc, dir == adminDir)
 			return
 		}
 		c.String(http.StatusNotFound, "Frontend not built")
 	})
+}
+
+// serveDocument sends one SPA document with the shop's own head tags written in.
+// Anything else below a bundle root — a font, a manifest, an image — goes out as
+// it was built, and a document that cannot be read is a miss rather than a
+// half-written page.
+func serveDocument(c *gin.Context, path string, sysSvc *system.Service, admin bool) {
+	if !strings.EqualFold(filepath.Ext(path), ".html") {
+		c.Header("Cache-Control", "no-cache")
+		c.File(path)
+		return
+	}
+	document, err := os.ReadFile(path)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	stamped := stampShell(string(document), sysSvc.GetShellIdentity(), requestBase(c.Request), admin)
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(stamped))
 }
 
 // spaTarget maps a request path to the SPA that owns it and the file below that

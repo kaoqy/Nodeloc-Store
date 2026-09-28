@@ -123,6 +123,38 @@ func (s *Service) Status() map[string]any {
 	return status
 }
 
+// ShellIdentity is the copy an HTML document needs before its JavaScript boots:
+// what the tab is called, what a search result or a forum preview says about the
+// shop, and which icon the tab wears.
+type ShellIdentity struct {
+	Name        string
+	Description string
+	Logo        string
+	Locale      string
+}
+
+// GetShellIdentity reads the same settings document the status API answers from,
+// so the served shell and the app that repaints it cannot disagree about what
+// the shop is called. Until setup finishes there is nothing stored, and the
+// built defaults are returned — the same words the bundle ships with.
+func (s *Service) GetShellIdentity() ShellIdentity {
+	d := Default()
+	shell := ShellIdentity{Name: d.App.Name, Locale: d.Theme.Locale}
+	rt, err := s.currentRuntime()
+	if err != nil || rt == nil {
+		return shell
+	}
+	if rt.App.Name != "" {
+		shell.Name = rt.App.Name
+	}
+	shell.Description = rt.App.Description
+	shell.Logo = rt.App.Logo
+	if rt.Theme.Locale != "" {
+		shell.Locale = rt.Theme.Locale
+	}
+	return shell
+}
+
 // InstallRequest is the JSON body posted by the setup wizard.
 type InstallRequest struct {
 	App      AppConfig      `json:"app"`

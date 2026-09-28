@@ -16,10 +16,11 @@
         localStorage.getItem('store-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
       var brand = localStorage.getItem('store-brand');
       if (brand && /^#[0-9a-f]{6}$/i.test(brand)) root.style.setProperty('--brand', brand);
-      // Same trick for the tab: a shop called 网卡小店 should not open as
-      // "Nodeloc Store" and then rename itself once the request lands.
+      // The server stamps the tab with the shop's own name, so the value the
+      // last visit cached only stands in for the rare document that could not
+      // read the settings — it must never overrule a name the server knew.
       var shop = localStorage.getItem('store-name');
-      if (shop) document.title = shop;
+      if (shop && document.title.indexOf('Nodeloc Store') === 0) document.title = shop;
     </script>
     <style>
       /* Boot splash: the JS bundle and the first route chunk are the only thing

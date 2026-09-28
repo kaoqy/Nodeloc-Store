@@ -31,5 +31,8 @@ Thumbs.db
 # Logs
 *.log
 
-# Go build artifact
-server
+# Go build artifacts. Anchored to the repository root: an unanchored "server"
+# also matched cmd/server/, which silently ignored every new file in the entry
+# package.
+/server
+/server.exe
