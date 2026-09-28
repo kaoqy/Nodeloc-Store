@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listOrders, reconcileMessage, reconcileOrder } from '../api/payment'
 import { errorMessage } from '../api/client'
+import { useInboxStore } from '../stores/inbox'
 import { fulfillmentStatus, money, orderStatus, paymentNotice, when } from '../utils/format'
 import type { Order } from '../types'
 
@@ -20,6 +21,7 @@ const FILTERS: { key: string; label: string }[] = [
 
 const route = useRoute()
 const router = useRouter()
+const inbox = useInboxStore()
 const orders = ref<Order[]>([])
 const total = ref(0)
 const loading = ref(true)
@@ -102,7 +104,12 @@ function choose(next: string) {
   load(0)
 }
 
-onMounted(() => load(0))
+onMounted(() => {
+  void load(0)
+  // The buyer usually lands here straight from NodeLoc, which is when the shop
+  // has had a moment to write the 支付已确认 / 商品已交付 message.
+  void inbox.refresh()
+})
 </script>
 
 <template>

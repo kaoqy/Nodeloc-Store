@@ -134,6 +134,17 @@ func (g *NodeLocGateway) post(ctx context.Context, path string, params map[strin
 		return nil, nil, err
 	}
 
+	// NodeLoc recomputes the signature from the parameters it actually received,
+	// and an empty one may not survive the trip. Dropping it from both the signed
+	// string and the body keeps the two sides looking at the same fields — with a
+	// recipient bound by NodeLoc uid only, signing "to_username=" would reject
+	// the refund as tampered.
+	for name, value := range params {
+		if value == "" {
+			delete(params, name)
+		}
+	}
+
 	params["signature"] = shared.Sign(params, key)
 	values := url.Values{}
 	for key, value := range params {

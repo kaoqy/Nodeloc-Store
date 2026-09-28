@@ -118,3 +118,22 @@ type FulfillmentService interface {
 type CouponPricing interface {
 	DiscountFor(ctx context.Context, userID, productID uint, quantity, unitPrice int, code string) (discount int, couponID uint, err error)
 }
+
+// BuyerEvent is one of an order's moments worth telling the buyer about: the
+// payment landed, the goods were delivered, the shop refunded. Payment writes the
+// copy because it is the module that knows what actually happened; whoever
+// carries the message stays generic.
+type BuyerEvent struct {
+	UserID  uint
+	Type    string
+	Title   string
+	Content string
+	Link    string
+}
+
+// BuyerNotifier carries BuyerEvents to the buyer's inbox. Publish has no error
+// to return by design: the order it describes has already moved on, and a
+// message that cannot be written must never make a settled payment look failed.
+type BuyerNotifier interface {
+	Publish(ctx context.Context, event BuyerEvent)
+}

@@ -51,7 +51,9 @@ type Service struct {
 	fulfillment contract.FulfillmentService
 	users       contract.UserLookup
 	coupons     contract.CouponPricing
-	paymentID   string
+	// events is optional: a store with no inbox still has to be able to take money.
+	events    contract.BuyerNotifier
+	paymentID string
 }
 
 type CreatePaymentInput struct {
@@ -107,11 +109,11 @@ type RefundInput struct {
 	ToUsername string
 }
 
-func NewService(orders contract.OrderRepo, gateway contract.PaymentGateway, fulfillment contract.FulfillmentService, users contract.UserLookup, coupons contract.CouponPricing, paymentID string) *Service {
+func NewService(orders contract.OrderRepo, gateway contract.PaymentGateway, fulfillment contract.FulfillmentService, users contract.UserLookup, coupons contract.CouponPricing, events contract.BuyerNotifier, paymentID string) *Service {
 	if orders == nil || gateway == nil || fulfillment == nil || users == nil {
 		panic("payment: nil dependency")
 	}
-	return &Service{orders: orders, gateway: gateway, fulfillment: fulfillment, users: users, coupons: coupons, paymentID: strings.TrimSpace(paymentID)}
+	return &Service{orders: orders, gateway: gateway, fulfillment: fulfillment, users: users, coupons: coupons, events: events, paymentID: strings.TrimSpace(paymentID)}
 }
 
 func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*models.Order, error) {
@@ -457,6 +459,14 @@ func (s *Service) settle(ctx context.Context, orderNo string, paymentOrder *doma
 			return nil, fmt.Errorf("settle payment transaction: %w", err)
 		}
 	}
+	// NodeLoc can send the same callback twice, and 查单 may settle an order a
+	// callback already settled. One order should reach the inbox once, so only a
+	// real transition sends the message — and a read that fails still sends it,
+	// because nothing here may refuse a confirmed payment.
+	alreadySettled := false
+	if current, readErr := s.orders.GetOrderByNo(ctx, orderNo); readErr == nil && current != nil {
+		alreadySettled = current.Status == "paid" || current.Status == "completed"
+	}
 	order, err := s.orders.MarkOrderPaid(ctx, orderNo, transactionID, platformFee, merchantPoints)
 	if err != nil {
 		return nil, err
@@ -474,7 +484,13 @@ func (s *Service) settle(ctx context.Context, orderNo string, paymentOrder *doma
 	fresh, err := s.orders.GetOrderByNo(ctx, orderNo)
 	if err != nil {
 		log.Printf("payment settle %s: reload after fulfillment failed: %v", orderNo, err)
+		if !alreadySettled {
+			s.notifyOrder(ctx, order, deliveryEvent(order))
+		}
 		return order, nil
+	}
+	if !alreadySettled {
+		s.notifyOrder(ctx, fresh, deliveryEvent(fresh))
 	}
 	return fresh, nil
 }
@@ -694,8 +710,13 @@ func (s *Service) RetryPendingDeliveries(ctx context.Context) (int, error) {
 			log.Printf("delivery retry %s: still undelivered: %v", order.OrderNo, err)
 			continue
 		}
-		if order.FulfillmentStatus == "delivered" || order.FulfillmentStatus == "completed" ||
-			order.FulfillmentStatus == "manual_pending" || order.FulfillmentStatus == "waiting_stock" {
+		switch order.FulfillmentStatus {
+		case "delivered", "completed":
+			delivered++
+			// The buyer was told the payment landed; this is the message that says
+			// the goods did too, which the 已付款 page could not send on its own.
+			s.notifyOrder(ctx, &order, eventDelivered)
+		case "manual_pending", "waiting_stock":
 			delivered++
 		}
 	}
@@ -818,6 +839,8 @@ func (s *Service) Refund(ctx context.Context, input RefundInput) (*contract.Tran
 			return nil, saveErr
 		}
 	}
+	// NodeLoc has moved the points by now, so this says what is already true.
+	s.notifyOrder(ctx, order, eventRefunded)
 	return result, nil
 }
 
@@ -859,7 +882,21 @@ func (s *Service) AdminCancelOrder(ctx context.Context, orderNo string) (*models
 }
 
 func (s *Service) AdminDeliverOrder(ctx context.Context, orderNo string, content string) (*models.Order, error) {
-	return s.orders.SetOrderDeliveryContent(ctx, strings.TrimSpace(orderNo), content)
+	orderNo = strings.TrimSpace(orderNo)
+	// Re-shipping an order that already shipped edits its content; the buyer is
+	// told once, not once per edit.
+	alreadyShipped := false
+	if current, err := s.orders.GetOrderByNo(ctx, orderNo); err == nil && current != nil {
+		alreadyShipped = current.FulfillmentStatus == "delivered" || current.FulfillmentStatus == "completed"
+	}
+	order, err := s.orders.SetOrderDeliveryContent(ctx, orderNo, content)
+	if err != nil {
+		return nil, err
+	}
+	if !alreadyShipped {
+		s.notifyOrder(ctx, order, eventShipped)
+	}
+	return order, nil
 }
 
 // AdminRefundOrder moves the points back through NodeLoc before the shop calls

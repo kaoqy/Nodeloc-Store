@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"log"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -13,7 +14,9 @@ import (
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification"
+	notificationapp "github.com/kaoqy/Nodeloc-Store/internal/modules/notification/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment"
+	paymentcontract "github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/system"
 	"github.com/kaoqy/Nodeloc-Store/internal/platform/database/gormdb"
 )
@@ -27,6 +30,27 @@ type Container struct {
 	Catalog      *catalog.Module
 	Notification *notification.Module
 	Audit        *audit.Module
+}
+
+// inbox is the payment module's order events written into the buyer's
+// notification list. Publish swallows what it cannot write: the order it reports
+// has already moved on, and a buyer who gets no message can still read the same
+// truth on the order page.
+type inbox struct {
+	service *notificationapp.Service
+}
+
+func (i inbox) Publish(ctx context.Context, event paymentcontract.BuyerEvent) {
+	notification := &models.Notification{UserID: event.UserID, Type: event.Type, Title: event.Title}
+	if content := strings.TrimSpace(event.Content); content != "" {
+		notification.Content = &content
+	}
+	if link := strings.TrimSpace(event.Link); link != "" {
+		notification.Link = &link
+	}
+	if err := i.service.Send(ctx, notification); err != nil {
+		log.Printf("[inbox] user %d (%s): %v", event.UserID, event.Title, err)
+	}
 }
 
 // New builds the container from config. Runtime settings stored by the
@@ -83,14 +107,15 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 			OAuthUsername: user.OAuthUsername,
 		}, nil
 	}
-	// Catalogue first: checkout asks it what a 优惠码 is worth, so payment is
-	// wired against the module that already exists.
+	// Catalogue and inbox first: checkout asks the catalogue what a 优惠码 is worth
+	// and hands the buyer's order events to the inbox, so payment is wired
+	// against modules that already exist.
 	catalogMod := catalog.Wire(db, cfg)
-	paymentMod, err := payment.Wire(db, cfg, identityFind, catalogMod.Service)
+	notificationMod := notification.Wire(db)
+	paymentMod, err := payment.Wire(db, cfg, identityFind, catalogMod.Service, inbox{service: notificationMod.Service})
 	if err != nil {
 		return nil, err
 	}
-	notificationMod := notification.Wire(db)
 	auditMod := audit.Wire(db)
 
 	if sys != nil {

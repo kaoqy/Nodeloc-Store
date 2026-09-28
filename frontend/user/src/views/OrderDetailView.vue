@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createPayment, getOrder, reconcileMessage, reconcileOrder, reconcileRetryable } from '../api/payment'
 import { errorMessage } from '../api/client'
+import { useInboxStore } from '../stores/inbox'
 import { setPageTitle } from '../utils/identity'
 import { fulfillmentStatus, money, orderStatus, paymentNotice, providerStatus, when } from '../utils/format'
 import type { Order } from '../types'
 
 const route = useRoute()
 const router = useRouter()
+const inbox = useInboxStore()
 const order = ref<Order | null>(null)
 const loading = ref(true)
 const paying = ref(false)
@@ -41,6 +43,11 @@ const delivered = computed(() => {
 })
 
 const awaitingDelivery = computed(() => isPaid.value && !delivered.value && order.value?.status !== 'refunded')
+
+// The shop writes an inbox message when the payment lands and another when the
+// goods do. This page is where either happens, so the unread badge on the nav
+// asks again rather than waiting for the buyer to visit their profile.
+watch([isPaid, delivered], () => void inbox.refresh())
 
 async function load() {
   loading.value = true
