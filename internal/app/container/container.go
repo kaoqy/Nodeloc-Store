@@ -51,6 +51,10 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 	if err := authz.SeedDefaults(); err != nil {
 		log.Printf("[warn] RBAC seed failed: %v", err)
 	}
+	// Stores built before the wizard handed out super_admin have no owner at all.
+	if err := system.EnsureOwnerRole(db); err != nil {
+		log.Printf("[warn] owner role check failed: %v", err)
+	}
 
 	// Wizard-stored settings win over process defaults.
 	rt, err := system.LoadRuntime(db)

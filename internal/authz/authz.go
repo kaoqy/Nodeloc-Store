@@ -114,8 +114,8 @@ func SeedDefaults() error {
 		}
 	}
 	if stored < 2 {
-		// The role editor went live with 细分权限, and 管理员 is the role the
-		// install wizard hands the owner. Without roles:manage an existing store
+		// The role editor went live with 细分权限, and 管理员 is the role a shop
+		// owner uses for day-to-day work. Without roles:manage an existing store
 		// could not add its first staff account at all.
 		if addMissing("admin", "roles", "manage") {
 			changed = true

@@ -126,7 +126,7 @@ async function submit() {
       <span class="badge badge-success">初始化完成</span>
       <h1 class="mt-4 text-2xl font-bold">商店已就绪</h1>
       <p class="mt-2 text-sm leading-relaxed text-[var(--text-dim)]">
-        数据库已迁移，运行时配置已写入系统。使用刚创建的管理员账号即可登录后台，之后所有参数都能在「系统设置」中修改。
+        数据库已迁移，运行时配置已写入系统。刚创建的账号是超级管理员——只有它能授予「管理员」并调整后台账号的角色。用它登录后台后，所有参数都能在「系统设置」中修改。
       </p>
       <dl class="mt-6 space-y-2.5 border-t border-[var(--stroke-quiet)] pt-6 text-sm">
         <div class="flex justify-between gap-4">
@@ -290,6 +290,7 @@ async function submit() {
             <label class="label" for="admin-password">管理员密码 <span class="accent-text">*</span></label>
             <input id="admin-password" v-model="form.admin_password" type="password" class="input" placeholder="至少 8 位" autocomplete="new-password" />
           </div>
+          <p class="hint">这个账号会成为超级管理员：只有它能授予「管理员」和调整后台账号的角色，之后的员工请到「角色」里分配。</p>
 
           <div class="rounded-xl border border-[var(--stroke)] bg-[var(--surface-hi)] p-4">
             <p class="eyebrow mb-3">确认摘要</p>
@@ -315,7 +316,7 @@ async function submit() {
                 <dd class="mono">{{ paymentReady ? `Payment ID ${form.payment_id.trim()}` : '稍后配置' }}</dd>
               </div>
               <div class="flex justify-between gap-4">
-                <dt class="quiet">管理员</dt>
+                <dt class="quiet">超级管理员</dt>
                 <dd class="mono">{{ form.admin_username || '（未填写）' }}</dd>
               </div>
             </dl>

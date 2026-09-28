@@ -23,6 +23,10 @@ import (
 // Version is reported by the system status endpoint.
 const Version = "1.0.0"
 
+// superAdminRole is the role the wizard gives the account it creates. It is the
+// only role that can hand out back-office roles, so the owner has to hold it.
+const superAdminRole = "super_admin"
+
 // Service owns the install/status/settings lifecycle. In bootstrap mode db is
 // nil and only Install/Status are usable; after the container is built, Attach
 // hands it the live database and connectivity probes.
@@ -271,7 +275,7 @@ func (s *Service) runInstall(req InstallRequest) (*gorm.DB, error) {
 	hashString := string(hash)
 	if existing > 0 {
 		res := db.Model(&models.User{}).Where("username = ?", req.Admin.Username).
-			Updates(map[string]any{"password_hash": &hashString, "is_admin": true, "role": "admin", "is_active": true})
+			Updates(map[string]any{"password_hash": &hashString, "is_admin": true, "role": superAdminRole, "is_active": true})
 		if res.Error != nil {
 			closeDB(db)
 			return nil, res.Error
@@ -282,7 +286,7 @@ func (s *Service) runInstall(req InstallRequest) (*gorm.DB, error) {
 			PasswordHash: &hashString,
 			IsAdmin:      true,
 			IsActive:     true,
-			Role:         "admin",
+			Role:         superAdminRole,
 		}
 		if req.Admin.Email != "" {
 			user.Email = &req.Admin.Email
@@ -323,6 +327,50 @@ func closeDB(db *gorm.DB) {
 	if sqlDB, err := db.DB(); err == nil {
 		_ = sqlDB.Close()
 	}
+}
+
+// EnsureOwnerRole leaves the store with exactly one super_admin.
+//
+// The wizard used to hand the owner 管理员, and this application deliberately
+// lets only a super_admin grant 管理员 or move a staff account's role: an
+// install from before the change had no account that could ever add a second
+// admin. Promoting the oldest 管理员 closes that hole; as soon as a
+// super_admin exists the check reads the count and stops touching roles, so it
+// is safe to run on every boot and never overrides a deliberate demotion.
+func EnsureOwnerRole(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	var owners int64
+	if err := db.Model(&models.User{}).
+		Where("role = ?", superAdminRole).
+		Count(&owners).Error; err != nil {
+		return err
+	}
+	if owners > 0 {
+		return nil
+	}
+
+	var candidate models.User
+	err := db.Where("(is_admin = ? OR role = ?) AND role <> ? AND is_active = ?",
+		true, "admin", superAdminRole, true).
+		Order("id ASC").
+		First(&candidate).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Nothing to promote: either the shop has no 管理员 account left, or the
+		// owner deactivated it. Both are states someone has to fix by hand, and
+		// silently elevating a 客服 to owner would be the worse answer.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := db.Model(&candidate).
+		Updates(map[string]any{"role": superAdminRole, "is_admin": true}).Error; err != nil {
+		return err
+	}
+	log.Printf("[authz] no super_admin in store; promoted user %d (%s) to owner", candidate.ID, candidate.Username)
+	return nil
 }
 
 func (s *Service) claimInstalling() bool {
