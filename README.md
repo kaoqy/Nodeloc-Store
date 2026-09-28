@@ -20,6 +20,7 @@
 - 🎁 **用户运营** — 每日签到、连续签到奖励、积分流水、站点公告与客服信息；个人中心可以改昵称/简介/联系邮箱、上传自己的头像、从 NodeLoc 同步头像、绑定或换绑 NodeLoc 身份
 - 📊 **Admin 后台** — 概览看板（趋势图、订单结构、热销商品、买家排行、库存预警、优惠码成效、卡密健康、买家活跃）、商品/卡密/订单/用户/通知管理、操作审计日志、退款
 - 🔍 **审计日志筛选台** — 日志页可按四种条件组合查：操作类型（输入框联想本店真的出现过的动作名，输 `order` 就把 `order.refund`、`order.deliver` 都带出来）、关键词（在「操作 / 对象 / 详情」三列和「操作者用户名」里找包含关系，`%` 和 `_` 当普通字符处理，不会因为手滑输个星号就命中全部日志，输成员的名字就能翻出 TA 的全部动作）、操作者（填用户 ID，或按「只看系统操作」把对账、重试这类商店自己写下的记录单独捞出来）、日期区间（今天 / 近 7 天 / 近 30 天三个快捷档，也可以手填起止日期，结束那天算在内）。筛选结果同步写进地址栏，`/admin/logs?actor=3&since=2026-09-28` 这种链接可以直接贴进工单；用户详情页有「查看其操作记录 →」一键跳到 TA 名下；详情列被截断的行点一下就就地展开看全文。「操作者」列显示用户名而不是光秃秃的 ID（账号后来注销了也照样从历史里点名），认不出来时退回 `#用户ID`，商店自己写下的记录标「系统」
+- 🧾 **订单列表也能贴链接** — 状态、关键词、指定买家、「需处理交付」与当前页码全部同步进地址栏，`/admin/orders?status=paid&user=7` 或 `/admin/orders?q=SEED-1&page=3` 打开就是那一批单子；地址栏里的页码超出实际页数时不会停在空白页上，而是退回最后一页（一笔都没有就回第 1 页）。「需处理交付」是按交付结果定的筛选，勾上它状态下拉会锁住，两种条件不叠加。列表底部的计数在这一页没行时只写「共 N 条」，不再出现「第 0–20 条 · 共 0 条」这种自相矛盾的话
 - 🧭 **店招与页脚** — 后台直接编辑商店名称、Logo、公告、页脚文案与最多 8 条页脚链接，保存后前台立即生效
 - 🎨 **商店主题** — 「外观」里的一个主题色会同时染色前台、后台与登录页（按钮、链接、徽标、聚焦圈与光晕按深/浅色各算一档），默认语言写进前台页面的 `lang`；改色不需要重新构建镜像
 - 🔖 **浏览器标签页** — 商店名称就是标签页标题（商品页写成「商品名 · 店名」，订单页写成「订单号 · 店名」，后台写成「页面 · 店名 管理后台」），「网站描述」写进页面的 `description`，后台侧栏与登录页的门牌也用商店名称与 Logo
@@ -369,7 +370,7 @@ sudo openresty -t && sudo openresty -s reload
 | | `POST .../cards/batch-status`、`.../cards/batch-delete`、`PUT` / `DELETE .../cards/:card_id` | `cards:manage` 批量删除只动未售出的卡，已售出的属于买家订单 |
 | 后台优惠码 | `GET /admin/coupons` | `coupons:view` |
 | | `POST` / `PUT` / `DELETE /admin/coupons[/:id]` | `coupons:manage` |
-| 后台订单 | `GET /admin/orders`、`GET /admin/orders/:order_no` | `orders:view` 列表支持 `status`、`user`、`q`、`attention=undelivered` |
+| 后台订单 | `GET /admin/orders`、`GET /admin/orders/:order_no` | `orders:view` 列表支持 `status`、`user`、`q`、`attention=undelivered`（该参数取代 `status`）。后台地址栏用同一组键，另加 `page`（第几页，一页 20 笔），页码超出实际页数时自动退回最后一页 |
 | | `POST /admin/orders/:order_no/cancel`、`/deliver`、`/refund`、`/fulfill`、`/reconcile`、`POST /admin/reconcile/pending` | `orders:manage` |
 | 后台用户 | `GET /admin/users`、`GET /admin/users/:id` | `users:view` |
 | | `POST /admin/users/:id/toggle-active`、`/points` | `users:manage` |

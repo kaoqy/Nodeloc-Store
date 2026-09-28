@@ -56,6 +56,10 @@ const canManage = computed(() => auth.allows('cards', 'manage'))
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
 const from = computed(() => (cards.value.length ? (page.value - 1) * PageSize + 1 : 0))
 const to = computed(() => (page.value - 1) * PageSize + cards.value.length)
+// 这一页一张卡密都没有时只报总数，不报「第 0–40 张」那种范围。
+const summary = computed(() =>
+  cards.value.length ? `第 ${from.value}–${to.value} 张 · 共 ${total.value} 张` : `共 ${total.value} 张`,
+)
 
 // The batch bar needs one product: the endpoints move stock for a single
 // catalogue item, and a mixed selection cannot be given one stock recount.
@@ -450,7 +454,7 @@ onMounted(async () => {
       :page="page"
       :pages="pageCount"
       :loading="loading"
-      :summary="`第 ${from}–${to} 张 · 共 ${total} 张`"
+      :summary="summary"
       @change="page = $event"
     />
 

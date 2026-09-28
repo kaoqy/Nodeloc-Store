@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import PaginationFooter from '../components/PaginationFooter.vue'
 import { listOrders, reconcilePendingOrders, type ReconcileReport } from '../api/orders'
 import { errorMessage, fulfillmentStatus, money, orderStatus, providerStatus, when } from '../utils/format'
@@ -26,6 +26,10 @@ const page = computed(() => Math.floor(offset.value / PageSize) + 1)
 const pages = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
 const from = computed(() => (orders.value.length ? offset.value + 1 : 0))
 const to = computed(() => offset.value + orders.value.length)
+// 一行都没有时不报「第 0–20 条」那种范围，只说总数。
+const summary = computed(() =>
+  orders.value.length ? `第 ${from.value}–${to.value} 条 · 共 ${total.value} 条` : `共 ${total.value} 条`,
+)
 
 const statuses = [
   { value: 'pending', label: '待支付' },
@@ -39,18 +43,34 @@ const filtered = computed(
   () => Boolean(search.value.trim() || statusFilter.value || buyerId.value || needAttention.value),
 )
 
+function queryParams() {
+  return {
+    limit: PageSize,
+    offset: offset.value,
+    status: statusFilter.value || undefined,
+    q: search.value.trim() || undefined,
+    user_id: buyerId.value || undefined,
+    attention: needAttention.value ? 'undelivered' : undefined,
+  }
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const result = await listOrders({
-      limit: PageSize,
-      offset: offset.value,
-      status: statusFilter.value || undefined,
-      q: search.value.trim() || undefined,
-      user_id: buyerId.value || undefined,
-      attention: needAttention.value ? 'undelivered' : undefined,
-    })
+    let result = await listOrders(queryParams())
+    // 地址栏里的页码可能比实际页数还大（链接是手写的，或者刚筛完只剩一页）。
+    // 有货就退回最后一页再取一次，一笔都没有就回到第 1 页，别把店家丢在
+    // 一个看着像坏掉的空白页上（第 2 / 1 页 共 0 条）。
+    if (!result.data.length && offset.value > 0) {
+      if (!result.total) {
+        offset.value = 0
+      } else {
+        offset.value = (Math.max(1, Math.ceil(result.total / PageSize)) - 1) * PageSize
+        result = await listOrders(queryParams())
+      }
+      syncUrl()
+    }
     orders.value = result.data
     total.value = result.total
   } catch (err) {
@@ -62,6 +82,7 @@ async function load() {
 
 function applyFilters() {
   offset.value = 0
+  syncUrl()
   load()
 }
 
@@ -113,32 +134,52 @@ function clearBuyer() {
   applyFilters()
 }
 
+const route = useRoute()
+
+/**
+ * Every filter and the current page live in the address bar, so a list pointed
+ * at 「已支付、这一位买家、第 3 页」 can be pasted into a support thread. The URL
+ * is rewritten rather than routed to: the back-office shell keys its view by
+ * fullPath, and a route change would throw away and rebuild this screen.
+ */
+function syncUrl() {
+  const params = new URLSearchParams()
+  if (statusFilter.value) params.set('status', statusFilter.value)
+  if (search.value.trim()) params.set('q', search.value.trim())
+  if (buyerId.value) params.set('user', String(buyerId.value))
+  if (needAttention.value) params.set('attention', 'undelivered')
+  if (page.value > 1) params.set('page', String(page.value))
+  const query = params.toString()
+  window.history.replaceState(null, '', query ? `/admin/orders?${query}` : '/admin/orders')
+}
+
 function goTo(target: number) {
   offset.value = Math.min(pages.value - 1, Math.max(0, target - 1)) * PageSize
+  syncUrl()
   load()
 }
 
-const route = useRoute()
-const router = useRouter()
-
-/** Keep the attention filter in the URL so the dashboard can deep-link to it. */
+/** 只看钱已到账、东西还没出去的单子。 */
 function toggleAttention() {
   needAttention.value = !needAttention.value
-  offset.value = 0
-  const next: Record<string, string> = {}
-  if (statusFilter.value) next.status = statusFilter.value
-  if (needAttention.value) next.attention = 'undelivered'
-  if (buyerId.value) next.user = String(buyerId.value)
-  void router.replace({ path: '/orders', query: next })
-  load()
+  if (needAttention.value) statusFilter.value = ''
+  applyFilters()
 }
 
 onMounted(() => {
-  const status = route.query.status
-  if (typeof status === 'string') statusFilter.value = status
-  if (route.query.attention === 'undelivered') needAttention.value = true
-  const user = route.query.user
-  if (typeof user === 'string' && /^\d+$/.test(user)) buyerId.value = Number(user)
+  const { status, q, attention, user, page: asked } = route.query
+  if (typeof status === 'string' && statuses.some((item) => item.value === status)) statusFilter.value = status
+  if (typeof q === 'string') search.value = q
+  if (attention === 'undelivered') {
+    needAttention.value = true
+    // 「需处理交付」本身就是一组状态，不再叠加状态筛选（下拉框这时也是锁住的）。
+    statusFilter.value = ''
+  }
+  if (typeof user === 'string' && /^\d+$/.test(user)) {
+    buyerId.value = Number(user)
+    buyerName.value = `#${user}`
+  }
+  if (typeof asked === 'string' && /^\d+$/.test(asked)) offset.value = (Math.max(1, Number(asked)) - 1) * PageSize
   load()
 })
 </script>
@@ -304,7 +345,7 @@ onMounted(() => {
       :page="page"
       :pages="pages"
       :loading="loading"
-      :summary="`第 ${from}–${to} 条 · 共 ${total} 条`"
+      :summary="summary"
       @change="goTo"
     />
   </section>

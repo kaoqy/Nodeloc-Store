@@ -40,7 +40,9 @@ const paged = computed(() => {
   return filtered.value.slice(start, start + PageSize)
 })
 const summary = computed(() => {
-  const first = filtered.value.length ? (current.value - 1) * PageSize + 1 : 0
+  // 这一页一行都没有时不报「第 0–-1 个」那种范围，只说总数。
+  if (!filtered.value.length) return `共 ${filtered.value.length} 个商品`
+  const first = (current.value - 1) * PageSize + 1
   return `第 ${first}–${first - 1 + paged.value.length} 个 · 共 ${filtered.value.length} 个商品`
 })
 

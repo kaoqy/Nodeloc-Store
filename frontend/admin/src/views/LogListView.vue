@@ -68,15 +68,17 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const result = await listAuditLogs({
-      page: page.value,
-      limit: Limit,
-      action: actionFilter.value.trim() || undefined,
-      search: searchFilter.value.trim() || undefined,
-      actor: systemOnly.value ? 'system' : actorFilter.value.trim() || undefined,
-      since: since.value || undefined,
-      until: until.value || undefined,
-    })
+    let result = await listAuditLogs(query())
+    // 地址栏里的页码可能比实际页数还大：有记录就退回最后一页再取一次，
+    // 一条都没有就回第 1 页，别把店家丢在一个看着像坏掉的空白页上。
+    if (!result.items.length && result.total > 0 && page.value > 1) {
+      page.value = Math.max(1, result.total_pages)
+      syncUrl()
+      result = await listAuditLogs(query())
+    } else if (!result.total && page.value > 1) {
+      page.value = 1
+      syncUrl()
+    }
     logs.value = result.items
     total.value = result.total
     totalPages.value = result.total_pages || 1
@@ -85,6 +87,18 @@ async function load() {
     error.value = errorMessage(err, '加载日志失败')
   } finally {
     loading.value = false
+  }
+}
+
+function query() {
+  return {
+    page: page.value,
+    limit: Limit,
+    action: actionFilter.value.trim() || undefined,
+    search: searchFilter.value.trim() || undefined,
+    actor: systemOnly.value ? 'system' : actorFilter.value.trim() || undefined,
+    since: since.value || undefined,
+    until: until.value || undefined,
   }
 }
 
@@ -344,7 +358,7 @@ async function loadAuditActions() {
       :page="page"
       :pages="totalPages"
       :loading="loading"
-      :summary="`第 ${range.first}–${range.last} 条 · 共 ${total} 条`"
+      :summary="logs.length ? `第 ${range.first}–${range.last} 条 · 共 ${total} 条` : `共 ${total} 条`"
       @change="go"
     />
   </section>
