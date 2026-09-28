@@ -48,7 +48,7 @@ export const useSiteStore = defineStore('site', () => {
       if (status.theme?.locale) document.documentElement.lang = status.theme.locale
       // The name and the summary are what the browser tab and a search result
       // show, so they travel with the site identity rather than the page body.
-      applyShopIdentity(status.app?.name, status.app?.description)
+      applyShopIdentity(status.app?.name, status.app?.description, status.app?.logo)
     } catch {
       // The status endpoint is optional; the storefront still works without it.
     }

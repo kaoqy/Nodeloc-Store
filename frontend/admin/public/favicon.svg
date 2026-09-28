@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Nodeloc Store 管理后台">
+  <rect width="64" height="64" rx="15" fill="#0a0b0d" />
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" fill="none" stroke="#f2704a" stroke-opacity="0.45" />
+  <text x="32" y="46" font-family="'Courier New', monospace" font-size="38" font-weight="700" text-anchor="middle" fill="#f2704a">N</text>
+</svg>

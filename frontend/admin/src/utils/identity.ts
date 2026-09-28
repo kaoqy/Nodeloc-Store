@@ -10,6 +10,9 @@ const nameState = ref(localStorage.getItem(NAME_KEY) || DEFAULT_NAME)
 const logoState = ref('')
 let section = ''
 
+// The tab's face is the built-in mark until the shop supplies a logo.
+const builtInIcon = document.head.querySelector<HTMLLinkElement>('link[rel="icon"]')?.href || ''
+
 export const shopName = readonly(nameState)
 export const shopLogo = readonly(logoState)
 export const shopInitials = computed(() => nameState.value.trim().slice(0, 1).toUpperCase() || 'N')
@@ -20,7 +23,10 @@ export function applyShopIdentity(name?: string, logo?: string) {
     nameState.value = value
     localStorage.setItem(NAME_KEY, value)
   }
-  logoState.value = (logo ?? '').trim()
+  const image = (logo ?? '').trim()
+  logoState.value = image
+  const icon = document.head.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  if (icon) icon.href = image || builtInIcon
   setPageTitle()
 }
 

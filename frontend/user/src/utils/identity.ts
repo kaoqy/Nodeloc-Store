@@ -12,9 +12,13 @@ let shopName = localStorage.getItem(NAME_KEY) || DEFAULT_NAME
 // route instead of flattening it back to the store front door.
 let section = ''
 
+// The tab's icon is the shop's face: the mark the build ships with until the
+// owner uploads a logo, theirs from then on.
+const builtInIcon = document.head.querySelector<HTMLLinkElement>('link[rel="icon"]')?.href || ''
+
 // Both SPAs share this origin and this key, same as the accent colour: the tab
 // a buyer opens and the tab the owner works in should read alike.
-export function applyShopIdentity(name?: string, description?: string) {
+export function applyShopIdentity(name?: string, description?: string, logo?: string) {
   const value = (name ?? '').trim()
   if (value) {
     shopName = value
@@ -27,6 +31,8 @@ export function applyShopIdentity(name?: string, description?: string) {
     const meta = document.head.querySelector('meta[name="description"]')
     if (meta) meta.setAttribute('content', summary)
   }
+  const icon = document.head.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  if (icon) icon.href = (logo ?? '').trim() || builtInIcon
   setPageTitle()
 }
 

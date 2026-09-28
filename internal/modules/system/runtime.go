@@ -174,9 +174,16 @@ func (r *RuntimeConfig) Normalize() {
 	r.App.Name = trimRunes(r.App.Name, 120)
 	r.App.Slogan = trimRunes(r.App.Slogan, 160)
 	r.App.Description = trimRunes(r.App.Description, 500)
+	r.App.Logo = trimRunes(r.App.Logo, 500)
 	r.App.FooterText = trimRunes(r.App.FooterText, 300)
 	r.App.FooterNote = trimRunes(r.App.FooterNote, 120)
 	r.App.Announcement = trimRunes(r.App.Announcement, 200)
+
+	// The logo is an image source on every page of both interfaces, so a value
+	// that is not an image address is dropped rather than loaded everywhere.
+	if r.App.Logo != "" && !isSafeImageURL(r.App.Logo) {
+		r.App.Logo = ""
+	}
 
 	primary := strings.TrimSpace(r.Theme.Primary)
 	if !hexColor.MatchString(primary) {
@@ -221,6 +228,17 @@ func isSafeFooterURL(value string) bool {
 		return true
 	}
 	return false
+}
+
+// isSafeImageURL accepts everything a footer link may be, plus an inline
+// data: image, which is how a small logo arrives from a paste. A javascript: or
+// file: address is not a picture, and the shop should not try to load one as its
+// own face on every page.
+func isSafeImageURL(value string) bool {
+	if strings.HasPrefix(value, "data:image/") {
+		return true
+	}
+	return isSafeFooterURL(value)
 }
 
 func trimRunes(value string, limit int) string {
