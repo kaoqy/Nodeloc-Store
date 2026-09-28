@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import ProductCard from '../components/ProductCard.vue'
 import { couponQuoteMessage, getProduct, listProducts, quoteCoupon } from '../api/products'
 import { createOrder, createPayment } from '../api/payment'
-import { errorMessage } from '../api/client'
+import { errorMessage, errorStatus } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useSiteStore } from '../stores/site'
 import { setPageTitle } from '../utils/identity'
@@ -118,18 +118,40 @@ async function loadRelated(item: Product) {
   }
 }
 
-onMounted(async () => {
+/** Read the goods this address names, starting every product-only panel fresh. */
+async function load(slug: string) {
+  loading.value = true
+  error.value = ''
+  product.value = null
+  related.value = []
+  quantity.value = 1
+  couponCode.value = ''
+  quote.value = null
+  couponError.value = ''
+  submitting.value = false
   try {
-    product.value = await getProduct(String(route.params.slug))
+    product.value = await getProduct(slug)
     // The tab says which goods the visitor is reading about, not just which shop.
     setPageTitle(product.value?.name)
     if (product.value) void loadRelated(product.value)
   } catch (e) {
-    error.value = errorMessage(e, '商品加载失败')
+    // An address for goods the shop does not carry is not a fault worth
+    // reporting: the empty state below already says the item is gone.
+    error.value = errorStatus(e) === 404 ? '' : errorMessage(e, '商品加载失败')
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(() => void load(String(route.params.slug)))
+
+// Related goods link straight to each other, and both addresses render this same
+// component. Without reloading on the slug the page keeps the item the visitor
+// came from while the address already names another one.
+watch(
+  () => route.params.slug,
+  (next) => void load(String(next ?? '')),
+)
 </script>
 
 <template>
@@ -144,9 +166,18 @@ onMounted(async () => {
       <div class="skeleton h-80 w-full !rounded-lg" />
     </div>
 
-    <p v-else-if="!product" class="alert alert-danger max-w-xl" role="alert">
-      {{ error || '未找到该商品，它可能已经下架。' }}
-    </p>
+    <div v-else-if="!product" class="card mx-auto max-w-xl py-14 text-center">
+      <p class="eyebrow">{{ error ? '加载失败' : '不在架上' }}</p>
+      <h1 class="mt-3 text-lg font-semibold">{{ error || '未找到该商品，它可能已经下架。' }}</h1>
+      <p class="mt-2 text-sm leading-relaxed text-[var(--text-dim)]">
+        {{ error ? '网络或服务暂时没应答，可以直接重试一次。' : '下架的商品不会再用旧链接打开，货架上还有其他可选。' }}
+      </p>
+      <div class="mt-7 flex flex-wrap justify-center gap-2">
+        <button v-if="error" class="btn btn-primary btn-sm" @click="load(String(route.params.slug))">再试一次</button>
+        <RouterLink v-else to="/" class="btn btn-primary btn-sm">去挑选商品</RouterLink>
+        <RouterLink v-if="auth.isAuthenticated" to="/orders" class="btn btn-quiet btn-sm">我的订单</RouterLink>
+      </div>
+    </div>
 
     <div v-else class="fade-in grid items-start gap-8 lg:grid-cols-[1.5fr_1fr]">
       <section>

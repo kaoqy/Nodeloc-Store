@@ -701,10 +701,13 @@ func parseID(c *gin.Context, name string) (uint, bool) {
 	return uint(value), true
 }
 
+// respondError answers with what a caller can act on: the status, and words the
+// person reading them can understand. A missing record used to arrive as the
+// driver's own "record not found", which the storefront then showed a buyer.
 func respondError(c *gin.Context, err error) {
-	status := http.StatusBadRequest
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		status = http.StatusNotFound
+		c.JSON(http.StatusNotFound, gin.H{"error": "这条记录不存在，或者已经被删除。", "code": "not_found"})
+		return
 	}
-	c.JSON(status, gin.H{"error": err.Error()})
+	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 }
