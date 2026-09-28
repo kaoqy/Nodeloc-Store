@@ -2,6 +2,7 @@ package infrastructure
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -19,6 +20,32 @@ func NewProductRepo(db *gorm.DB) *GormProductRepo   { return &GormProductRepo{db
 func NewCardRepo(db *gorm.DB) *GormCardRepo         { return &GormCardRepo{db: db} }
 func NewCategoryRepo(db *gorm.DB) *GormCategoryRepo { return &GormCategoryRepo{db: db} }
 func NewCouponRepo(db *gorm.DB) *GormCouponRepo     { return &GormCouponRepo{db: db} }
+
+// asTaken replaces a unique-index collision with the catalogue rule it broke.
+// Left alone, the driver's own sentence ("UNIQUE constraint failed:
+// products.slug") travels all the way to the shop owner's screen, where it reads
+// as a fault rather than as the duplicate slug it is.
+func asTaken(err error, taken error) error {
+	if !isDuplicateKey(err) {
+		return err
+	}
+	return taken
+}
+
+// isDuplicateKey recognises both drivers by hand because GORM's error translation
+// is not turned on for this project: SQLite names the index, MySQL reports 1062.
+func isDuplicateKey(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	text := err.Error()
+	return strings.Contains(text, "UNIQUE constraint failed") ||
+		strings.Contains(text, "Error 1062") ||
+		strings.Contains(text, "duplicate key value")
+}
 
 // ListQuery applies the storefront's filters in the database. Manual-delivery
 // products always count as in stock, because 现货 for them is the shop owner's
@@ -164,11 +191,11 @@ func (r *GormProductRepo) GetBySlug(ctx context.Context, slug string, publishedO
 }
 
 func (r *GormProductRepo) Create(ctx context.Context, product *domain.Product) error {
-	return r.db.WithContext(ctx).Create(product).Error
+	return asTaken(r.db.WithContext(ctx).Create(product).Error, domain.ErrProductSlugTaken)
 }
 
 func (r *GormProductRepo) Update(ctx context.Context, product *domain.Product) error {
-	return r.db.WithContext(ctx).Save(product).Error
+	return asTaken(r.db.WithContext(ctx).Save(product).Error, domain.ErrProductSlugTaken)
 }
 
 func (r *GormProductRepo) UpdateStockCount(ctx context.Context, productID uint, count int) error {
@@ -375,11 +402,11 @@ func (r *GormCategoryRepo) GetByID(ctx context.Context, id uint) (*domain.Catego
 }
 
 func (r *GormCategoryRepo) Create(ctx context.Context, category *domain.Category) error {
-	return r.db.WithContext(ctx).Create(category).Error
+	return asTaken(r.db.WithContext(ctx).Create(category).Error, domain.ErrCategorySlugTaken)
 }
 
 func (r *GormCategoryRepo) Update(ctx context.Context, category *domain.Category) error {
-	return r.db.WithContext(ctx).Save(category).Error
+	return asTaken(r.db.WithContext(ctx).Save(category).Error, domain.ErrCategorySlugTaken)
 }
 
 func (r *GormCategoryRepo) Delete(ctx context.Context, id uint) error {
@@ -409,11 +436,11 @@ func (r *GormCouponRepo) GetByCode(ctx context.Context, code string) (*domain.Co
 }
 
 func (r *GormCouponRepo) Create(ctx context.Context, coupon *domain.Coupon) error {
-	return r.db.WithContext(ctx).Create(coupon).Error
+	return asTaken(r.db.WithContext(ctx).Create(coupon).Error, domain.ErrCouponCodeTaken)
 }
 
 func (r *GormCouponRepo) Update(ctx context.Context, coupon *domain.Coupon) error {
-	return r.db.WithContext(ctx).Save(coupon).Error
+	return asTaken(r.db.WithContext(ctx).Save(coupon).Error, domain.ErrCouponCodeTaken)
 }
 
 func (r *GormCouponRepo) Delete(ctx context.Context, id uint) error {

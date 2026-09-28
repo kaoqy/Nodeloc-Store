@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -80,9 +81,10 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	admin.DELETE("/coupons/:id", guard("coupons", "manage"), h.deleteCoupon)
 }
 
-// productQuery reads the storefront's listing parameters. The same handler has
-// served every shop since, so unknown values degrade to the default ordering
-// rather than erroring: a stale link should still show products.
+// productQuery reads the storefront's listing parameters. Only the values a
+// caller can actually name are parsed here; an unknown sort is refused further
+// down rather than silently becoming the default ordering, because a filter chip
+// that quietly did nothing is worse to debug than a 400 that says so.
 func productQuery(c *gin.Context) domain.ProductQuery {
 	query := domain.ProductQuery{
 		Search: strings.TrimSpace(c.Query("q")),
@@ -151,7 +153,7 @@ func (h *Handler) quoteCoupon(c *gin.Context) {
 		productID = product.ID
 	}
 	if productID == 0 {
-		respondError(c, fmt.Errorf("%w: product_id or product_slug is required", application.ErrInvalidQuery))
+		respondError(c, fmt.Errorf("%w: 请先告诉我要试算哪件商品。", application.ErrInvalidQuery))
 		return
 	}
 	product, err := h.service.GetProduct(c.Request.Context(), productID)
@@ -686,7 +688,13 @@ func (h *Handler) deleteCoupon(c *gin.Context) {
 
 func bindJSON(c *gin.Context, target any) bool {
 	if err := c.ShouldBindJSON(target); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "detail": err.Error()})
+		// The form the shop owner filled is the thing at fault, so the answer says
+		// what to do rather than quoting Go's JSON parser.
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  "提交的内容无法解析，请检查表单后重试。",
+			"code":   "invalid_request",
+			"detail": err.Error(),
+		})
 		return false
 	}
 	return true
@@ -695,19 +703,69 @@ func bindJSON(c *gin.Context, target any) bool {
 func parseID(c *gin.Context, name string) (uint, bool) {
 	value, err := strconv.ParseUint(c.Param(name), 10, 64)
 	if err != nil || value == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid " + name})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "地址里的编号不对，请从列表页重新进入。",
+			"code":  "invalid_id",
+		})
 		return 0, false
 	}
 	return uint(value), true
 }
 
-// respondError answers with what a caller can act on: the status, and words the
-// person reading them can understand. A missing record used to arrive as the
-// driver's own "record not found", which the storefront then showed a buyer.
+// respondError answers with what a caller can act on: the status, a machine code,
+// and words the person reading them can understand. Every catalogue failure has
+// a name, so the driver's own English ("record not found", "UNIQUE constraint
+// failed: products.slug") never reaches a Chinese screen as if it were the shop's
+// own message.
 func respondError(c *gin.Context, err error) {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "这条记录不存在，或者已经被删除。", "code": "not_found"})
-		return
+	status, code, message := errorCopy(err)
+	if status == http.StatusInternalServerError {
+		// The client only sees a generic message, so the real cause has to reach
+		// the server log or unexplained 500s cannot be diagnosed.
+		log.Printf("[catalog] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
 	}
-	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	c.JSON(status, gin.H{"error": message, "code": code})
+}
+
+// errorCopy keys the wording off the rule that broke, the same way identity answers
+// its callers. A validation error carries the specific complaint, so its own tail
+// is kept; the rest get a fixed sentence written for the back office.
+func errorCopy(err error) (int, string, string) {
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return http.StatusNotFound, "not_found", "这条记录不存在，或者已经被删除。"
+	case errors.Is(err, domain.ErrInvalidInput):
+		return http.StatusBadRequest, "invalid_input", detail(err, "信息填得不对，请检查后重试。")
+	case errors.Is(err, application.ErrInvalidQuery):
+		return http.StatusBadRequest, "invalid_query", detail(err, "查询条件不对，请调整后重试。")
+	case errors.Is(err, application.ErrInvalidProductType):
+		return http.StatusBadRequest, "invalid_product_type", "商品类型只能是 card（卡密自动发货）或 manual（手动发货）。"
+	case errors.Is(err, application.ErrInvalidCardStatus):
+		return http.StatusBadRequest, "invalid_card_status", "卡密状态只能是 available（可用）或 disabled（停用）。"
+	case errors.Is(err, application.ErrManualProductCard):
+		return http.StatusBadRequest, "manual_product", "手动发货的商品没有卡密库存，无需添加或管理卡密。"
+	case errors.Is(err, domain.ErrProductSlugTaken):
+		return http.StatusConflict, "slug_taken", "这个 slug 已经有商品在用，换一个再保存。"
+	case errors.Is(err, domain.ErrCategorySlugTaken):
+		return http.StatusConflict, "slug_taken", "这个 slug 已经有分类在用，换一个再保存。"
+	case errors.Is(err, domain.ErrCouponCodeTaken):
+		return http.StatusConflict, "code_taken", "这个优惠码已经存在，不要重复创建。"
+	}
+	// A quoted code can be refused for a reason the buyer acts on differently from
+	// a form error, and the refusal already carries its own words.
+	var refusal *application.CouponError
+	if errors.As(err, &refusal) {
+		return http.StatusUnprocessableEntity, refusal.CouponCode(), refusal.CouponMessage()
+	}
+	return http.StatusInternalServerError, "internal_error", "服务器开小差了，请稍后再试。"
+}
+
+// detail keeps the reason a wrapped sentinel carries ("invalid input: 商品名称和
+// slug 都要填写。" → the part after the colon) and falls back when there is none.
+func detail(err error, fallback string) string {
+	_, tail, found := strings.Cut(err.Error(), ": ")
+	if found && strings.TrimSpace(tail) != "" {
+		return tail
+	}
+	return fallback
 }

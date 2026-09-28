@@ -63,7 +63,7 @@ func (s *Service) AdminProducts(ctx context.Context, query domain.ProductQuery) 
 
 func (s *Service) filteredProducts(ctx context.Context, query domain.ProductQuery) ([]domain.Product, int64, error) {
 	if !domain.ValidSort(query.Sort) {
-		return nil, 0, fmt.Errorf("%w: unknown sort %q", ErrInvalidQuery, query.Sort)
+		return nil, 0, fmt.Errorf("%w: 不支持这种排序方式（%s），请从列表页重新筛选。", ErrInvalidQuery, briefValue(query.Sort))
 	}
 	if query.Limit <= 0 {
 		query.Limit = 24
@@ -172,7 +172,7 @@ func (s *Service) AddCard(ctx context.Context, productID uint, card *domain.Card
 	card.ProductID = productID
 	card.Content = strings.TrimSpace(card.Content)
 	if card.Content == "" {
-		return errors.New("card content is required")
+		return fmt.Errorf("%w: 卡密内容不能为空。", domain.ErrInvalidInput)
 	}
 	if card.Status == "" {
 		card.Status = domain.CardStatusAvailable
@@ -195,11 +195,11 @@ func (s *Service) UpdateCard(ctx context.Context, productID, cardID uint, input 
 		return nil, err
 	}
 	if card.ProductID != productID {
-		return nil, errors.New("card does not belong to product")
+		return nil, fmt.Errorf("%w: 这张卡密并不属于地址里的商品。", domain.ErrInvalidInput)
 	}
 	content := strings.TrimSpace(input.Content)
 	if content == "" {
-		return nil, errors.New("card content is required")
+		return nil, fmt.Errorf("%w: 卡密内容不能为空。", domain.ErrInvalidInput)
 	}
 	status := input.Status
 	if status == "" {
@@ -225,7 +225,7 @@ func (s *Service) DeleteCard(ctx context.Context, productID, cardID uint) error 
 		return err
 	}
 	if card.ProductID != productID {
-		return errors.New("card does not belong to product")
+		return fmt.Errorf("%w: 这张卡密并不属于地址里的商品。", domain.ErrInvalidInput)
 	}
 	if err := s.cards.Delete(ctx, cardID); err != nil {
 		return err
@@ -276,7 +276,7 @@ func (s *Service) CreateCategory(ctx context.Context, category *domain.Category)
 	category.Name = strings.TrimSpace(category.Name)
 	category.Slug = strings.TrimSpace(category.Slug)
 	if category.Name == "" || category.Slug == "" {
-		return errors.New("category name and slug are required")
+		return fmt.Errorf("%w: 分类名称和 slug 都要填写。", domain.ErrInvalidInput)
 	}
 	return s.categories.Create(ctx, category)
 }
@@ -298,7 +298,7 @@ func (s *Service) UpdateCategory(ctx context.Context, id uint, input *domain.Cat
 	category.Name = strings.TrimSpace(category.Name)
 	category.Slug = strings.TrimSpace(category.Slug)
 	if category.Name == "" || category.Slug == "" {
-		return nil, errors.New("category name and slug are required")
+		return nil, fmt.Errorf("%w: 分类名称和 slug 都要填写。", domain.ErrInvalidInput)
 	}
 	if err := s.categories.Update(ctx, category); err != nil {
 		return nil, err
@@ -583,7 +583,7 @@ func (s *Service) ImportCards(ctx context.Context, productID uint, contents []st
 		if result.Blank > 0 || result.Skipped > 0 {
 			return result, nil
 		}
-		return nil, errors.New("at least one non-empty card is required")
+		return nil, fmt.Errorf("%w: 至少要填写一条非空的卡密。", domain.ErrInvalidInput)
 	}
 	if err := s.cards.CreateBatch(ctx, result.Created); err != nil {
 		return nil, err
@@ -606,15 +606,15 @@ func (s *Service) GenerateCards(ctx context.Context, productID uint, count int, 
 		return nil, err
 	}
 	if count <= 0 || count > 500 {
-		return nil, fmt.Errorf("%w: generate count must be between 1 and 500", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: 一次生成的卡密数量要在 1 到 500 之间。", ErrInvalidQuery)
 	}
 	prefix = strings.ToUpper(strings.TrimSpace(prefix))
 	if len(prefix) > 16 {
-		return nil, fmt.Errorf("%w: prefix is too long", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: 前缀最长 16 个字符。", ErrInvalidQuery)
 	}
 	for _, r := range prefix {
 		if !strings.ContainsRune(cardAlphabet+"-", r) {
-			return nil, fmt.Errorf("%w: prefix may only use letters, digits and dashes", ErrInvalidQuery)
+			return nil, fmt.Errorf("%w: 前缀只能使用字母、数字和短横线。", ErrInvalidQuery)
 		}
 	}
 
@@ -667,7 +667,7 @@ func randomCardBody(length int) (string, error) {
 // SetCardStatus enables or disables selected keys and reports how many moved.
 func (s *Service) SetCardStatus(ctx context.Context, productID uint, ids []uint, status string) (int64, error) {
 	if len(ids) == 0 {
-		return 0, fmt.Errorf("%w: no cards selected", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: 请先勾选要操作的卡密。", ErrInvalidQuery)
 	}
 	if status != domain.CardStatusAvailable && status != domain.CardStatusDisabled {
 		return 0, ErrInvalidCardStatus
@@ -689,7 +689,7 @@ func (s *Service) SetCardStatus(ctx context.Context, productID uint, ids []uint,
 // that card is part of their order record.
 func (s *Service) DeleteCards(ctx context.Context, productID uint, ids []uint) (int64, error) {
 	if len(ids) == 0 {
-		return 0, fmt.Errorf("%w: no cards selected", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: 请先勾选要操作的卡密。", ErrInvalidQuery)
 	}
 	if err := s.ensureCardProduct(ctx, productID); err != nil {
 		return 0, err
@@ -720,10 +720,10 @@ func normalizeProduct(product *domain.Product) error {
 	product.Slug = strings.TrimSpace(product.Slug)
 	product.ProductType = strings.ToLower(strings.TrimSpace(product.ProductType))
 	if product.Name == "" || product.Slug == "" {
-		return errors.New("product name and slug are required")
+		return fmt.Errorf("%w: 商品名称和 slug 都要填写。", domain.ErrInvalidInput)
 	}
 	if product.Price < 0 {
-		return errors.New("product price cannot be negative")
+		return fmt.Errorf("%w: 商品价格不能是负数。", domain.ErrInvalidInput)
 	}
 	if product.ProductType == "" {
 		product.ProductType = domain.ProductTypeCard
@@ -739,22 +739,22 @@ func normalizeCoupon(coupon *domain.Coupon) error {
 	coupon.Code = strings.ToUpper(strings.TrimSpace(coupon.Code))
 	coupon.DiscountType = strings.ToLower(strings.TrimSpace(coupon.DiscountType))
 	if coupon.Code == "" {
-		return errors.New("coupon code is required")
+		return fmt.Errorf("%w: 优惠码本身不能为空。", domain.ErrInvalidInput)
 	}
 	if coupon.DiscountType != "fixed" && coupon.DiscountType != "percent" {
-		return errors.New("discount type must be fixed or percent")
+		return fmt.Errorf("%w: 抵扣方式只能是 fixed（立减）或 percent（折扣）。", domain.ErrInvalidInput)
 	}
 	if coupon.DiscountValue <= 0 {
-		return errors.New("discount value must be positive")
+		return fmt.Errorf("%w: 抵扣数额要大于 0。", domain.ErrInvalidInput)
 	}
 	if coupon.DiscountType == "percent" && coupon.DiscountValue > 100 {
-		return errors.New("percentage discount cannot exceed 100")
+		return fmt.Errorf("%w: 折扣比例不能超过 100%%。", domain.ErrInvalidInput)
 	}
 	if coupon.MinOrderAmount < 0 || coupon.MaxUses < 0 {
-		return errors.New("coupon limits cannot be negative")
+		return fmt.Errorf("%w: 门槛金额和限量次数不能是负数。", domain.ErrInvalidInput)
 	}
 	if coupon.ValidFrom != nil && coupon.ValidUntil != nil && coupon.ValidUntil.Before(*coupon.ValidFrom) {
-		return errors.New("valid_until must be after valid_from")
+		return fmt.Errorf("%w: 失效时间要晚于生效时间。", domain.ErrInvalidInput)
 	}
 	// Scope decides what the code may buy. Anything unrecognized is treated as
 	// the whole shop rather than silently matching nothing.
@@ -767,23 +767,23 @@ func normalizeCoupon(coupon *domain.Coupon) error {
 	case "product":
 		coupon.CategoryID = nil
 		if coupon.ProductID == nil || *coupon.ProductID == 0 {
-			return errors.New("a product-scoped coupon needs product_id")
+			return fmt.Errorf("%w: 指定商品可用的优惠码要先选好商品。", domain.ErrInvalidInput)
 		}
 	case "category":
 		coupon.ProductID = nil
 		if coupon.CategoryID == nil || *coupon.CategoryID == 0 {
-			return errors.New("a category-scoped coupon needs category_id")
+			return fmt.Errorf("%w: 指定分类可用的优惠码要先选好分类。", domain.ErrInvalidInput)
 		}
 	default:
-		return errors.New("scope must be all, product or category")
+		return fmt.Errorf("%w: 适用范围只能是 all、product 或 category。", domain.ErrInvalidInput)
 	}
 	if coupon.PerUserLimit < 0 {
-		return errors.New("per_user_limit cannot be negative")
+		return fmt.Errorf("%w: 每人限用次数不能是负数。", domain.ErrInvalidInput)
 	}
 	if coupon.Description != nil {
 		description := strings.TrimSpace(*coupon.Description)
 		if len([]rune(description)) > 255 {
-			return errors.New("coupon description is too long")
+			return fmt.Errorf("%w: 优惠码说明最长 255 个字。", domain.ErrInvalidInput)
 		}
 		if description == "" {
 			coupon.Description = nil
@@ -796,4 +796,17 @@ func normalizeCoupon(coupon *domain.Coupon) error {
 
 func validCardStatus(status string) bool {
 	return status == domain.CardStatusAvailable || status == domain.CardStatusSold || status == domain.CardStatusDisabled
+}
+
+// briefValue shortens a rejected query value before it is echoed back in the
+// error copy, so a paste box full of text cannot become a page of error message.
+func briefValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "空值"
+	}
+	if runes := []rune(value); len(runes) > 24 {
+		return string(runes[:24]) + "…"
+	}
+	return value
 }
