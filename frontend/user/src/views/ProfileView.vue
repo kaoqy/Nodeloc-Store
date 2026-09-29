@@ -15,6 +15,7 @@ import {
 } from '../api/auth'
 import { errorMessage } from '../api/client'
 import { listNotifications, markAllRead, markNotificationRead } from '../api/notifications'
+import type { InboxKind, InboxQuery } from '../api/notifications'
 import { useAuthStore } from '../stores/auth'
 import { useInboxStore } from '../stores/inbox'
 import { useSiteStore } from '../stores/site'
@@ -22,6 +23,7 @@ import { oauthErrorText, when } from '../utils/format'
 import type { AppNotification, CheckinRecord, CheckinStatus, PointEntry } from '../types'
 
 const POINTS_PAGE = 20
+const NOTES_PAGE = 10
 
 const auth = useAuthStore()
 const site = useSiteStore()
@@ -40,6 +42,11 @@ const pointsTotal = ref(0)
 const pointsLoading = ref(false)
 const notifications = ref<AppNotification[]>([])
 const markingAll = ref(false)
+const notesTotal = ref(0)
+const notesLoading = ref(false)
+const noteKind = ref('')
+const notesUnreadOnly = ref(false)
+const inboxKinds = ref<InboxKind[]>([])
 
 const editing = ref(false)
 const form = ref({ nickname: '', avatar_url: '', bio: '', email: '' })
@@ -71,7 +78,7 @@ async function reloadAccountPanels() {
     site.checkinEnabled ? checkinStatus() : Promise.resolve(null),
     site.checkinEnabled ? checkinHistory(7) : Promise.resolve([]),
     myPoints(POINTS_PAGE, 0),
-    listNotifications(1, 10),
+    listNotifications(1, NOTES_PAGE, noteQuery()),
   ])
   if (status.status === 'fulfilled') checkin.value = status.value
   if (history.status === 'fulfilled') checkins.value = (history.value as CheckinRecord[]) ?? []
@@ -81,6 +88,8 @@ async function reloadAccountPanels() {
   }
   if (messages.status === 'fulfilled') {
     notifications.value = messages.value.items
+    notesTotal.value = messages.value.total
+    inboxKinds.value = messages.value.kinds
   }
   // The count comes from the server because the panel only lists one page:
   // counting that page would under-report a longer inbox to the header badge.
@@ -96,12 +105,74 @@ async function readAllNotifications() {
     const marked = await markAllRead()
     notifications.value = notifications.value.map((item) => ({ ...item, is_read: true }))
     inbox.reset(0)
+    // The tabs carry unread counts, and they all go to zero together.
+    inboxKinds.value = inboxKinds.value.map((kind) => ({ ...kind, unread: 0 }))
+    if (notesUnreadOnly.value) await loadNotes()
     message.value = marked ? `已把 ${marked} 条通知标为已读。` : '这些通知本来就是已读状态。'
   } catch (e) {
     error.value = errorMessage(e, '全部标为已读失败，请稍后重试')
   } finally {
     markingAll.value = false
   }
+}
+
+function noteQuery(): InboxQuery {
+  return { kind: noteKind.value, unreadOnly: notesUnreadOnly.value }
+}
+
+/** One page of the inbox, either fresh or appended by 加载更多. */
+async function loadNotes(append = false) {
+  if (notesLoading.value) return
+  notesLoading.value = true
+  error.value = ''
+  try {
+    const page = append ? Math.floor(notifications.value.length / NOTES_PAGE) + 1 : 1
+    const result = await listNotifications(page, NOTES_PAGE, noteQuery())
+    notifications.value = append ? [...notifications.value, ...result.items] : result.items
+    notesTotal.value = result.total
+    inboxKinds.value = result.kinds
+  } catch (e) {
+    error.value = errorMessage(e, '通知读取失败，请稍后重试')
+  } finally {
+    notesLoading.value = false
+  }
+}
+
+function pickKind(kind: string) {
+  if (noteKind.value === kind) return
+  noteKind.value = kind
+  void loadNotes()
+}
+
+function toggleUnreadOnly() {
+  notesUnreadOnly.value = !notesUnreadOnly.value
+  void loadNotes()
+}
+
+/** One click back to the whole inbox, whichever tabs were on. */
+function clearNoteFilter() {
+  if (!notesFiltered.value) return
+  noteKind.value = ''
+  notesUnreadOnly.value = false
+  void loadNotes()
+}
+
+const notesFiltered = computed(() => Boolean(noteKind.value) || notesUnreadOnly.value)
+const notesMore = computed(() => notifications.value.length < notesTotal.value)
+const notesAllCount = computed(() => inboxKinds.value.reduce((sum, kind) => sum + (kind.total || 0), 0))
+const notesUnreadCount = computed(() => inboxKinds.value.reduce((sum, kind) => sum + (kind.unread || 0), 0))
+// Only kinds the buyer actually has mail in become a tab, so the row never shows
+// a 促销 chip that is guaranteed to answer "这里还没有通知".
+const noteTabs = computed(() => inboxKinds.value.filter((kind) => kind.total > 0))
+const kindLabels: Record<string, string> = {
+  order: '订单',
+  system: '系统',
+  promo: '促销',
+  announcement: '公告',
+}
+
+function kindLabel(kind: string) {
+  return kindLabels[kind] || kind
 }
 
 async function doCheckIn() {
@@ -259,6 +330,11 @@ async function readNotification(item: AppNotification) {
     await markNotificationRead(item.id)
     item.is_read = true
     inbox.reset(Math.max(0, inbox.unread - 1))
+    inboxKinds.value = inboxKinds.value.map((kind) =>
+      kind.type === item.type && kind.unread > 0 ? { ...kind, unread: kind.unread - 1 } : kind,
+    )
+    // Under the 未读 filter the row just stopped belonging to the list.
+    if (notesUnreadOnly.value) await loadNotes()
   } catch (e) {
     error.value = errorMessage(e, '标记已读失败')
   }
@@ -524,6 +600,37 @@ onMounted(async () => {
         </div>
       </div>
 
+      <div v-if="noteTabs.length" class="mt-4 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          class="chip"
+          :class="!notesFiltered ? 'chip-active' : ''"
+          @click="clearNoteFilter"
+        >
+          全部 <span class="nums">{{ notesAllCount }}</span>
+        </button>
+        <button
+          v-if="notesUnreadCount"
+          type="button"
+          class="chip"
+          :class="notesUnreadOnly ? 'chip-active' : ''"
+          @click="toggleUnreadOnly"
+        >
+          未读 <span class="nums">{{ notesUnreadCount }}</span>
+        </button>
+        <button
+          v-for="kind in noteTabs"
+          :key="kind.type"
+          type="button"
+          class="chip"
+          :class="noteKind === kind.type ? 'chip-active' : ''"
+          @click="pickKind(kind.type)"
+        >
+          {{ kindLabel(kind.type) }} <span class="nums">{{ kind.total }}</span>
+          <span v-if="kind.unread" class="nums hint">· {{ kind.unread }} 未读</span>
+        </button>
+      </div>
+
       <ul v-if="notifications.length" class="mt-4 divide-y divide-[var(--stroke-quiet)]">
         <li v-for="item in notifications" :key="item.id" class="py-3 text-sm">
           <button
@@ -541,7 +648,21 @@ onMounted(async () => {
           </button>
         </li>
       </ul>
+      <p v-else-if="notesFiltered" class="hint mt-4">
+        {{ notesUnreadOnly ? '这一类没有未读的了。' : '这个类别还没有通知。' }}
+        <button v-if="noteTabs.length" type="button" class="chip ml-1" @click="clearNoteFilter">看全部</button>
+      </p>
       <p v-else class="hint mt-4">暂时没有通知。</p>
+
+      <button
+        v-if="notesMore"
+        type="button"
+        class="btn btn-quiet btn-sm mt-4"
+        :disabled="notesLoading"
+        @click="loadNotes(true)"
+      >
+        {{ notesLoading ? '加载中…' : `加载更多（还有 ${notesTotal - notifications.length} 条）` }}
+      </button>
     </section>
 
     <nav class="mt-5 grid gap-3 sm:grid-cols-2">

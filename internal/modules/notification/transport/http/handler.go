@@ -4,12 +4,14 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification/application"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification/infrastructure"
 )
 
@@ -48,6 +50,16 @@ type broadcastRequest struct {
 	Link    *string `json:"link"`
 }
 
+// atoiDefault reads a query number the way a browser sends one: absent, empty or
+// nonsense all mean "take the default", not a 400.
+func atoiDefault(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
 func currentUserID(c *gin.Context) (uint, bool) {
 	value, exists := c.Get("user_id")
 	if !exists {
@@ -74,14 +86,23 @@ func (h *Handler) List(c *gin.Context) {
 		unauthorized(c)
 		return
 	}
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	items, total, err := h.service.List(c.Request.Context(), userID, page, pageSize)
+	page, pageSize := application.InboxPaging(atoiDefault(c.Query("page"), 1), atoiDefault(c.Query("page_size"), 20))
+	filter := contract.InboxFilter{
+		Type:       c.Query("type"),
+		UnreadOnly: c.Query("unread") == "1" || strings.EqualFold(c.Query("unread"), "true"),
+	}
+	items, total, err := h.service.List(c.Request.Context(), userID, page, pageSize, filter)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": total, "page": page, "page_size": pageSize})
+	// The tabs count the whole inbox, not the page being shown: a buyer looking
+	// at 未读 still needs to see how many 订单 messages exist behind the filter.
+	kinds, err := h.service.Facets(c.Request.Context(), userID)
+	if err != nil {
+		kinds = nil
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items, "total": total, "page": page, "page_size": pageSize, "kinds": kinds})
 }
 
 func (h *Handler) Send(c *gin.Context) {

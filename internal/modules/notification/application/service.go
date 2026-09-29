@@ -63,7 +63,10 @@ func (s *Service) Broadcast(ctx context.Context, notificationType, title string,
 	return len(notifications), nil
 }
 
-func (s *Service) List(ctx context.Context, userID uint, page, pageSize int) ([]models.Notification, int64, error) {
+// InboxPaging clamps what a caller asked for to what the inbox serves: page 1 is
+// the floor and one page holds at most 100 rows. Both the query and the response
+// run through it, so the API never echoes back a page size it quietly ignored.
+func InboxPaging(page, pageSize int) (int, int) {
 	if page < 1 {
 		page = 1
 	}
@@ -73,7 +76,25 @@ func (s *Service) List(ctx context.Context, userID uint, page, pageSize int) ([]
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	return s.repo.ListByUser(ctx, userID, pageSize, (page-1)*pageSize)
+	return page, pageSize
+}
+
+// List reads one page of a buyer's own inbox. The filter narrows it to one kind
+// of message or to the unread ones; the total it reports is the filtered one, so
+// the page never counts rows it cannot show.
+func (s *Service) List(ctx context.Context, userID uint, page, pageSize int, filter contract.InboxFilter) ([]models.Notification, int64, error) {
+	page, pageSize = InboxPaging(page, pageSize)
+	filter.Type = strings.TrimSpace(filter.Type)
+	return s.repo.ListByUser(ctx, userID, pageSize, (page-1)*pageSize, filter)
+}
+
+// Facets describes the whole inbox by kind, so the page can offer a 订单 tab only
+// to a buyer who has order messages and show how much of each is unread.
+func (s *Service) Facets(ctx context.Context, userID uint) ([]contract.InboxFacet, error) {
+	if userID == 0 {
+		return nil, ErrInvalidNotification
+	}
+	return s.repo.ListFacets(ctx, userID)
 }
 
 func (s *Service) MarkAsRead(ctx context.Context, id, userID uint) error {

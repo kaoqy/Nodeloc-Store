@@ -3,8 +3,10 @@ package infrastructure
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification/contract"
 	"gorm.io/gorm"
 )
 
@@ -27,17 +29,37 @@ func (s *GormStore) CreateBatch(ctx context.Context, notifications []*models.Not
 	return s.db.WithContext(ctx).CreateInBatches(notifications, 500).Error
 }
 
-func (s *GormStore) ListByUser(ctx context.Context, userID uint, limit, offset int) ([]models.Notification, int64, error) {
+func (s *GormStore) ListByUser(ctx context.Context, userID uint, limit, offset int, filter contract.InboxFilter) ([]models.Notification, int64, error) {
 	var notifications []models.Notification
 	var total int64
 	query := s.db.WithContext(ctx).Model(&models.Notification{}).Where("user_id = ?", userID)
+	if kind := strings.TrimSpace(filter.Type); kind != "" {
+		query = query.Where("type = ?", kind)
+	}
+	if filter.UnreadOnly {
+		query = query.Where("is_read = ?", false)
+	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := query.Order("created_at DESC").Limit(limit).Offset(offset).Find(&notifications).Error; err != nil {
+	// created_at only reaches the second on some databases and two messages can
+	// land in it together; without the id tiebreaker the same row can show up on
+	// two pages, or on none.
+	if err := query.Order("created_at DESC, id DESC").Limit(limit).Offset(offset).Find(&notifications).Error; err != nil {
 		return nil, 0, err
 	}
 	return notifications, total, nil
+}
+
+func (s *GormStore) ListFacets(ctx context.Context, userID uint) ([]contract.InboxFacet, error) {
+	var facets []contract.InboxFacet
+	err := s.db.WithContext(ctx).Model(&models.Notification{}).
+		Select("type, COUNT(*) AS total, SUM(CASE WHEN is_read = 1 THEN 0 ELSE 1 END) AS unread").
+		Where("user_id = ?", userID).
+		Group("type").
+		Order("type ASC").
+		Scan(&facets).Error
+	return facets, err
 }
 
 func (s *GormStore) MarkAsRead(ctx context.Context, id, userID uint) error {
