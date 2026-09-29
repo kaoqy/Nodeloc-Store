@@ -867,14 +867,54 @@ func (s *Service) AdminGetOrder(ctx context.Context, orderNo string) (*models.Or
 // swaps the status filter for "paid but still owed a delivery", the queue that
 // needs a person once the automatic retries have had their turns.
 func (s *Service) AdminListOrders(ctx context.Context, limit, offset int, status, search string, buyerID uint, attention string) (*OrderList, error) {
-	if attention != "" && attention != "undelivered" {
-		return nil, fmt.Errorf("%w: unknown attention filter %q", ErrInvalidInput, attention)
+	if err := checkAttention(attention); err != nil {
+		return nil, err
 	}
 	orders, total, err := s.orders.ListAllOrders(ctx, limit, offset, status, search, buyerID, attention)
 	if err != nil {
 		return nil, err
 	}
 	return &OrderList{Orders: orders, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+func checkAttention(attention string) error {
+	if attention != "" && attention != "undelivered" {
+		return fmt.Errorf("%w: unknown attention filter %q", ErrInvalidInput, attention)
+	}
+	return nil
+}
+
+// maxExportOrders bounds an order download. A shop holding tens of thousands of
+// orders should narrow the window first rather than pull the whole ledger into
+// one response.
+const maxExportOrders = 20000
+
+// ExportOrders walks the same filtered list the back office shows, page by page,
+// so the CSV a shop owner downloads is the batch they were looking at. The
+// second return says the batch was cut short: a truncated file must never read
+// like a complete one.
+func (s *Service) ExportOrders(ctx context.Context, status, search string, buyerID uint, attention string) ([]models.Order, bool, error) {
+	if err := checkAttention(attention); err != nil {
+		return nil, false, err
+	}
+	const pageSize = 100
+	var (
+		orders    []models.Order
+		truncated bool
+	)
+	for offset := 0; ; offset += pageSize {
+		batch, _, err := s.orders.ListAllOrders(ctx, pageSize, offset, status, search, buyerID, attention)
+		if err != nil {
+			return nil, false, err
+		}
+		orders = append(orders, batch...)
+		if len(batch) < pageSize {
+			return orders, truncated, nil
+		}
+		if len(orders)+pageSize > maxExportOrders {
+			return orders, true, nil
+		}
+	}
 }
 
 func (s *Service) AdminCancelOrder(ctx context.Context, orderNo string) (*models.Order, error) {

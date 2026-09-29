@@ -58,3 +58,39 @@ export interface ReconcileReport {
 
 export const reconcilePendingOrders = () =>
   client.post<ReconcileReport>('/admin/reconcile/pending').then((r) => r.data)
+
+// 导出走 blob：这个接口在 Authorization 头后面，普通的下载链接会被当成未登录。
+// 参数与列表同一套，所以下下来的就是屏幕上那一批单子。
+export interface OrderExportQuery {
+  status?: string
+  q?: string
+  user_id?: number
+  attention?: string
+}
+
+export const exportOrders = async (query: OrderExportQuery = {}) => {
+  const response = await client.get<Blob>('/admin/orders/export', {
+    responseType: 'blob',
+    params: {
+      status: query.status || undefined,
+      q: query.q?.trim() || undefined,
+      user_id: query.user_id || undefined,
+      attention: query.attention || undefined,
+    },
+  })
+  const data = response.data
+  const url = URL.createObjectURL(data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+  // 行数与「有没有被截断」由服务端在响应头里报数，不靠前端数行 —— 商品名里
+  // 换一个回车就会把行数数错。
+  return {
+    rows: Number(response.headers['x-export-rows'] ?? 0),
+    truncated: response.headers['x-export-truncated'] === '1',
+  }
+}

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/csv"
 	"errors"
 	"io"
 	"log"
@@ -8,10 +9,12 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
+	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/domain"
 )
@@ -59,6 +62,8 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	adminOrders := router.Group("/api/v1/admin/orders")
 	adminOrders.Use(middleware.JWTMiddleware(jwtConfig))
 	adminOrders.GET("", guard("orders", "view"), h.AdminListOrders)
+	// A static segment, so it wins over /:order_no for the word "export".
+	adminOrders.GET("/export", guard("orders", "view"), h.AdminExportOrders)
 	adminOrders.GET("/:order_no", guard("orders", "view"), h.AdminGetOrder)
 	adminOrders.POST("/:order_no/cancel", guard("orders", "manage"), h.AdminCancelOrder)
 	adminOrders.POST("/:order_no/deliver", guard("orders", "manage"), h.AdminDeliverOrder)
@@ -429,6 +434,16 @@ func isAdminRoute(c *gin.Context) bool {
 
 // ── Admin Order Handlers ───────────────────────────────────────────
 
+// orderFilter is what both the admin order list and its CSV download read out of
+// the query string. Sharing the parse is the point: a download can then only
+// ever carry the batch the page was showing.
+type orderFilter struct {
+	status    string
+	search    string
+	buyerID   uint
+	attention string
+}
+
 func (h *Handler) AdminListOrders(c *gin.Context) {
 	limit, err := parseNonNegativeInt(c.DefaultQuery("limit", "20"))
 	if err != nil || limit == 0 {
@@ -443,19 +458,141 @@ func (h *Handler) AdminListOrders(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "offset must be a non-negative integer"})
 		return
 	}
-	status := c.DefaultQuery("status", "")
-	buyerID, err := parseNonNegativeInt(c.DefaultQuery("user_id", "0"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id must be a non-negative integer"})
+	filter, badQuery := readOrderFilter(c)
+	if badQuery != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": badQuery})
 		return
 	}
 
-	result, err := h.service.AdminListOrders(c.Request.Context(), limit, offset, status, c.Query("q"), uint(buyerID), c.Query("attention"))
+	result, err := h.service.AdminListOrders(c.Request.Context(), limit, offset, filter.status, filter.search, filter.buyerID, filter.attention)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": result.Orders, "total": result.Total, "limit": result.Limit, "offset": result.Offset})
+}
+
+func readOrderFilter(c *gin.Context) (orderFilter, string) {
+	filter := orderFilter{status: c.Query("status"), search: c.Query("q"), attention: c.Query("attention")}
+	buyerID, err := parseNonNegativeInt(c.DefaultQuery("user_id", "0"))
+	if err != nil {
+		return filter, "user_id must be a non-negative integer"
+	}
+	filter.buyerID = uint(buyerID)
+	return filter, ""
+}
+
+// exportOrderColumns name the CSV header. The amounts are labelled in 元 because
+// orders store fen: a shop owner reconciling against their NodeLoc statement
+// would otherwise read ¥1.00 as ¥100.
+var exportOrderColumns = []string{
+	"订单号", "状态", "交付状态", "商品", "数量", "单价(元)", "优惠(元)", "实付(元)", "优惠码",
+	"买家ID", "买家用户名", "买家邮箱", "联系方式", "NodeLoc交易号", "卡密数",
+	"下单时间", "支付时间", "交付时间",
+}
+
+// AdminExportOrders streams the filtered order list as a CSV download for
+// bookkeeping and reconciliation. The UTF-8 BOM is not decoration: Excel opens a
+// Chinese header row as mojibake without it.
+func (h *Handler) AdminExportOrders(c *gin.Context) {
+	filter, badQuery := readOrderFilter(c)
+	if badQuery != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": badQuery})
+		return
+	}
+	orders, truncated, err := h.service.ExportOrders(c.Request.Context(), filter.status, filter.search, filter.buyerID, filter.attention)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	// The name carries no request input, so nothing from the query string can
+	// reach a response header.
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", `attachment; filename="orders-`+time.Now().Format("20060102")+`.csv"`)
+	// The page reports these back to the shop owner instead of counting the rows
+	// itself: a product name carrying a newline would be miscounted.
+	c.Header("X-Export-Rows", strconv.Itoa(len(orders)))
+	if truncated {
+		c.Header("X-Export-Truncated", "1")
+	}
+	c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
+	writer := csv.NewWriter(c.Writer)
+	_ = writer.Write(exportOrderColumns)
+	for _, order := range orders {
+		buyerID, username, email := "", "", ""
+		if order.User != nil {
+			buyerID = strconv.FormatUint(uint64(order.User.ID), 10)
+			username = order.User.Username
+			if order.User.Email != nil {
+				email = *order.User.Email
+			}
+		}
+		transactionID := ""
+		if order.TransactionID != nil {
+			transactionID = *order.TransactionID
+		}
+		contact := ""
+		if order.CustomerContact != nil {
+			contact = *order.CustomerContact
+		}
+		_ = writer.Write([]string{
+			safeCell(order.OrderNo),
+			order.Status,
+			order.FulfillmentStatus,
+			safeCell(productName(order)),
+			strconv.Itoa(order.Quantity),
+			yuan(order.UnitPrice),
+			yuan(order.DiscountAmount),
+			yuan(order.TotalAmount),
+			safeCell(order.CouponCode),
+			buyerID,
+			safeCell(username),
+			safeCell(email),
+			safeCell(contact),
+			safeCell(transactionID),
+			strconv.Itoa(len(order.Cards)),
+			order.CreatedAt.Format(time.RFC3339),
+			formatTime(order.PaidAt),
+			formatTime(order.DeliveredAt),
+		})
+	}
+	writer.Flush()
+	if truncated {
+		_, _ = c.Writer.Write([]byte("# 结果已截断，请缩小筛选范围后再导出\n"))
+	}
+}
+
+// safeCell defuses spreadsheet formulas. A buyer types their own contact
+// details, and a cell starting with = + - @ executes when the shop owner opens
+// the export in Excel — a download of orders has to stay data, not code.
+func safeCell(value string) string {
+	if value == "" {
+		return value
+	}
+	switch value[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + value
+	}
+	return value
+}
+
+func productName(order models.Order) string {
+	if order.Product != nil {
+		return order.Product.Name
+	}
+	return ""
+}
+
+func formatTime(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.Format(time.RFC3339)
+}
+
+// yuan renders a fen amount the way a statement reads it.
+func yuan(fen int) string {
+	return strconv.FormatFloat(float64(fen)/100, 'f', 2, 64)
 }
 
 func (h *Handler) AdminGetOrder(c *gin.Context) {

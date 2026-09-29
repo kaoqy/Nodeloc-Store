@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PaginationFooter from '../components/PaginationFooter.vue'
-import { listOrders, reconcilePendingOrders, type ReconcileReport } from '../api/orders'
+import { listOrders, reconcilePendingOrders, exportOrders, type ReconcileReport } from '../api/orders'
 import { errorMessage, fulfillmentStatus, money, orderStatus, providerStatus, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 import type { Order } from '../types'
@@ -84,6 +84,33 @@ function applyFilters() {
   offset.value = 0
   syncUrl()
   load()
+}
+
+const exporting = ref(false)
+/**
+ * 导出的是屏幕上这一批单子：对账、报税、跟 NodeLoc 流水核对都要把整批带走，
+ * 而不是照着列表手抄。所以这里传的是当前筛选条件，不含分页。
+ */
+async function downloadOrders() {
+  if (exporting.value) return
+  exporting.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const { rows, truncated } = await exportOrders({
+      status: statusFilter.value || undefined,
+      q: search.value.trim() || undefined,
+      user_id: buyerId.value || undefined,
+      attention: needAttention.value ? 'undelivered' : undefined,
+    })
+    notice.value = truncated
+      ? `已导出 ${rows} 笔订单，但筛选结果比这更多，文件只装了前面那些 —— 请缩小范围（例如按状态或日期）后再导一次。`
+      : `已导出${filtered.value ? '当前筛选的' : '全部'} ${rows} 笔订单。`
+  } catch (err) {
+    error.value = errorMessage(err, '导出订单失败')
+  } finally {
+    exporting.value = false
+  }
 }
 
 const reconciling = ref(false)
@@ -222,6 +249,16 @@ onMounted(() => {
         >
           <span v-if="reconciling" class="spinner" />
           {{ reconciling ? '正在向 NodeLoc 核实…' : '批量查单对账' }}
+        </button>
+        <!-- 导出只是读，所以跟着这一页本身走：能打开订单页就导得动。 -->
+        <button
+          class="btn btn-quiet btn-sm"
+          :disabled="exporting || loading"
+          :title="filtered ? '按当前筛选导出' : '导出全部订单'"
+          @click="downloadOrders"
+        >
+          <span v-if="exporting" class="spinner" />
+          {{ exporting ? '正在生成…' : filtered ? '导出当前筛选' : '导出订单 CSV' }}
         </button>
         <RouterLink to="/orders?status=pending" class="quiet text-xs">只看待支付 →</RouterLink>
       </div>
