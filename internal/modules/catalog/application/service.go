@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 
@@ -355,6 +356,90 @@ func (s *Service) UpdateCoupon(ctx context.Context, id uint, input *domain.Coupo
 
 func (s *Service) DeleteCoupon(ctx context.Context, id uint) error {
 	return s.coupons.Delete(ctx, id)
+}
+
+// StorefrontCoupon is one promotion on the shop's own shelf: the code, what it
+// takes off, and what a buyer needs to decide whether it is worth using. Nothing
+// about other accounts' usage is in here, and the quota is counted from live
+// orders, so a code that just ran out of uses leaves the shelf rather than
+// failing the buyer at checkout.
+type StorefrontCoupon struct {
+	Code           string     `json:"code"`
+	DiscountType   string     `json:"discount_type"`
+	DiscountValue  int        `json:"discount_value"`
+	MinOrderAmount int        `json:"min_order_amount"`
+	Scope          string     `json:"scope"`
+	ProductID      *uint      `json:"product_id,omitempty"`
+	CategoryID     *uint      `json:"category_id,omitempty"`
+	PerUserLimit   int        `json:"per_user_limit"`
+	Description    string     `json:"description,omitempty"`
+	ValidUntil     *time.Time `json:"valid_until,omitempty"`
+	// Remaining is the number of uses left, absent when the code is unlimited.
+	Remaining *int `json:"remaining,omitempty"`
+}
+
+// StorefrontCoupons lists the advertised promotions that a buyer could actually
+// use right now. The window is judged with the same comparisons couponApplies
+// makes at checkout, so the shelf never shows a code the quote box then refuses.
+func (s *Service) StorefrontCoupons(ctx context.Context) ([]StorefrontCoupon, error) {
+	if !s.features.CouponsOn() {
+		return nil, nil
+	}
+	coupons, err := s.coupons.ListAdvertised(ctx)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	list := make([]StorefrontCoupon, 0, len(coupons))
+	for index := range coupons {
+		coupon := coupons[index]
+		if coupon.ValidFrom != nil && now.Before(*coupon.ValidFrom) {
+			continue
+		}
+		if coupon.ValidUntil != nil && now.After(*coupon.ValidUntil) {
+			continue
+		}
+		entry := StorefrontCoupon{
+			Code:           coupon.Code,
+			DiscountType:   coupon.DiscountType,
+			DiscountValue:  coupon.DiscountValue,
+			MinOrderAmount: coupon.MinOrderAmount,
+			Scope:          coupon.Scope,
+			ProductID:      coupon.ProductID,
+			CategoryID:     coupon.CategoryID,
+			PerUserLimit:   coupon.PerUserLimit,
+			ValidUntil:     coupon.ValidUntil,
+		}
+		if coupon.Description != nil {
+			entry.Description = *coupon.Description
+		}
+		if coupon.MaxUses > 0 {
+			used, err := s.coupons.UsedTotal(ctx, coupon.ID)
+			if err != nil {
+				return nil, err
+			}
+			left := coupon.MaxUses - int(used)
+			if left <= 0 {
+				continue
+			}
+			entry.Remaining = &left
+		}
+		list = append(list, entry)
+	}
+	// A deadline is the part of a promotion a buyer acts on, so the codes about
+	// to end read first and the standing ones sink to the bottom.
+	sort.SliceStable(list, func(i, j int) bool {
+		first, second := list[i].ValidUntil, list[j].ValidUntil
+		switch {
+		case first == nil:
+			return false
+		case second == nil:
+			return true
+		default:
+			return first.Before(*second)
+		}
+	})
+	return list, nil
 }
 
 // CouponQuote is the answer the storefront shows under the 优惠码 field. It

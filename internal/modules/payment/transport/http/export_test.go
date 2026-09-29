@@ -25,12 +25,13 @@ func TestSafeCellDefusesFormulaStarts(t *testing.T) {
 	}
 }
 
-// Orders store money in fen; a statement reads in 元.
-func TestYuanRendersFenAsStatementAmount(t *testing.T) {
-	cases := map[int]string{0: "0.00", 1: "0.01", 999: "9.99", 100: "1.00", 123456789: "1234567.89"}
-	for fen, want := range cases {
-		if got := yuan(fen); got != want {
-			t.Errorf("yuan(%d) = %q, want %q", fen, got, want)
+// The export must write the amount the shop set and the buyer was charged, so
+// the number is rendered with two decimals and never rescaled.
+func TestYuanRendersStatementAmount(t *testing.T) {
+	cases := map[int]string{0: "0.00", 1: "1.00", 99: "99.00", 999: "999.00", 123456789: "123456789.00"}
+	for amount, want := range cases {
+		if got := yuan(amount); got != want {
+			t.Errorf("yuan(%d) = %q, want %q", amount, got, want)
 		}
 	}
 }

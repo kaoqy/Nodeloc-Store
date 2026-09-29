@@ -112,6 +112,24 @@ export interface CouponQuote {
   description?: string
 }
 
+/**
+ * A promotion the shop put on its own shelf: the buyer can read the code and
+ * what it is worth before typing anything. remaining is the live quota left.
+ */
+export interface StorefrontCoupon {
+  code: string
+  discount_type: string
+  discount_value: number
+  min_order_amount: number
+  scope: string
+  product_id?: number | null
+  category_id?: number | null
+  per_user_limit: number
+  description?: string
+  valid_until?: string | null
+  remaining?: number | null
+}
+
 export interface AuthTokens {
   access_token: string
   refresh_token?: string

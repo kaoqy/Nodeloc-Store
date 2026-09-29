@@ -2,14 +2,14 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProductCard from '../components/ProductCard.vue'
-import { couponQuoteMessage, getProduct, listProducts, quoteCoupon } from '../api/products'
+import { couponQuoteMessage, getProduct, listProducts, listStoreCoupons, quoteCoupon } from '../api/products'
 import { createOrder, createPayment } from '../api/payment'
 import { errorMessage, errorStatus } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useSiteStore } from '../stores/site'
 import { setPageTitle } from '../utils/identity'
-import { money } from '../utils/format'
-import type { CouponQuote, Product } from '../types'
+import { money, when } from '../utils/format'
+import type { CouponQuote, Product, StorefrontCoupon } from '../types'
 
 const MaxQuantity = 20
 
@@ -31,6 +31,7 @@ const couponCode = ref('')
 const quote = ref<CouponQuote | null>(null)
 const couponError = ref('')
 const quoting = ref(false)
+const promos = ref<StorefrontCoupon[]>([])
 
 const cardStock = computed(() => {
   const item = product.value
@@ -48,6 +49,45 @@ const gross = computed(() => (product.value?.price ?? 0) * quantity.value)
 /** What NodeLoc is asked to collect: the quoted discount is already off it. */
 const payable = computed(() => (quote.value?.accepted ? quote.value.payable : gross.value))
 const discount = computed(() => (quote.value?.accepted ? quote.value.discount : 0))
+
+/**
+ * The shelf only shows the promotions this item can actually be bought with: a
+ * code written for another product or another category would be refused the
+ * moment the buyer pressed it, and a chip that cannot work is worse than none.
+ */
+const applicablePromos = computed(() => {
+  const item = product.value
+  if (!item) return []
+  return promos.value.filter((promo) => {
+    if (promo.scope === 'product') return Number(promo.product_id) === item.id
+    if (promo.scope === 'category') return Boolean(item.category_id) && Number(promo.category_id) === Number(item.category_id)
+    return true
+  })
+})
+
+function promoWorth(promo: StorefrontCoupon): string {
+  return promo.discount_type === 'percent' ? `立减 ${promo.discount_value}%` : `立减 ${money(promo.discount_value)}`
+}
+
+/** Read the code into the field and price it against this order right away. */
+function usePromo(promo: StorefrontCoupon) {
+  couponCode.value = promo.code
+  void applyQuote()
+}
+
+async function loadPromos() {
+  if (!site.couponsEnabled) {
+    promos.value = []
+    return
+  }
+  try {
+    promos.value = await listStoreCoupons()
+  } catch {
+    // A shelf that failed to load must not take the purchase down with it: the
+    // 优惠码 field still works with a code the buyer already has.
+    promos.value = []
+  }
+}
 
 function step(delta: number) {
   quantity.value = Math.min(limit.value, Math.max(1, quantity.value + delta))
@@ -128,12 +168,16 @@ async function load(slug: string) {
   couponCode.value = ''
   quote.value = null
   couponError.value = ''
+  promos.value = []
   submitting.value = false
   try {
     product.value = await getProduct(slug)
     // The tab says which goods the visitor is reading about, not just which shop.
     setPageTitle(product.value?.name)
-    if (product.value) void loadRelated(product.value)
+    if (product.value) {
+      void loadRelated(product.value)
+      void loadPromos()
+    }
   } catch (e) {
     // An address for goods the shop does not carry is not a fault worth
     // reporting: the empty state below already says the item is gone.
@@ -274,6 +318,34 @@ watch(
             <label class="label" for="note">备注</label>
             <textarea id="note" v-model="note" class="input" maxlength="500" placeholder="选填，例如规格要求"></textarea>
           </div>
+
+          <ul v-if="applicablePromos.length" class="space-y-2">
+            <li v-for="promo in applicablePromos" :key="promo.code" class="card-quiet px-3 py-2.5">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="mono text-sm font-semibold">{{ promo.code }}</p>
+                  <p class="hint mt-1">
+                    {{ promoWorth(promo) }}
+                    <span v-if="promo.min_order_amount"> · 满 {{ money(promo.min_order_amount) }} 可用</span>
+                    <span v-if="promo.description"> · {{ promo.description }}</span>
+                  </p>
+                  <p v-if="promo.min_order_amount > gross" class="mt-1 text-xs text-[var(--warning)]">
+                    这个单还差 {{ money(promo.min_order_amount - gross) }}，多加一件就能用。
+                  </p>
+                  <p class="hint mt-1">
+                    <span v-if="promo.valid_until">有效期至 {{ when(promo.valid_until) }}</span>
+                    <span v-if="promo.remaining !== undefined && promo.remaining !== null">
+                      <span v-if="promo.valid_until"> ·</span> 仅剩 {{ promo.remaining }} 次
+                    </span>
+                    <span v-if="promo.per_user_limit"> · 每人 {{ promo.per_user_limit }} 次</span>
+                  </p>
+                </div>
+                <button class="btn btn-quiet btn-sm shrink-0" type="button" :disabled="quoting" @click="usePromo(promo)">
+                  用这个
+                </button>
+              </div>
+            </li>
+          </ul>
 
           <div v-if="site.couponsEnabled">
             <label class="label" for="coupon">优惠码</label>

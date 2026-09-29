@@ -16,13 +16,6 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
-// Money represents a monetary amount in the smallest currency unit (e.g. cents/fen).
-type Money int64
-
-func (m Money) String() string {
-	return fmt.Sprintf("%.2f", float64(m)/100)
-}
-
 // Slugify converts a string to a URL-friendly slug.
 func Slugify(s string) string {
 	s = strings.TrimSpace(strings.ToLower(s))

@@ -59,6 +59,10 @@ type CategoryRepo interface {
 // CouponRepo defines persistence operations for coupons.
 type CouponRepo interface {
 	List(ctx context.Context) ([]domain.Coupon, error)
+	// ListAdvertised is the storefront's promo shelf: only codes the shop put on
+	// display and left switched on. The validity window and the remaining quota
+	// are judged above the store, because they need the clock and live orders.
+	ListAdvertised(ctx context.Context) ([]domain.Coupon, error)
 	GetByID(ctx context.Context, id uint) (*domain.Coupon, error)
 	GetByCode(ctx context.Context, code string) (*domain.Coupon, error)
 	Create(ctx context.Context, coupon *domain.Coupon) error

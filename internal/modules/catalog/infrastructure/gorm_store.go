@@ -419,6 +419,17 @@ func (r *GormCouponRepo) List(ctx context.Context) ([]domain.Coupon, error) {
 	return coupons, err
 }
 
+// ListAdvertised is the storefront's promo shelf. Only the switched-on codes the
+// shop chose to advertise come back; the window and the quota are judged above.
+func (r *GormCouponRepo) ListAdvertised(ctx context.Context) ([]domain.Coupon, error) {
+	var coupons []domain.Coupon
+	err := r.db.WithContext(ctx).
+		Where("advertised = ? AND is_active = ?", true, true).
+		Order("id DESC").
+		Find(&coupons).Error
+	return coupons, err
+}
+
 func (r *GormCouponRepo) GetByID(ctx context.Context, id uint) (*domain.Coupon, error) {
 	var coupon domain.Coupon
 	if err := r.db.WithContext(ctx).First(&coupon, id).Error; err != nil {

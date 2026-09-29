@@ -1,5 +1,5 @@
 import client, { errorMessage } from './client'
-import type { Category, CouponQuote, Product, StoreStats } from '../types'
+import type { Category, CouponQuote, Product, StorefrontCoupon, StoreStats } from '../types'
 
 /**
  * The storefront lists from the server, not from a copy of the whole catalogue:
@@ -54,6 +54,16 @@ export interface StoreStatsResult {
 export async function storeStats(): Promise<StoreStatsResult> {
   const { data } = await client.get<StoreStatsResult>('/store/stats')
   return data
+}
+
+/**
+ * The shop's own promo shelf: codes the owner chose to advertise and that a
+ * buyer could still use right now. Public and unpaginated on purpose — a code
+ * kept secret stays secret, and a running promotion is not a long list.
+ */
+export async function listStoreCoupons(): Promise<StorefrontCoupon[]> {
+  const { data } = await client.get<{ data?: StorefrontCoupon[] }>('/store/coupons')
+  return data.data ?? []
 }
 
 /**

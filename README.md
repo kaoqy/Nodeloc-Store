@@ -16,11 +16,12 @@
 - 💰 **Nodeloc Payments** — 所有订单统一走 Nodeloc Payments，支持多种回调参数、HMAC-SHA256 验签和幂等履约
 - 🚚 **统一履约** — 卡密自动发货、缺货等待补货、人工交付、交付内容与备注、用户侧履约状态查询
 - 🏷️ **促销与优惠码** — 百分比/固定金额两种码，全场/指定商品/指定分类三种范围，生效窗口、最低消费、总量限用、每人限用；下单前可先试算，折扣直接参与 NodeLoc 收款金额
+- 📣 **促销自己会说话** — 后台每张码多了一个「在前台展示」开关：默认不展示，私下发给某个客户的码不会被顺手公开；勾上之后商品详情页下方自动列出**此刻真的能用**的那些促销（还没到生效时间、已经过期、店家停用的都不会出现，限量码的剩余额度按真实占用算，含还没付款的订单，所以不会被前一个人占穿后还挂着）。每条写出立减多少、满多少可用、每人限用几次、有效期到什么时候、还剩几次，限定商品或分类的只在对应的页面上露面，点「用这个」当场填码试算，看到减免后的应付金额再下单；店家在设置里关掉优惠码功能，前台整块跟着收起。订单页与后台订单详情把「商品小计 → 优惠码减免（带上用的哪个码） → 本单实付」摊开写清，买家和店家看的是同一笔账
 - 👥 **角色权限** — 超级管理员、管理员、运营、客服和普通用户五级角色，后台按 11 项资源 × 查看/管理逐项授权，权限矩阵由服务端目录驱动，每个角色标注当前账号数，越权的按钮不会出现在页面上
 - 🎁 **用户运营** — 每日签到、连续签到奖励、积分流水、站点公告与客服信息；个人中心可以改昵称/简介/联系邮箱、上传自己的头像、从 NodeLoc 同步头像、绑定或换绑 NodeLoc 身份。站内通知在顶栏「个人中心」和头像上带未读角标（数的是整个收件箱而不是当前这一页，超过 99 条写成 `99+`），通知区一键「全部标为已读」会回报实际改了几条，而不是空喊成功
 - 🔔 **订单动态自动通知** — 买家不必守着订单页刷新：卡密到账、人工单等待发货、缺货等待补货、商家已发货、退款回到 NodeLoc 账户，这五种时刻都会自动写进买家的站内通知（顶栏角标跟着亮起来），文案带上订单号和商品名，点开就是那一单的详情页。同一笔订单重复对账、重复发货不会把同一条消息发第二遍；通知写不进去只记服务器日志，绝不会把已经收到的钱显示成支付失败
 - 🗂️ **通知中心分门别类** — 收件箱不再是一条越滚越长的列表：通知区上面一排标签把消息按类别分开（全部、未读、订单、促销、系统，本店真有一条该类消息时才出现该类），每个标签上写着这一类的总数，未读的那些另外标出「· N 未读」。点「未读」只看还没读过的，点某一类只看那一类，两个条件可以叠着一起用；筛完这一页没有消息时不会只甩一句「暂无通知」，而是说明是「这一类没有未读的了」还是「这个类别还没有通知」，并给一个「看全部」把筛选放回去。一屏装十条，底部「加载更多（还有 N 条）」往下续，N 是剩下的确切条数；标完已读后各类标签上的未读数就地减一，不用整页重拉。清空后所有标签的未读标记一起消失，顶栏头像上的角标也一起落下
-- 📦 **订单也能整批带走** — 订单页有「导出订单 CSV」，导出的就是屏幕上那一批：状态、关键词、指定买家、「需处理交付」哪个筛选在生效，下载的文件里就是哪个范围，一笔不多一笔不少（服务端在响应头里报实际行数，前端照实念出「已导出当前筛选的 72 笔订单」，不让人自己数行）。列带单号、状态与交付状态、商品与数量、单价/优惠/实付（按元写两位小数，不是原始的分）、优惠码、买家 ID/用户名/邮箱、联系方式、NodeLoc 交易号、发出卡密的条数、下单/支付/交付时间。文件开头带 UTF-8 BOM，Excel 打开中文列名不会变乱码；超过 20000 笔会截断并在文件末尾写明，绝不把残缺的文件装成完整的。两点安全边界：**不导卡密内容**（那是 `cards:manage` 的活，导订单的人拿不到钥匙，只拿到「这单发了 1 张」），并且买家自己填的联系方式、商品名一类以 `=` `+` `-` `@` 开头的值会先加一层保护再写入 —— 店家把导出的文件用 Excel 打开时，那应该是数据，不是可执行的公式
+- 📦 **订单也能整批带走** — 订单页有「导出订单 CSV」，导出的就是屏幕上那一批：状态、关键词、指定买家、「需处理交付」哪个筛选在生效，下载的文件里就是哪个范围，一笔不多一笔不少（服务端在响应头里报实际行数，前端照实念出「已导出当前筛选的 72 笔订单」，不让人自己数行）。列带单号、状态与交付状态、商品与数量、单价/优惠/实付（就是店家定的、屏幕上显示、向 NodeLoc 申请收款的那个数，写成两位小数，不做任何换算）、优惠码、买家 ID/用户名/邮箱、联系方式、NodeLoc 交易号、发出卡密的条数、下单/支付/交付时间。文件开头带 UTF-8 BOM，Excel 打开中文列名不会变乱码；超过 20000 笔会截断并在文件末尾写明，绝不把残缺的文件装成完整的。两点安全边界：**不导卡密内容**（那是 `cards:manage` 的活，导订单的人拿不到钥匙，只拿到「这单发了 1 张」），并且买家自己填的联系方式、商品名一类以 `=` `+` `-` `@` 开头的值会先加一层保护再写入 —— 店家把导出的文件用 Excel 打开时，那应该是数据，不是可执行的公式
 - 📊 **Admin 后台** — 概览看板（趋势图、订单结构、热销商品、买家排行、库存预警、优惠码成效、卡密健康、买家活跃）、商品/卡密/订单/用户/通知管理、操作审计日志、退款
 - 🔍 **审计日志筛选台** — 日志页可按四种条件组合查：操作类型（输入框联想本店真的出现过的动作名，输 `order` 就把 `order.refund`、`order.deliver` 都带出来）、关键词（在「操作 / 对象 / 详情」三列和「操作者用户名」里找包含关系，`%` 和 `_` 当普通字符处理，不会因为手滑输个星号就命中全部日志，输成员的名字就能翻出 TA 的全部动作）、操作者（填用户 ID，或按「只看系统操作」把对账、重试这类商店自己写下的记录单独捞出来）、日期区间（今天 / 近 7 天 / 近 30 天三个快捷档，也可以手填起止日期，结束那天算在内）。筛选结果同步写进地址栏，`/admin/logs?actor=3&since=2026-09-28` 这种链接可以直接贴进工单；用户详情页有「查看其操作记录 →」一键跳到 TA 名下；详情列被截断的行点一下就就地展开看全文。「操作者」列显示用户名而不是光秃秃的 ID（账号后来注销了也照样从历史里点名），认不出来时退回 `#用户ID`，商店自己写下的记录标「系统」
 - 🧾 **订单列表也能贴链接** — 状态、关键词、指定买家、「需处理交付」与当前页码全部同步进地址栏，`/admin/orders?status=paid&user=7` 或 `/admin/orders?q=SEED-1&page=3` 打开就是那一批单子；地址栏里的页码超出实际页数时不会停在空白页上，而是退回最后一页（一笔都没有就回第 1 页）。「需处理交付」是按交付结果定的筛选，勾上它状态下拉会锁住，两种条件不叠加。列表底部的计数在这一页没行时只写「共 N 条」，不再出现「第 0–20 条 · 共 0 条」这种自相矛盾的话
@@ -360,21 +361,22 @@ sudo openresty -t && sudo openresty -s reload
 | | `GET /auth/checkin/status`、`GET /auth/checkin/history`、`POST /auth/checkin` | 登录 签到状态、日历与当日签到 |
 | | `POST /auth/bind-oauth`、`DELETE /auth/unbind-oauth`、`POST /auth/me/sync-oauth` | 登录 绑定/解绑 NodeLoc，并把手上的授权换成正经身份 |
 | 商店目录 | `GET /store/products`、`GET /store/products/:slug`、`GET /store/categories`、`GET /store/stats`（公开） | — 列表支持 `q`、`sort`（留空按店家排序，另可选 `sales` / `price_asc` / `price_desc` / `newest`，写错直接 `400`）、`category`、`featured`、`in_stock`、`limit`/`offset` |
+| | `GET /store/coupons`（公开） | — 前台促销架：只列店家勾了「在前台展示」、当前真的能用得上的码，返回 `{ "data": [...], "enabled": true/false }`。判据与下单试算完全一致（同一套生效窗口比较，限量额度按非取消订单的真实占用计算，含未付款），所以架子上不会出现试算时被拒的码；还没到生效时间、已过期、店家停用的都不露面，`enabled_coupons` 关掉时直接给空数组。每条带 `code`、`discount_type`、`discount_value`、`min_order_amount`、`scope`、`product_id`、`category_id`、`per_user_limit`、`description`、`valid_until`，以及 `remaining`（不限次时不出现）；按失效时间近的排前面。谁都能读，不需要登录，也不消耗任何额度 |
 | | `POST /store/coupons/quote` | 登录 试算优惠码，返回 `discount` / `payable` / `original_total`；失败见 2.5 |
 | 下单支付 | `POST /payment/orders`、`POST /payment/create`、`GET /payment/orders`、`GET /payment/orders/:order_no`、`POST /payment/orders/:order_no/reconcile` | 登录 下单时可带 `coupon_code`，折扣直接进入 NodeLoc 收款金额 |
 | 后台商品 | `GET /admin/products`、`GET /admin/products/:id` | `products:view` |
-| | `POST` / `PUT` / `DELETE /admin/products[/:id]` | `products:manage` |
+| | `POST` / `PUT` / `DELETE /admin/products[/:id]` | `products:manage` 写请求按整行走：创建时不写 `is_published` / `stock_visible` 仍是「上架 / 显示库存」，但显式写 `false` 就一定落成 `false`（这几列不再有数据库默认值，勾掉的开关不会再被悄悄写回打开）；`PUT` 是整行覆盖，前台表单要把 `is_published`、`stock_visible`、`is_featured`、`require_contact` 一并提交。`auto_deliver` 由商品类型决定，传了也不作数 |
 | | `GET /admin/low-stock` | `products:view` 按后台设置的阈值列出待补货商品 |
-| | `GET` / `POST` / `PUT` / `DELETE /admin/categories[/:id]` | `categories:view` / `categories:manage` |
+| | `GET` / `POST` / `PUT` / `DELETE /admin/categories[/:id]` | `categories:view` / `categories:manage` 创建时不写 `is_visible` 仍是前台可见，写 `false` 就真的隐藏（前台分类列表与筛选都不再出现该分类） |
 | 后台卡密 | `GET /admin/cards` | `cards:view` 跨商品视图，支持 `product_id`、`status`、`q`、分页 |
 | | `GET /admin/cards/export` | `cards:manage` 带 BOM 的 UTF-8 CSV，Excel 直接双击可开 |
 | | `GET /admin/products/:id/cards` | `cards:view` |
 | | `POST /admin/products/:id/cards`、`.../cards/batch-add`、`.../cards/generate` | `cards:manage` 导入会跳过该商品已有的卡 |
 | | `POST .../cards/batch-status`、`.../cards/batch-delete`、`PUT` / `DELETE .../cards/:card_id` | `cards:manage` 批量删除只动未售出的卡，已售出的属于买家订单 |
 | 后台优惠码 | `GET /admin/coupons` | `coupons:view` |
-| | `POST` / `PUT` / `DELETE /admin/coupons[/:id]` | `coupons:manage` |
+| | `POST` / `PUT` / `DELETE /admin/coupons[/:id]` | `coupons:manage` `advertised` 决定这张码是否上前台促销架，创建时不写就是不公开（私下发给某个客户的码不会顺手公开）；`is_active` 不写仍是启用，写 `false` 就真的是停用；`PUT` 是整行覆盖，编辑时要带上 `advertised` 与 `is_active`，漏写等于关掉 |
 | 后台订单 | `GET /admin/orders`、`GET /admin/orders/:order_no` | `orders:view` 列表支持 `status`、`user`、`q`、`attention=undelivered`（该参数取代 `status`）。后台地址栏用同一组键，另加 `page`（第几页，一页 20 笔），页码超出实际页数时自动退回最后一页 |
-| | `GET /admin/orders/export` | `orders:view` 按同一组筛选参数导出 CSV（`status`、`q`、`user_id`、`attention`；不带分页，导的是整个筛选结果）。响应是 `text/csv` 附件、带 UTF-8 BOM，`X-Export-Rows` 报实际行数，超过 20000 笔时带 `X-Export-Truncated: 1` 并在文件末尾写明。金额按元写两位小数，卡密只报发了几张、不含卡密内容；以 `=` `+` `-` `@` 开头的文本会先加保护再写入，防止在表格里被执行。参数非法（`user_id=-3`、未知的 `attention`）返回 400，不会被当成「没筛」 |
+| | `GET /admin/orders/export` | `orders:view` 按同一组筛选参数导出 CSV（`status`、`q`、`user_id`、`attention`；不带分页，导的是整个筛选结果）。响应是 `text/csv` 附件、带 UTF-8 BOM，`X-Export-Rows` 报实际行数，超过 20000 笔时带 `X-Export-Truncated: 1` 并在文件末尾写明。金额写的就是店家定价、屏幕显示、向 NodeLoc 申请收款的那个数（统一两位小数，不做任何换算，与商品页和订单详情对得上），卡密只报发了几张、不含卡密内容；以 `=` `+` `-` `@` 开头的文本会先加保护再写入，防止在表格里被执行。参数非法（`user_id=-3`、未知的 `attention`）返回 400，不会被当成「没筛」 |
 | | `POST /admin/orders/:order_no/cancel`、`/deliver`、`/refund`、`/fulfill`、`/reconcile`、`POST /admin/reconcile/pending` | `orders:manage` |
 | 后台用户 | `GET /admin/users`、`GET /admin/users/:id` | `users:view` |
 | | `POST /admin/users/:id/toggle-active`、`/points` | `users:manage` |

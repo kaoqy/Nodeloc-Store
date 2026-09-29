@@ -274,6 +274,28 @@ async function refreshDelivery() {
           </div>
         </div>
 
+        <!-- A discounted order writes its own book: the price on the shelf, what
+             the code took off, and the amount NodeLoc was asked to collect, so
+             the buyer never has to guess which of the three they are looking at. -->
+        <div v-if="order.discount_amount || order.coupon_code" class="card-quiet mt-5 space-y-1.5 text-sm">
+          <div class="flex items-baseline justify-between text-[var(--text-dim)]">
+            <span>商品小计</span>
+            <span class="nums">{{ money(order.unit_price * order.quantity) }}</span>
+          </div>
+          <div class="flex items-baseline justify-between text-[var(--success)]">
+            <span>
+              优惠码减免
+              <span v-if="order.coupon_code" class="mono text-[var(--text-quiet)]">（{{ order.coupon_code }}）</span>
+            </span>
+            <span class="nums">-{{ money(order.discount_amount || 0) }}</span>
+          </div>
+          <div class="divider" />
+          <div class="flex items-baseline justify-between">
+            <span class="text-[var(--text-dim)]">本单实付</span>
+            <span class="nums font-semibold">{{ money(order.total_amount) }}</span>
+          </div>
+        </div>
+
         <div v-if="payError" class="alert alert-danger mt-5" role="alert">{{ payError }}</div>
         <p v-if="error" class="alert alert-warning mt-5" role="alert">{{ error }}</p>
 

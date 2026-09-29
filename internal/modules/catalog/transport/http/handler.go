@@ -36,6 +36,9 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	store.GET("/products/:slug", h.getPublicProduct)
 	store.GET("/categories", h.listPublicCategories)
 	store.GET("/stats", h.storeStats)
+	// The promo shelf is public on purpose: a shop that advertises a code wants
+	// buyers to find it before they reach checkout.
+	store.GET("/coupons", h.listStoreCoupons)
 
 	// A code is quoted, not guessed: only an account the store already knows
 	// may ask what a coupon would take off, and the answer never reveals
@@ -129,6 +132,22 @@ func (h *Handler) storeStats(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"stats": stats, "coupons_enabled": h.service.CouponsEnabled()})
+}
+
+// listStoreCoupons is the storefront's promo shelf: the codes the shop chose to
+// advertise and a buyer could still use right now. An empty shelf answers with
+// an empty list, because "the shop turned coupons off" and "nothing is running
+// today" look identical from the buyer's side and both render as no chip.
+func (h *Handler) listStoreCoupons(c *gin.Context) {
+	coupons, err := h.service.StorefrontCoupons(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	if coupons == nil {
+		coupons = []application.StorefrontCoupon{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": coupons, "enabled": h.service.CouponsEnabled()})
 }
 
 func (h *Handler) quoteCoupon(c *gin.Context) {
@@ -273,15 +292,17 @@ func (h *Handler) getProduct(c *gin.Context) {
 }
 
 func (h *Handler) createProduct(c *gin.Context) {
-	var product domain.Product
-	if !bindJSON(c, &product) {
+	var input productInput
+	if !bindJSON(c, &input) {
 		return
 	}
-	if err := h.service.CreateProduct(c.Request.Context(), &product); err != nil {
+	input.Product.StockVisible = onUnlessTurnedOff(input.StockVisible)
+	input.Product.IsPublished = onUnlessTurnedOff(input.IsPublished)
+	if err := h.service.CreateProduct(c.Request.Context(), &input.Product); err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": product})
+	c.JSON(http.StatusCreated, gin.H{"data": input.Product})
 }
 
 func (h *Handler) updateProduct(c *gin.Context) {
@@ -596,15 +617,16 @@ func (h *Handler) listCategories(c *gin.Context) {
 }
 
 func (h *Handler) createCategory(c *gin.Context) {
-	var category domain.Category
-	if !bindJSON(c, &category) {
+	var input categoryInput
+	if !bindJSON(c, &input) {
 		return
 	}
-	if err := h.service.CreateCategory(c.Request.Context(), &category); err != nil {
+	input.Category.IsVisible = onUnlessTurnedOff(input.IsVisible)
+	if err := h.service.CreateCategory(c.Request.Context(), &input.Category); err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": category})
+	c.JSON(http.StatusCreated, gin.H{"data": input.Category})
 }
 
 func (h *Handler) updateCategory(c *gin.Context) {
@@ -646,15 +668,18 @@ func (h *Handler) listCoupons(c *gin.Context) {
 }
 
 func (h *Handler) createCoupon(c *gin.Context) {
-	var coupon domain.Coupon
-	if !bindJSON(c, &coupon) {
+	var input couponInput
+	if !bindJSON(c, &input) {
 		return
 	}
-	if err := h.service.CreateCoupon(c.Request.Context(), &coupon); err != nil {
+	// A code the payload says nothing about arrives switched on, which is what
+	// 新建优惠码 has always meant; 前台展示 is the opposite and waits to be asked.
+	input.Coupon.IsActive = onUnlessTurnedOff(input.IsActive)
+	if err := h.service.CreateCoupon(c.Request.Context(), &input.Coupon); err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": coupon})
+	c.JSON(http.StatusCreated, gin.H{"data": input.Coupon})
 }
 
 func (h *Handler) updateCoupon(c *gin.Context) {
@@ -684,6 +709,34 @@ func (h *Handler) deleteCoupon(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// onUnlessTurnedOff reads a create-time switch that used to live in the column
+// default: a payload that never mentioned it means "on", and a payload that said
+// false now actually gets false. The columns no longer carry DEFAULT true, so
+// this is the only place that assumption survives — which is the point, since it
+// stops a turned-off box from being written back as turned on.
+func onUnlessTurnedOff(flag *bool) bool {
+	return flag == nil || *flag
+}
+
+// The create payloads shadow the row's bools with *bools so the handler can tell
+// "absent" from "off". Updates keep the plain row shape: a PUT replaces the row,
+// and both SPAs send it in full.
+type productInput struct {
+	domain.Product
+	StockVisible *bool `json:"stock_visible"`
+	IsPublished  *bool `json:"is_published"`
+}
+
+type categoryInput struct {
+	domain.Category
+	IsVisible *bool `json:"is_visible"`
+}
+
+type couponInput struct {
+	domain.Coupon
+	IsActive *bool `json:"is_active"`
 }
 
 func bindJSON(c *gin.Context, target any) bool {

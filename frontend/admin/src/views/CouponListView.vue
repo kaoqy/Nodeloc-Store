@@ -17,6 +17,7 @@ const coupons = ref<Coupon[]>([])
 const categories = ref<Category[]>([])
 const products = ref<Product[]>([])
 const editing = ref<Partial<Coupon> | null>(null)
+const toggling = ref<number | null>(null)
 
 const SCOPE_LABEL: Record<string, string> = {
   all: '全场可用',
@@ -83,6 +84,7 @@ function startCreate() {
     valid_from: null,
     valid_until: null,
     description: '',
+    advertised: false,
     scope: 'all',
     category_id: null,
     product_id: null,
@@ -131,6 +133,9 @@ async function save() {
       valid_from: item.valid_from || null,
       valid_until: item.valid_until || null,
       description: item.description?.trim() || null,
+      // The server saves the whole row, so a PUT that left this out would switch
+      // an advertised code back to private without anyone touching the box.
+      advertised: item.advertised ?? false,
       scope: item.scope || 'all',
       category_id: item.scope === 'category' ? Number(item.category_id) || null : null,
       product_id: item.scope === 'product' ? Number(item.product_id) || null : null,
@@ -161,6 +166,21 @@ async function remove(coupon: Coupon) {
   }
 }
 
+// Putting a code on the storefront shelf is the one thing worth flipping after a
+// promotion is written: the discount stays the same, only its visibility moves.
+async function toggleAdvertise(coupon: Coupon) {
+  toggling.value = coupon.id
+  error.value = ''
+  try {
+    await updateCoupon(coupon.id, { ...coupon, advertised: !coupon.advertised })
+    await load()
+  } catch (err) {
+    error.value = errorMessage(err, '更新前台展示失败')
+  } finally {
+    toggling.value = null
+  }
+}
+
 function discountLabel(coupon: Coupon): string {
   return coupon.discount_type === 'percent' ? `立减 ${coupon.discount_value}%` : `立减 ${money(coupon.discount_value)}`
 }
@@ -178,6 +198,7 @@ onMounted(load)
     <div class="flex flex-wrap items-center justify-between gap-3">
       <p class="quiet text-sm">
         优惠码在下单时参与计价：买家在商品页输入后，折扣会直接从应付金额里扣掉。
+        勾了「在前台展示」的码还会列在商品页的促销位上，买家点一下就填好，不用记字母。
       </p>
       <button v-if="canManage" class="btn btn-primary btn-sm" @click="startCreate">+ 新建优惠券</button>
     </div>
@@ -196,6 +217,7 @@ onMounted(load)
             <th>最低消费</th>
             <th>使用情况</th>
             <th>有效期</th>
+            <th>展示</th>
             <th>状态</th>
             <th></th>
           </tr>
@@ -203,11 +225,11 @@ onMounted(load)
         <tbody>
           <template v-if="loading">
             <tr v-for="i in 5" :key="`skeleton-${i}`">
-              <td colspan="8"><div class="skeleton h-6" /></td>
+              <td colspan="9"><div class="skeleton h-6" /></td>
             </tr>
           </template>
           <tr v-else-if="!coupons.length">
-            <td colspan="8">
+            <td colspan="9">
               <div class="empty-state">
                 <p class="empty-glyph" aria-hidden="true">◌</p>
                 <p class="empty-title">还没有优惠码</p>
@@ -228,6 +250,21 @@ onMounted(load)
               <p v-if="coupon.per_user_limit" class="quiet text-xs">每人 {{ coupon.per_user_limit }} 次</p>
             </td>
             <td class="text-xs quiet">{{ expiry(coupon) }}</td>
+            <td>
+              <button
+                v-if="canManage"
+                class="badge cursor-pointer transition-opacity hover:opacity-80"
+                :class="coupon.advertised ? 'badge-teal' : 'badge-neutral'"
+                :title="coupon.advertised ? '买家在商品页能看到这个码，点击收起' : '只有拿到码的人知道，点击放到前台'"
+                :disabled="toggling === coupon.id"
+                @click="toggleAdvertise(coupon)"
+              >
+                {{ toggling === coupon.id ? '处理中…' : coupon.advertised ? '前台展示' : '仅私下' }}
+              </button>
+              <span v-else class="badge" :class="coupon.advertised ? 'badge-teal' : 'badge-neutral'">
+                {{ coupon.advertised ? '前台展示' : '仅私下' }}
+              </span>
+            </td>
             <td>
               <span class="badge" :class="coupon.is_active ? 'badge-success' : 'badge-neutral'">
                 {{ coupon.is_active ? '启用' : '停用' }}
@@ -346,6 +383,16 @@ onMounted(load)
             <input v-model="editing.is_active" type="checkbox" class="accent-[var(--accent)]" />
             启用
           </label>
+          <div>
+            <label class="flex items-center gap-2.5 text-sm">
+              <input v-model="editing.advertised" type="checkbox" class="accent-[var(--accent)]" />
+              在前台展示
+            </label>
+            <p class="hint mt-1">
+              勾上后，这个码会出现在商品详情页的促销位上，任何访客都看得到（过期或额度用完会自动收起）。
+              不勾就是私下发的码，只有拿到字的人知道。
+            </p>
+          </div>
         </div>
         <div class="mt-5 flex justify-end gap-2">
           <button class="btn btn-secondary btn-sm" @click="editing = null">取消</button>

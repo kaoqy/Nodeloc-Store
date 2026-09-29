@@ -112,7 +112,10 @@ type Category struct {
 	Description *string `gorm:"type:text" json:"description,omitempty"`
 	Icon        *string `gorm:"size:50" json:"icon,omitempty"`
 	SortOrder   int     `gorm:"default:0;not null" json:"sort_order"`
-	IsVisible   bool    `gorm:"default:true;not null" json:"is_visible"`
+	// IsVisible has no column default, for the same reason as the product flags
+	// below: GORM leaves out a zero value when the column declares a default, so
+	// a hidden category would be written back as visible.
+	IsVisible bool `gorm:"not null" json:"is_visible"`
 
 	Products []Product `gorm:"foreignKey:CategoryID;" json:"-"`
 }
@@ -129,8 +132,12 @@ type Product struct {
 	RequireContact       bool    `gorm:"default:false;not null" json:"require_contact"`
 	Price                int     `gorm:"not null" json:"price"`
 	OriginalPrice        *int    `json:"original_price,omitempty"`
-	StockVisible         bool    `gorm:"default:true;not null" json:"stock_visible"`
-	StockCount           int     `gorm:"default:0;not null" json:"stock_count"`
+	// StockVisible, AutoDeliver and IsPublished carry no column default on purpose.
+	// GORM omits a zero value from the INSERT when the column declares a default,
+	// so "default:true" quietly turns an unchecked box back on: the shop hides the
+	// stock count, or unpublishes a product, and the row says the opposite.
+	StockVisible bool `gorm:"not null" json:"stock_visible"`
+	StockCount   int  `gorm:"default:0;not null" json:"stock_count"`
 	// SoldCount is delivered volume, not order volume: it goes up when goods
 	// actually leave the shop and back down on refund, so the storefront can
 	// show a number a buyer can believe.
@@ -138,8 +145,8 @@ type Product struct {
 	// IsFeatured marks the products the storefront promotes. Publishing is the
 	// buyer-facing gate; featuring is only a placement choice on top of it.
 	IsFeatured  bool       `gorm:"default:false;not null;index" json:"is_featured"`
-	AutoDeliver bool       `gorm:"default:true;not null" json:"auto_deliver"`
-	IsPublished bool       `gorm:"default:true;not null" json:"is_published"`
+	AutoDeliver bool       `gorm:"not null" json:"auto_deliver"`
+	IsPublished bool       `gorm:"not null" json:"is_published"`
 	IsArchived  bool       `gorm:"default:false;not null;index" json:"is_archived"`
 	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
 	SortOrder   int        `gorm:"default:0;not null" json:"sort_order"`
@@ -170,9 +177,10 @@ type Order struct {
 	ProductID uint   `gorm:"not null;index" json:"product_id"`
 	Quantity  int    `gorm:"default:1;not null" json:"quantity"`
 	UnitPrice int    `gorm:"not null" json:"unit_price"`
-	// DiscountAmount is the coupon's cut in fen, taken off before the order goes
-	// to NodeLoc: TotalAmount is what the buyer actually pays, so 查单 amounts
-	// keep matching without anyone recomputing the coupon later.
+	// DiscountAmount is the coupon's cut, taken off before the order goes to
+	// NodeLoc: TotalAmount is what the buyer actually pays, so 查单 amounts keep
+	// matching without anyone recomputing the coupon later. It is counted in the
+	// same unit the storefront prices and charges in, not a rescaled one.
 	DiscountAmount int   `gorm:"default:0;not null" json:"discount_amount"`
 	CouponID       *uint `json:"coupon_id,omitempty"`
 	// CouponCode is the code as the buyer typed it, kept on the order so a
@@ -223,10 +231,17 @@ type Coupon struct {
 	UsedCount      int        `gorm:"default:0;not null" json:"used_count"`
 	ValidFrom      *time.Time `json:"valid_from,omitempty"`
 	ValidUntil     *time.Time `json:"valid_until,omitempty"`
-	IsActive       bool       `gorm:"default:true;not null" json:"is_active"`
+	// IsActive has no column default so that a coupon created in the "off" state
+	// really is off; see the note on the product flags.
+	IsActive bool `gorm:"not null" json:"is_active"`
 
 	// Description is the storefront-facing one-liner ("新人首单立减 5 元").
 	Description *string `gorm:"size:255" json:"description,omitempty"`
+	// Advertised puts the code on the storefront's own promo shelf. It is off by
+	// default: a code the shop means for one customer stays unlisted until the
+	// shop says otherwise, and turning it on is a decision the owner makes while
+	// looking at the whole promotion.
+	Advertised bool `gorm:"default:false;not null" json:"advertised"`
 	// Scope limits what the code can buy. all is the pre-existing behaviour;
 	// category and product narrow it so a promotion cannot be spent on the one
 	// item that was never meant to be discounted.

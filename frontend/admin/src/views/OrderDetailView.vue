@@ -190,6 +190,11 @@ onMounted(load)
         <p class="eyebrow">金额</p>
         <p class="nums mt-2 text-xl font-bold accent-text">{{ money(order.total_amount) }}</p>
         <p class="quiet mt-1 text-xs mono">单价 {{ money(order.unit_price ?? 0) }} × {{ order.quantity }}</p>
+        <!-- The shop needs to see the same three numbers the buyer sees: what the
+             shelf priced, what the code took, what NodeLoc actually collected. -->
+        <p v-if="order.discount_amount" class="mt-1 text-xs text-[var(--success)]">
+          优惠码 {{ order.coupon_code || '—' }} 减 {{ money(order.discount_amount) }}
+        </p>
       </div>
       <div class="card !p-4">
         <p class="eyebrow">买家</p>

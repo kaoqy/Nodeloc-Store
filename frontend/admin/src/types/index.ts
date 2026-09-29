@@ -125,6 +125,7 @@ export interface Coupon {
   valid_from?: string | null
   valid_until?: string | null
   description?: string | null
+  advertised?: boolean
   scope?: string
   category_id?: number | null
   product_id?: number | null

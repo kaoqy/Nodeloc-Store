@@ -483,8 +483,9 @@ func readOrderFilter(c *gin.Context) (orderFilter, string) {
 }
 
 // exportOrderColumns name the CSV header. The amounts are labelled in 元 because
-// orders store fen: a shop owner reconciling against their NodeLoc statement
-// would otherwise read ¥1.00 as ¥100.
+// that is the unit the shop prices, displays and charges in: an order for a ¥99
+// product reads 99.00 here, on the storefront, and in what NodeLoc was asked to
+// collect. A download that rescaled them would not reconcile with anything.
 var exportOrderColumns = []string{
 	"订单号", "状态", "交付状态", "商品", "数量", "单价(元)", "优惠(元)", "实付(元)", "优惠码",
 	"买家ID", "买家用户名", "买家邮箱", "联系方式", "NodeLoc交易号", "卡密数",
@@ -590,9 +591,10 @@ func formatTime(value *time.Time) string {
 	return value.Format(time.RFC3339)
 }
 
-// yuan renders a fen amount the way a statement reads it.
-func yuan(fen int) string {
-	return strconv.FormatFloat(float64(fen)/100, 'f', 2, 64)
+// yuan renders an order amount the way a statement reads it: the shop's own
+// number, two decimals, no rescaling.
+func yuan(amount int) string {
+	return strconv.FormatFloat(float64(amount), 'f', 2, 64)
 }
 
 func (h *Handler) AdminGetOrder(c *gin.Context) {
