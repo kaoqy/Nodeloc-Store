@@ -15,6 +15,7 @@
 - 🎫 **卡密系统** — 批量导入（每行一个，自动跳过重复）、内置生成器、按商品与状态筛选、关键字搜索、批量启用/停用、批量删除、CSV 导出，库存自动同步
 - 💰 **Nodeloc Payments** — 所有订单统一走 Nodeloc Payments，支持多种回调参数、HMAC-SHA256 验签和幂等履约
 - 🚚 **统一履约** — 卡密自动发货、缺货等待补货、人工交付、交付内容与备注、用户侧履约状态查询
+- 📦 **补货即发货** — 店家导入、生成或重新启用卡密的那一刻，这件商品「已付款、正在等补货」的订单就按付款先后当场放出交付（一次调用最多放 100 笔），不用再干等 3 分钟一轮的后台清扫。接口回一个 `released` 数字，卡密页的成功提示直接念出「已自动发出 N 笔等待中的订单」，低库存面板与概览的库存预警也各带上「N 笔已付款在等」并按欠单多少排序——先补收了钱的那一格，而不是先补看起来最空的。只有真的上了货架的可用卡才算补货：单张新增即停用、批量停用都不谎报发货；别的商品的队列、未付款的订单都不受影响，已经交付过的订单不会被重复发卡。放队失败只写服务器日志，导入本身照样算成功（卡已经在架子上），后台清扫仍是兜底
 - 🏷️ **促销与优惠码** — 百分比/固定金额两种码，全场/指定商品/指定分类三种范围，生效窗口、最低消费、总量限用、每人限用；下单前可先试算，折扣直接参与 NodeLoc 收款金额
 - 📣 **促销自己会说话** — 后台每张码多了一个「在前台展示」开关：默认不展示，私下发给某个客户的码不会被顺手公开；勾上之后商品详情页下方自动列出**此刻真的能用**的那些促销（还没到生效时间、已经过期、店家停用的都不会出现，限量码的剩余额度按真实占用算，含还没付款的订单，所以不会被前一个人占穿后还挂着）。每条写出立减多少、满多少可用、每人限用几次、有效期到什么时候、还剩几次，限定商品或分类的只在对应的页面上露面，点「用这个」当场填码试算，看到减免后的应付金额再下单；店家在设置里关掉优惠码功能，前台整块跟着收起。订单页与后台订单详情把「商品小计 → 优惠码减免（带上用的哪个码） → 本单实付」摊开写清，买家和店家看的是同一笔账
 - 👥 **角色权限** — 超级管理员、管理员、运营、客服和普通用户五级角色，后台按 11 项资源 × 查看/管理逐项授权，权限矩阵由服务端目录驱动，每个角色标注当前账号数，越权的按钮不会出现在页面上
@@ -179,7 +180,7 @@ sudo mysql -e "
 **两条后台自愈循环**（`maintenanceLoop`，启动 20 秒后跑第一轮，之后每 3 分钟一次）：
 
 1. **自动查单**：挑出「已拿到 NodeLoc 交易号、却仍显示待支付、且已放置超过 10 分钟」的订单（每轮 10 笔）向 NodeLoc 查询，已付则当场入账。买家关掉付款页不再回来，钱也不会卡在待支付。10 分钟的门槛是为了不抢正在轮询的付款页。
-2. **交付重试**：挑出 `paid` / `completed` 但履约状态仍是 `pending` / `waiting_stock`、且付款已超过 1 分钟的订单（每轮 50 笔）重新发货。导入补货卡密后，之前卡在「等待补货」的订单会自动交付；已绑给本单的卡密会被直接复用，不会重复占库存。
+2. **交付重试**：挑出 `paid` / `completed` 但履约状态仍是 `pending` / `waiting_stock`、且付款已超过 1 分钟的订单（每轮 50 笔）重新发货。已绑给本单的卡密会被直接复用，不会重复占库存。**补货不再需要等这一轮**：导入、生成或重新启用卡密成功后，商店立刻按商品把它的等待队列放出来（`POST /admin/products/:id/cards`、`.../cards/batch-add`、`.../cards/generate`、`.../cards/batch-status` 的响应里 `released` 就是当场交付的笔数），清扫只是万一没放成时的兜底。
 
 因此后台的「需处理交付」队列（`?attention=undelivered`）只应包含自动重试搞不定、需要人来做的部分：人工发货、以及 NodeLoc 尚未确认到账的单子。
 
@@ -366,13 +367,13 @@ sudo openresty -t && sudo openresty -s reload
 | 下单支付 | `POST /payment/orders`、`POST /payment/create`、`GET /payment/orders`、`GET /payment/orders/:order_no`、`POST /payment/orders/:order_no/reconcile` | 登录 下单时可带 `coupon_code`，折扣直接进入 NodeLoc 收款金额 |
 | 后台商品 | `GET /admin/products`、`GET /admin/products/:id` | `products:view` |
 | | `POST` / `PUT` / `DELETE /admin/products[/:id]` | `products:manage` 写请求按整行走：创建时不写 `is_published` / `stock_visible` 仍是「上架 / 显示库存」，但显式写 `false` 就一定落成 `false`（这几列不再有数据库默认值，勾掉的开关不会再被悄悄写回打开）；`PUT` 是整行覆盖，前台表单要把 `is_published`、`stock_visible`、`is_featured`、`require_contact` 一并提交。`auto_deliver` 由商品类型决定，传了也不作数 |
-| | `GET /admin/low-stock` | `products:view` 按后台设置的阈值列出待补货商品 |
+| | `GET /admin/low-stock` | `products:view` 按后台设置的阈值列出待补货商品，每行带 `waiting_orders`：已付款、正在等这件商品卡密的订单笔数。队列先排欠单最多的（欠单相同再按货架最空），补货从收过钱的那一格开始 |
 | | `GET` / `POST` / `PUT` / `DELETE /admin/categories[/:id]` | `categories:view` / `categories:manage` 创建时不写 `is_visible` 仍是前台可见，写 `false` 就真的隐藏（前台分类列表与筛选都不再出现该分类） |
 | 后台卡密 | `GET /admin/cards` | `cards:view` 跨商品视图，支持 `product_id`、`status`、`q`、分页 |
 | | `GET /admin/cards/export` | `cards:manage` 带 BOM 的 UTF-8 CSV，Excel 直接双击可开 |
 | | `GET /admin/products/:id/cards` | `cards:view` |
-| | `POST /admin/products/:id/cards`、`.../cards/batch-add`、`.../cards/generate` | `cards:manage` 导入会跳过该商品已有的卡 |
-| | `POST .../cards/batch-status`、`.../cards/batch-delete`、`PUT` / `DELETE .../cards/:card_id` | `cards:manage` 批量删除只动未售出的卡，已售出的属于买家订单 |
+| | `POST /admin/products/:id/cards`、`.../cards/batch-add`、`.../cards/generate` | `cards:manage` 导入会跳过该商品已有的卡。三个写入口都回 `released`：这次上货当场交付了几笔原本卡在「等待补货」的订单（新单张若一创建就停用则算 0，因为那不是补货） |
+| | `POST .../cards/batch-status`、`.../cards/batch-delete`、`PUT` / `DELETE .../cards/:card_id` | `cards:manage` 批量删除只动未售出的卡，已售出的属于买家订单；`batch-status` 回 `{ "updated": 改了几张, "released": 当场发出几笔 }`，只有把卡放回货架（`available`）才会有 `released`，停用它是从架上取下 |
 | 后台优惠码 | `GET /admin/coupons` | `coupons:view` |
 | | `POST` / `PUT` / `DELETE /admin/coupons[/:id]` | `coupons:manage` `advertised` 决定这张码是否上前台促销架，创建时不写就是不公开（私下发给某个客户的码不会顺手公开）；`is_active` 不写仍是启用，写 `false` 就真的是停用；`PUT` 是整行覆盖，编辑时要带上 `advertised` 与 `is_active`，漏写等于关掉 |
 | 后台订单 | `GET /admin/orders`、`GET /admin/orders/:order_no` | `orders:view` 列表支持 `status`、`user`、`q`、`attention=undelivered`（该参数取代 `status`）。后台地址栏用同一组键，另加 `page`（第几页，一页 20 笔），页码超出实际页数时自动退回最后一页 |
@@ -383,7 +384,7 @@ sudo openresty -t && sudo openresty -s reload
 | | `POST /admin/users/:id/role`、`/toggle-admin` | `roles:manage` 改角色就是改权限，所以归到角色授权；且只有超级管理员能动后台账号 |
 | 通知 | `GET /notifications`、`POST /notifications/:id/read`、`GET /notifications/unread`、`POST /notifications/read-all` | 登录 只返回自己的通知；`unread` 数的是整个收件箱而不是当前页，`read-all` 一次清空并回报改动了多少条（再点一次回报 0，不谎报）。同一条重复标已读返回 200，不会因为「值没变」被判成找不到。订单的付款、发货、退款节点由商店自己写入买家收件箱（`type=order`、`link=/orders/单号`），买家只收到自己订单的消息。`?type=promo`、`?unread=1` 可各自单用或叠用，`total` 跟着筛选走（筛出来多少就报多少），`kinds` 却始终数整个收件箱（每个类型的总数与未读数，按类型名排序），所以切到某一类也不会把「促销还有 3 条」读成「促销只剩 2 条」。`page_size` 上限 100、`page` 下限 1，响应里的 `page`/`page_size` 报的是实际生效值而不是请求原样——要让人翻页的接口不能把自己没用的参数回给人看。排序是 `created_at DESC, id DESC`，同一秒落地的多条消息也不会因为时间戳打平而在两页里重复出现或凭空消失 |
 | | `POST /notifications`、`POST /admin/notifications/broadcast` | `notifications:manage` 定向发送 / 全量广播 |
-| 看板与设置 | `GET /admin/stats` | `stats:view` 概览全部面板（含上期对比、优惠码成效、卡密健康）都走这一个接口 |
+| 看板与设置 | `GET /admin/stats` | `stats:view` 概览全部面板（含上期对比、优惠码成效、卡密健康）都走这一个接口。`stock_alerts[]` 每行带 `waiting`（已付款、在等这件商品卡密的订单笔数），面板先排 `waiting` 重的、再排货架空的 |
 | | `GET /admin/settings` | `settings:view` 密钥以 `********` 回显，原样提交即保留原值 |
 | | `PUT` / `POST /admin/settings`、`POST /admin/settings/oauth-test`、`/payment-test` | `settings:manage` |
 | 图片素材 | `POST /admin/uploads/products`、`POST /admin/uploads/site` | `products:manage` / `settings:manage` 表单字段名 `image`。类型看文件头而不是扩展名，只收 png / jpg / gif（SVG 会被拒——那是一段有时会画图的脚本）；单张 2 MB、边长 8192 px 以内，超了分别 `413` / `400`。文件名由服务端生成，返回 `{url,width,height,size}`，`url` 就是「封面图」或「Logo 地址」该填的内容 |
@@ -480,7 +481,7 @@ Nodeloc-Store/
 | OAuth 登录未完成 | 登录页会把原因写清楚：**授权被拒绝**（用户在 NodeLoc 点了拒绝）/ **链接已过期**（回调没带上本浏览器的 `state`，常见于复制链接、隔了很久再打开、或 Cookie 被拦）/ **授权校验失败**（换 token 或取 userinfo 出错，多半是 Client Secret、回调地址或 Scope 不对）/ **服务商异常**（NodeLoc 本身报错）。前两类重试即可；最后一类核对后台设置 |
 | 邮件没拿到 | NodeLoc OAuth `email` scope 需审核通过；未通过时 token 只有 `openid` |
 | 前台确认支付结果不通过 | 页面会给出具体原因码（见 2.4）：`unsettled` / `provider_unreachable` 属可重试，稍后再查即可；`no_transaction` 表示这单根本没到 NodeLoc，要点「继续支付」重新发起；`amount_mismatch` / `foreign_transaction` 会停止自动入账，只能店家核对。后台日志里同一笔会带上 NodeLoc 的原文 |
-| 卡密一直没发货 | 先看后台订单列表的「需处理交付」队列：`waiting_stock` 会在补货后由 3 分钟一轮的自动重试释放，`manual_pending` 需要店家点「标记已发货」；再查 Admin → 日志 的 `payment.stock_warning`，确认有可用卡密 |
+| 卡密一直没发货 | 补货的接口会当场放出这一单的卡密并在响应里回 `released`，后台提示也写成「已自动发出 N 笔等待中的订单」，所以正常情况下不必等清扫。先看订单列表的「需处理交付」队列：`manual_pending` 需要店家点「标记已发货」；`waiting_stock` 说明补进去的货不够这一单（或那几张卡被停用了），核对 Admin → 卡密 里该商品的可用数与「N 笔已付款在等」，再查 Admin → 日志 的 `payment.stock_warning`。3 分钟一轮的清扫仍然兜底，放队失败的原因写在服务器日志里 |
 | 升级后概览或角色页 403 | 不用手工补：容器启动时会把授权目录升到当前版本（旧的 `dashboard:view` 自动迁成 `stats:view`，并补齐各角色缺失的那几项），已在**后台 → 角色**里主动关掉的权利不会被重新打开 |
 | 某个后台账号看不见某个页面 | 后台所有按钮都以 `GET /auth/me/permissions` 为准。让超级管理员到 **角色** 里给该角色勾上对应资源，或直接看 403 响应里的 `permission` 字段缺哪一项 |
 | 老店没有超级管理员，加不了第二个管理员 | 早期向导把首个账号建成「管理员」，而授予管理员只属于超级管理员。现在的构建启动时会检查：库里没有任何超级管理员时，把**最早那个启用的管理员**升为超级管理员（日志 `[authz] no super_admin in store; promoted user …`）。已经有一个超级管理员后这个检查不会再动任何角色，主动降级不会被偷偷改回来 |

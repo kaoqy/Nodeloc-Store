@@ -43,14 +43,17 @@ const generatePrefix = ref('')
 const generating = ref(false)
 const selected = ref<number[]>([])
 const exporting = ref(false)
-// Products about to run dry, so the picker can flag the one the operator is
-// about to pour new codes into. /admin/low-stock is priced on products:view,
-// which a cards-only role does not hold, so it is only asked for when readable.
-const lowStock = ref<Set<number>>(new Set())
+// Products about to run dry, and how many buyers have already paid for each of
+// them and are waiting. /admin/low-stock is priced on products:view, which a
+// cards-only role does not hold, so it is only asked for when readable.
+const waitingByProduct = ref<Map<number, number>>(new Map())
 
 const productId = computed(() => Number(route.params.id || 0))
 const product = computed(() => products.value.find((item) => item.id === productId.value) || null)
 const cardProducts = computed(() => products.value.filter((item) => item.product_type === 'card'))
+// Paid orders waiting on this very shelf, so the operator can see before importing
+// that the restock is owed to somebody.
+const waitingHere = computed(() => waitingByProduct.value.get(productId.value) ?? 0)
 const canManage = computed(() => auth.allows('cards', 'manage'))
 
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
@@ -85,9 +88,9 @@ async function loadLowStock() {
   if (!auth.allows('products', 'view')) return
   try {
     const { data } = await listLowStock()
-    lowStock.value = new Set(data.map((item) => item.id))
+    waitingByProduct.value = new Map(data.map((item) => [item.id, item.waiting_orders]))
   } catch {
-    lowStock.value = new Set()
+    waitingByProduct.value = new Map()
   }
 }
 
@@ -142,6 +145,19 @@ function toggleAll() {
   selected.value = selectionState.value === 'all' ? [] : visible
 }
 
+// A restock that let paid orders go out is the part the operator cares about, so
+// the toast says it instead of only counting keys.
+function releasedNote(released?: number) {
+  return released ? `，已自动发出 ${released} 笔等待中的订单` : ''
+}
+
+// The picker says what the shelf owes: buyers waiting beats a plain 需补货.
+function pickerNote(id: number) {
+  const waiting = waitingByProduct.value.get(id)
+  if (waiting) return ` · ${waiting} 笔在等`
+  return waitingByProduct.value.has(id) ? ' · 需补货' : ''
+}
+
 async function submitImport() {
   const lines = importText.value
     .split('\n')
@@ -154,7 +170,7 @@ async function submitImport() {
     const result = await batchAddCards(productId.value, lines)
     const created = result.created?.length ?? 0
     const skipped = result.skipped ?? 0
-    notice.value = `已导入 ${created} 条卡密${skipped ? `，跳过重复 ${skipped} 条` : ''}`
+    notice.value = `已导入 ${created} 条卡密${skipped ? `，跳过重复 ${skipped} 条` : ''}${releasedNote(result.released)}`
     importText.value = ''
     showImport.value = false
     await reload()
@@ -171,7 +187,7 @@ async function submitGenerate() {
   error.value = ''
   try {
     const result = await generateCards(productId.value, Number(generateCount.value) || 0, generatePrefix.value.trim())
-    notice.value = `已生成 ${result.created?.length ?? 0} 条卡密${result.skipped ? `，${result.skipped} 条因重复被跳过` : ''}`
+    notice.value = `已生成 ${result.created?.length ?? 0} 条卡密${result.skipped ? `，${result.skipped} 条因重复被跳过` : ''}${releasedNote(result.released)}`
     showGenerate.value = false
     await reload()
   } catch (err) {
@@ -230,7 +246,7 @@ async function batchStatus(status: string) {
   error.value = ''
   try {
     const result = await setCardStatusBatch(productId.value, selected.value, status)
-    notice.value = `已${label} ${result.updated ?? 0} 张卡密`
+    notice.value = `已${label} ${result.updated ?? 0} 张卡密${status === 'available' ? releasedNote(result.released) : ''}`
     selected.value = []
     await reload()
   } catch (err) {
@@ -287,6 +303,7 @@ onMounted(async () => {
             <span v-if="product" class="quiet text-sm font-normal">· 卡密库存</span>
           </h2>
           <span v-if="product" class="badge badge-accent mono">库存 {{ product.stock_count }}</span>
+          <span v-if="waitingHere" class="badge badge-warning">{{ waitingHere }} 笔已付款在等</span>
         </div>
       </div>
 
@@ -295,7 +312,7 @@ onMounted(async () => {
         <select id="card-product" class="input w-52 !py-1.5 text-sm" :value="productId" @change="chooseProduct">
           <option :value="0">全部商品</option>
           <option v-for="item in cardProducts" :key="item.id" :value="item.id">
-            {{ item.name }}（可用 {{ item.stock_count }}{{ lowStock.has(item.id) ? ' · 需补货' : '' }}）
+            {{ item.name }}（可用 {{ item.stock_count }}{{ pickerNote(item.id) }}）
           </option>
         </select>
         <template v-if="canManage">

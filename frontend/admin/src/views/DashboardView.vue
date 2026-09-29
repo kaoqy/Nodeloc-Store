@@ -550,7 +550,10 @@ onUnmounted(() => {
             >
               <span class="min-w-0">
                 <span class="block truncate text-[13px]">{{ item.name || `#${item.product_id}` }}</span>
-                <span class="hint nums block">已售 {{ item.sold }} 张 · 阈值 {{ alertThreshold }}</span>
+                <span class="hint nums block">
+                  已售 {{ item.sold }} 张 · 阈值 {{ alertThreshold }}
+                  <span v-if="item.waiting" class="text-[var(--warning)]"> · {{ item.waiting }} 笔已付款在等</span>
+                </span>
               </span>
               <span class="badge shrink-0" :class="item.available ? 'badge-warning' : 'badge-danger'">
                 余 {{ item.available }}
@@ -562,7 +565,10 @@ onUnmounted(() => {
             >
               <span class="min-w-0">
                 <span class="block truncate text-[13px]">{{ item.name || `#${item.product_id}` }}</span>
-                <span class="hint nums block">已售 {{ item.sold }} 张</span>
+                <span class="hint nums block">
+                  已售 {{ item.sold }} 张
+                  <span v-if="item.waiting" class="text-[var(--warning)]"> · {{ item.waiting }} 笔已付款在等</span>
+                </span>
               </span>
               <span class="badge shrink-0" :class="item.available ? 'badge-warning' : 'badge-danger'">
                 余 {{ item.available }}

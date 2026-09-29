@@ -39,6 +39,9 @@ type StockAlert struct {
 	Slug      string `json:"slug"`
 	Available int64  `json:"available"`
 	Sold      int64  `json:"sold"`
+	// Waiting counts the buyers who already paid for this product and have no
+	// key to receive yet — the reason to restock it now rather than eventually.
+	Waiting int64 `json:"waiting"`
 }
 
 // FunnelCount is one stage of the order pipeline.
@@ -422,22 +425,39 @@ func statStockAlerts(ctx context.Context, db *gorm.DB, stats *DashboardStats, _ 
 		Slug      string
 		Available int64
 		Sold      int64
+		Waiting   int64
 	}
 	var rows []row
+	// The panel has room for six products, so the ones that owe real paid buyers
+	// have to come first: an empty shelf nobody bought from is a housekeeping
+	// note, an empty shelf with money behind it is a queue. The waiting count is
+	// one row per product, so MAX() carries it through the card join unchanged.
 	err := db.WithContext(ctx).Table("products").
 		Select(`products.id AS product_id, products.name AS name, products.slug AS slug,
 			COALESCE(SUM(CASE WHEN cards.status = 'available' THEN 1 ELSE 0 END), 0) AS available,
-			COALESCE(SUM(CASE WHEN cards.status = 'sold' THEN 1 ELSE 0 END), 0) AS sold`).
+			COALESCE(SUM(CASE WHEN cards.status = 'sold' THEN 1 ELSE 0 END), 0) AS sold,
+			COALESCE(MAX(waiting_orders.waiting), 0) AS waiting`).
 		Joins("LEFT JOIN cards ON cards.product_id = products.id AND cards.deleted_at IS NULL").
+		Joins(`LEFT JOIN (SELECT product_id, COUNT(*) AS waiting FROM orders
+			WHERE deleted_at IS NULL AND status IN ('paid', 'completed')
+			AND fulfillment_status IN ('pending', 'waiting_stock') GROUP BY product_id) AS waiting_orders
+			ON waiting_orders.product_id = products.id`).
 		Where("products.deleted_at IS NULL AND products.is_archived = ? AND products.product_type = ?", false, "card").
 		Group("products.id, products.name, products.slug").
 		Having("available <= ?", stats.StockAlertThreshold).
-		Order("available ASC").Limit(6).Scan(&rows).Error
+		Order("waiting DESC, available ASC").Limit(6).Scan(&rows).Error
 	if err != nil {
 		return err
 	}
 	for _, item := range rows {
-		stats.StockAlerts = append(stats.StockAlerts, StockAlert(item))
+		stats.StockAlerts = append(stats.StockAlerts, StockAlert{
+			ProductID: item.ProductID,
+			Name:      item.Name,
+			Slug:      item.Slug,
+			Available: item.Available,
+			Sold:      item.Sold,
+			Waiting:   item.Waiting,
+		})
 	}
 	return nil
 }

@@ -235,6 +235,54 @@ func (s *GormStore) ListUndeliveredPaidOrders(ctx context.Context, limit int) ([
 	return orders, err
 }
 
+// ListUndeliveredPaidOrdersForProduct is one product's waiting queue: the orders
+// that paid for keys this shelf did not have when the payment landed. Unlike the
+// background sweep it puts no age floor on the order — the buyer already waited
+// for the restock, and Fulfill locks the row and refuses anything unpaid, so a
+// payment still settling cannot be delivered twice by these two paths.
+func (s *GormStore) ListUndeliveredPaidOrdersForProduct(ctx context.Context, productID uint, limit int) ([]models.Order, error) {
+	if productID == 0 {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	orders := make([]models.Order, 0, limit)
+	err := s.db.WithContext(ctx).Model(&models.Order{}).
+		Where("product_id = ? AND status IN ? AND fulfillment_status IN ?",
+			productID, []string{"paid", "completed"}, []string{"pending", "waiting_stock"}).
+		Preload("Product").
+		Order("paid_at ASC, id ASC").
+		Limit(limit).
+		Find(&orders).Error
+	return orders, err
+}
+
+// CountUndeliveredPaidOrdersByProduct answers "and how many are already waiting
+// for this product" in one query, for the restocking queue.
+func (s *GormStore) CountUndeliveredPaidOrdersByProduct(ctx context.Context) (map[uint]int64, error) {
+	var rows []struct {
+		ProductID uint
+		Waiting   int64
+	}
+	err := s.db.WithContext(ctx).Model(&models.Order{}).
+		Select("product_id, COUNT(*) AS waiting").
+		Where("status IN ? AND fulfillment_status IN ?",
+			[]string{"paid", "completed"}, []string{"pending", "waiting_stock"}).
+		Group("product_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[uint]int64, len(rows))
+	for _, row := range rows {
+		if row.ProductID != 0 {
+			counts[row.ProductID] = row.Waiting
+		}
+	}
+	return counts, nil
+}
+
 // ListReconcilableOrders returns orders the store still calls 待支付 but which do
 // carry a NodeLoc transaction id — the set a lost browser redirect can strand,
 // and the one 批量查单 can settle.

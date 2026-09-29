@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"sort"
 	"strings"
@@ -28,6 +29,56 @@ type Service struct {
 	coupons    contract.CouponRepo
 	features   config.FeaturesConfig
 	now        func() time.Time
+	// wake belongs to the money side: it delivers the orders that paid for a
+	// product whose stock has just grown. Nil until the container has wired both
+	// modules, and a catalogue without it still stocks shelves — those orders go
+	// out on the next background sweep instead of on the spot.
+	wake deliveryWake
+}
+
+// deliveryWake is the payment module's answer to "keys just landed on this
+// shelf". The interface is declared here rather than imported because the
+// architecture rules let a module reach another only through a contract, and
+// this need belongs to the restock button, not to payment.
+type deliveryWake interface {
+	ReleaseProductBacklog(ctx context.Context, productID uint) (int, error)
+	WaitingOrdersByProduct(ctx context.Context) (map[uint]int64, error)
+}
+
+// SetDeliveryWake attaches the payment module so a restock can hand over the
+// orders that were waiting for the keys it just added. The container calls it
+// after wiring payment, which itself is wired against this catalogue for 优惠码
+// pricing.
+func (s *Service) SetDeliveryWake(wake deliveryWake) { s.wake = wake }
+
+// releaseBacklog is the last act of a restock, and returns how many waiting
+// orders actually left. A wake that fails must not turn a finished import into
+// an error: the keys are in stock, the buyer's order is intact, and the sweep
+// delivers it minutes later.
+func (s *Service) releaseBacklog(ctx context.Context, productID uint) int {
+	if s.wake == nil {
+		return 0
+	}
+	released, err := s.wake.ReleaseProductBacklog(ctx, productID)
+	if err != nil {
+		log.Printf("catalog: restock product %d: waiting orders could not be delivered yet: %v", productID, err)
+		return 0
+	}
+	return released
+}
+
+// waitingOrders is the restocking queue's "已付款在等" column, and is empty when
+// the catalogue is wired without the payment side.
+func (s *Service) waitingOrders(ctx context.Context) map[uint]int64 {
+	if s.wake == nil {
+		return map[uint]int64{}
+	}
+	counts, err := s.wake.WaitingOrdersByProduct(ctx)
+	if err != nil {
+		log.Printf("catalog: waiting order counts: %v", err)
+		return map[uint]int64{}
+	}
+	return counts
 }
 
 func NewService(products contract.ProductRepo, cards contract.CardRepo, categories contract.CategoryRepo, coupons contract.CouponRepo, features config.FeaturesConfig) *Service {
@@ -96,9 +147,28 @@ func (s *Service) StoreStats(ctx context.Context) (domain.StoreStats, error) {
 	return s.products.Stats(ctx, true)
 }
 
+// LowStockProduct is one row of the restocking queue: the product the shop must
+// refill and how many buyers have already paid for it and are waiting.
+type LowStockProduct struct {
+	domain.Product
+	WaitingOrders int64 `json:"waiting_orders"`
+}
+
 // LowStockProducts is the restocking queue at the shop's own threshold.
-func (s *Service) LowStockProducts(ctx context.Context) ([]domain.Product, error) {
-	return s.products.ListLowStock(ctx, s.features.AlertThreshold())
+func (s *Service) LowStockProducts(ctx context.Context) ([]LowStockProduct, error) {
+	products, err := s.products.ListLowStock(ctx, s.features.AlertThreshold())
+	if err != nil {
+		return nil, err
+	}
+	waiting := s.waitingOrders(ctx)
+	rows := make([]LowStockProduct, 0, len(products))
+	for _, product := range products {
+		rows = append(rows, LowStockProduct{Product: product, WaitingOrders: waiting[product.ID]})
+	}
+	// The queue is already ordered by how empty the shelf is; buyers who paid move
+	// it to the front, so restocking starts where money is waiting.
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].WaitingOrders > rows[j].WaitingOrders })
+	return rows, nil
 }
 
 func (s *Service) GetPublicProduct(ctx context.Context, slug string) (*domain.Product, error) {
@@ -163,28 +233,36 @@ func (s *Service) ListCards(ctx context.Context, productID uint) ([]domain.Card,
 	return s.cards.ListByProduct(ctx, productID)
 }
 
-func (s *Service) AddCard(ctx context.Context, productID uint, card *domain.Card) error {
+// AddCard stocks one key and returns how many of the orders that were waiting
+// for this product the restock delivered.
+func (s *Service) AddCard(ctx context.Context, productID uint, card *domain.Card) (int, error) {
 	if card == nil {
-		return errors.New("card is required")
+		return 0, errors.New("card is required")
 	}
 	if err := s.ensureCardProduct(ctx, productID); err != nil {
-		return err
+		return 0, err
 	}
 	card.ProductID = productID
 	card.Content = strings.TrimSpace(card.Content)
 	if card.Content == "" {
-		return fmt.Errorf("%w: 卡密内容不能为空。", domain.ErrInvalidInput)
+		return 0, fmt.Errorf("%w: 卡密内容不能为空。", domain.ErrInvalidInput)
 	}
 	if card.Status == "" {
 		card.Status = domain.CardStatusAvailable
 	}
 	if !validCardStatus(card.Status) {
-		return ErrInvalidCardStatus
+		return 0, ErrInvalidCardStatus
 	}
 	if err := s.cards.Create(ctx, card); err != nil {
-		return err
+		return 0, err
 	}
-	return s.SyncStock(ctx, productID)
+	if err := s.SyncStock(ctx, productID); err != nil {
+		return 0, err
+	}
+	if card.Status != domain.CardStatusAvailable {
+		return 0, nil
+	}
+	return s.releaseBacklog(ctx, productID), nil
 }
 
 func (s *Service) UpdateCard(ctx context.Context, productID, cardID uint, input *domain.Card) (*domain.Card, error) {
@@ -216,6 +294,9 @@ func (s *Service) UpdateCard(ctx context.Context, productID, cardID uint, input 
 	}
 	if err := s.SyncStock(ctx, productID); err != nil {
 		return nil, err
+	}
+	if status == domain.CardStatusAvailable {
+		s.releaseBacklog(ctx, productID)
 	}
 	return card, nil
 }
@@ -559,8 +640,9 @@ func couponApplies(coupon *domain.Coupon, product *domain.Product, total int, no
 }
 
 // couponDiscount never takes the whole order: NodeLoc is asked to collect a
-// payment, and a 0 amount order is not a payment. A 100% code therefore leaves
-// one fen behind rather than being rejected outright.
+// payment, and a 0 amount order is not a payment. A 100% code therefore leaves 1
+// 元 behind rather than being rejected outright, and an order of 1 元 or less
+// gets no discount at all.
 func couponDiscount(coupon *domain.Coupon, total int) int {
 	if total <= 1 {
 		return 0
@@ -627,6 +709,10 @@ type ImportResult struct {
 	Created []domain.Card `json:"created"`
 	Skipped int           `json:"skipped"`
 	Blank   int           `json:"blank"`
+	// Released counts the paid orders this restock was able to deliver on the
+	// spot, so the back office can say the goods went out rather than just that
+	// the keys arrived.
+	Released int `json:"released"`
 }
 
 // ImportCards adds lines to a product, dropping blanks and duplicates. Card
@@ -676,6 +762,7 @@ func (s *Service) ImportCards(ctx context.Context, productID uint, contents []st
 	if err := s.SyncStock(ctx, productID); err != nil {
 		return nil, err
 	}
+	result.Released = s.releaseBacklog(ctx, productID)
 	return result, nil
 }
 
@@ -733,7 +820,7 @@ func (s *Service) GenerateCards(ctx context.Context, productID uint, count int, 
 	if err := s.SyncStock(ctx, productID); err != nil {
 		return nil, err
 	}
-	return &ImportResult{Created: cards}, nil
+	return &ImportResult{Created: cards, Released: s.releaseBacklog(ctx, productID)}, nil
 }
 
 func randomCardBody(length int) (string, error) {
@@ -749,25 +836,30 @@ func randomCardBody(length int) (string, error) {
 	return string(out), nil
 }
 
-// SetCardStatus enables or disables selected keys and reports how many moved.
-func (s *Service) SetCardStatus(ctx context.Context, productID uint, ids []uint, status string) (int64, error) {
+// SetCardStatus enables or disables selected keys, reports how many moved, and
+// for a batch that just went back on the shelf, how many waiting orders that
+// released.
+func (s *Service) SetCardStatus(ctx context.Context, productID uint, ids []uint, status string) (int64, int, error) {
 	if len(ids) == 0 {
-		return 0, fmt.Errorf("%w: 请先勾选要操作的卡密。", ErrInvalidQuery)
+		return 0, 0, fmt.Errorf("%w: 请先勾选要操作的卡密。", ErrInvalidQuery)
 	}
 	if status != domain.CardStatusAvailable && status != domain.CardStatusDisabled {
-		return 0, ErrInvalidCardStatus
+		return 0, 0, ErrInvalidCardStatus
 	}
 	if err := s.ensureCardProduct(ctx, productID); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	moved, err := s.cards.BulkStatus(ctx, productID, ids, status)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if err := s.SyncStock(ctx, productID); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return moved, nil
+	if status != domain.CardStatusAvailable || moved == 0 {
+		return moved, 0, nil
+	}
+	return moved, s.releaseBacklog(ctx, productID), nil
 }
 
 // DeleteCards removes selected keys, and never a key a buyer already paid for:

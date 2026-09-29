@@ -199,6 +199,8 @@ export interface StockAlert {
   slug: string
   available: number
   sold: number
+  // Buyers who already paid for this product and have no key to receive yet.
+  waiting: number
 }
 
 export interface FunnelCount {

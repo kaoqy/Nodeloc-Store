@@ -13,6 +13,9 @@ export interface GeneratedCards {
   created: Card[]
   skipped: number
   blank: number
+  // released counts the paid orders this restock delivered on the spot; the keys
+  // going on the shelf is only half of what the operator wanted to know.
+  released: number
 }
 
 export const listProducts = () =>
@@ -68,7 +71,10 @@ export const generateCards = (productId: number, count: number, prefix = '') =>
 
 export const setCardStatusBatch = (productId: number, cardIds: number[], status: string) =>
   client
-    .post<{ updated: number }>(`/admin/products/${productId}/cards/batch-status`, { card_ids: cardIds, status })
+    .post<{ updated: number; released: number }>(
+      `/admin/products/${productId}/cards/batch-status`,
+      { card_ids: cardIds, status },
+    )
     .then((r) => r.data)
 
 export const deleteCardsBatch = (productId: number, cardIds: number[]) =>
@@ -105,7 +111,11 @@ export const updateCard = (productId: number, cardId: number, patch: Partial<Car
 export const deleteCard = (productId: number, cardId: number) =>
   client.delete(`/admin/products/${productId}/cards/${cardId}`)
 
+// LowStockRow is a product to restock plus how many buyers are already waiting
+// for it with the money paid.
+export type LowStockRow = Product & { waiting_orders: number }
+
 export const listLowStock = () =>
   client
-    .get<{ data: Product[]; threshold: number }>('/admin/low-stock')
+    .get<{ data: LowStockRow[]; threshold: number }>('/admin/low-stock')
     .then((r) => ({ data: r.data.data ?? [], threshold: r.data.threshold ?? 0 }))

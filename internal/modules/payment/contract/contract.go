@@ -36,6 +36,13 @@ type OrderRepo interface {
 	// ListUndeliveredPaidOrders returns paid orders whose delivery never
 	// completed, including those waiting for card stock to be refilled.
 	ListUndeliveredPaidOrders(ctx context.Context, limit int) ([]models.Order, error)
+	// ListUndeliveredPaidOrdersForProduct is the same queue for one product: the
+	// buyers who paid for keys this shelf did not have. A card restock releases
+	// exactly these, oldest payment first.
+	ListUndeliveredPaidOrdersForProduct(ctx context.Context, productID uint, limit int) ([]models.Order, error)
+	// CountUndeliveredPaidOrdersByProduct is "how many paid orders are still
+	// waiting" per product, for the restocking queue.
+	CountUndeliveredPaidOrdersByProduct(ctx context.Context) (map[uint]int64, error)
 	// ListReconcilableOrders returns orders still marked 待支付 locally that do
 	// carry a NodeLoc transaction id, so 批量查单 can ask the provider about them.
 	// minAge leaves freshly created orders to their own checkout page, which is

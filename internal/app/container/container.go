@@ -118,6 +118,11 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 	}
 	auditMod := audit.Wire(db)
 
+	// The loop closes in the other direction here: a card import tells the money
+	// side that the stock a waiting order was short of has arrived, so the buyer
+	// is delivered on the spot instead of on the next background sweep.
+	catalogMod.Service.SetDeliveryWake(paymentMod.Service)
+
 	if sys != nil {
 		sys.Attach(db,
 			func() (string, error) {

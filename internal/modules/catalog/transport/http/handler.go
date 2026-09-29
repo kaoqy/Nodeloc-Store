@@ -356,11 +356,12 @@ func (h *Handler) addCard(c *gin.Context) {
 	if !bindJSON(c, &card) {
 		return
 	}
-	if err := h.service.AddCard(c.Request.Context(), productID, &card); err != nil {
+	released, err := h.service.AddCard(c.Request.Context(), productID, &card)
+	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": card})
+	c.JSON(http.StatusCreated, gin.H{"data": card, "released": released})
 }
 
 // listAllCards backs the inventory screen: every product or a selected one,
@@ -515,12 +516,12 @@ func (h *Handler) batchCardStatus(c *gin.Context) {
 	if !bindJSON(c, &request) {
 		return
 	}
-	moved, err := h.service.SetCardStatus(c.Request.Context(), productID, request.selected(), request.Status)
+	moved, released, err := h.service.SetCardStatus(c.Request.Context(), productID, request.selected(), request.Status)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"updated": moved})
+	c.JSON(http.StatusOK, gin.H{"updated": moved, "released": released})
 }
 
 func (h *Handler) batchDeleteCards(c *gin.Context) {

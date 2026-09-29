@@ -705,22 +705,56 @@ func (s *Service) RetryPendingDeliveries(ctx context.Context) (int, error) {
 	}
 	delivered := 0
 	for i := range pending {
-		order := pending[i]
-		if err := s.fulfillment.Fulfill(ctx, &order); err != nil {
-			log.Printf("delivery retry %s: still undelivered: %v", order.OrderNo, err)
-			continue
-		}
-		switch order.FulfillmentStatus {
-		case "delivered", "completed":
-			delivered++
-			// The buyer was told the payment landed; this is the message that says
-			// the goods did too, which the 已付款 page could not send on its own.
-			s.notifyOrder(ctx, &order, eventDelivered)
-		case "manual_pending", "waiting_stock":
+		if s.retryDelivery(ctx, &pending[i]) != "" {
 			delivered++
 		}
 	}
 	return delivered, nil
+}
+
+// retryDelivery attempts one order's delivery again and reports where it ended
+// up: an empty status means the attempt failed outright.
+func (s *Service) retryDelivery(ctx context.Context, order *models.Order) string {
+	if err := s.fulfillment.Fulfill(ctx, order); err != nil {
+		log.Printf("delivery retry %s: still undelivered: %v", order.OrderNo, err)
+		return ""
+	}
+	if order.FulfillmentStatus == "delivered" || order.FulfillmentStatus == "completed" {
+		// The buyer was told the payment landed; this is the message that says
+		// the goods did too, which the 已付款 page could not send on its own.
+		s.notifyOrder(ctx, order, eventDelivered)
+	}
+	return order.FulfillmentStatus
+}
+
+// restockReleaseLimit caps what one card restock delivers. A shop that restocks
+// into a deeper queue sees the next hundred go out now and the remainder on the
+// following sweep, which is a queue no realistic shelf reaches.
+const restockReleaseLimit = 100
+
+// ReleaseProductBacklog is what a card import owes the buyers who paid before it:
+// the orders waiting for this product are delivered now, oldest payment first,
+// instead of waiting for the background sweep to notice the stock. It returns how
+// many actually left the shop, so the back office can say so out loud.
+func (s *Service) ReleaseProductBacklog(ctx context.Context, productID uint) (int, error) {
+	pending, err := s.orders.ListUndeliveredPaidOrdersForProduct(ctx, productID, restockReleaseLimit)
+	if err != nil {
+		return 0, err
+	}
+	released := 0
+	for i := range pending {
+		switch s.retryDelivery(ctx, &pending[i]) {
+		case "delivered", "completed":
+			released++
+		}
+	}
+	return released, nil
+}
+
+// WaitingOrdersByProduct is the restocking queue's "and how many have already
+// paid for it" column.
+func (s *Service) WaitingOrdersByProduct(ctx context.Context) (map[uint]int64, error) {
+	return s.orders.CountUndeliveredPaidOrdersByProduct(ctx)
 }
 
 // reconcileBatchLimit caps one 批量查单 sweep; the admin runs it again for more.
