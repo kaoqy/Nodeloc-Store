@@ -119,3 +119,15 @@ export const listLowStock = () =>
   client
     .get<{ data: LowStockRow[]; threshold: number }>('/admin/low-stock')
     .then((r) => ({ data: r.data.data ?? [], threshold: r.data.threshold ?? 0 }))
+
+// 缺货提醒跑的是后台每几分钟一次的那轮巡检，只是现在按。服务端只回计数：
+// 谁会被写到消息由权限决定，不在这里猜。同一天里同一件商品只会提醒一次，
+// 所以再按一次 sent 会是 0。
+export interface RestockAlertResult {
+  checked: number
+  sent: number
+  threshold: number
+}
+
+export const alertLowStock = () =>
+  client.post<RestockAlertResult>('/admin/low-stock/alert').then((r) => r.data)

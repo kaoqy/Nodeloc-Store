@@ -2,9 +2,11 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import StatCard from '../components/StatCard.vue'
 import { listAuditLogs } from '../api/logs'
+import { alertLowStock } from '../api/products'
 import { getStats } from '../api/system'
 import { errorMessage, fulfillmentStatus, money, orderStatus, when, dayLabel } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
+import { useInboxStore } from '../stores/inbox'
 import type { AuditLog, DashboardStats } from '../types'
 
 type Metric = 'revenue' | 'orders' | 'users'
@@ -51,8 +53,12 @@ function readPrefs(): ViewPrefs {
 
 const prefs = readPrefs()
 const auth = useAuthStore()
+const inbox = useInboxStore()
 const loading = ref(true)
 const error = ref('')
+const alerting = ref(false)
+const alertNotice = ref('')
+const alertFailed = ref(false)
 const days = ref(prefs.days)
 const metric = ref<Metric>(prefs.metric)
 const auto = ref(prefs.auto)
@@ -186,6 +192,27 @@ async function switchRange(value: number) {
   if (days.value === value) return
   days.value = value
   await load()
+}
+
+// One warning per product per day, so a second click has nothing new to send --
+// the panel then says what was already reported instead of looking like a no-op.
+async function warnRestock() {
+  if (alerting.value) return
+  alerting.value = true
+  alertNotice.value = ''
+  try {
+    const result = await alertLowStock()
+    alertFailed.value = false
+    if (!result.checked) alertNotice.value = '巡检没有需要提醒的商品，卡密都够用。'
+    else if (result.sent) alertNotice.value = `已发出 ${result.sent} 条提醒，覆盖 ${result.checked} 件缺货商品。`
+    else alertNotice.value = `今天已经提醒过 ${result.checked} 件缺货商品了，明天同一时间会再说一次。`
+    void inbox.refresh()
+  } catch (err) {
+    alertFailed.value = true
+    alertNotice.value = errorMessage(err, '提醒补货失败')
+  } finally {
+    alerting.value = false
+  }
 }
 
 function stopAutoRefresh() {
@@ -532,9 +559,19 @@ onUnmounted(() => {
       </div>
 
       <div class="card">
-        <div class="mb-4 flex items-center justify-between gap-3">
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-base font-semibold">库存预警</h2>
-          <RouterLink v-if="auth.allows('cards', 'view')" to="/cards" class="text-sm accent-text">卡密库存</RouterLink>
+          <div v-if="auth.allows('cards', 'view')" class="flex items-center gap-3">
+            <button
+              class="btn btn-quiet btn-sm"
+              :disabled="alerting || loading"
+              :title="`阈值 ${alertThreshold} 张以内、有成交或在途订单的商品会收到一条通知，每件商品每天一次`"
+              @click="warnRestock"
+            >
+              {{ alerting ? '巡检中…' : '提醒补货' }}
+            </button>
+            <RouterLink to="/cards" class="text-sm accent-text">卡密库存</RouterLink>
+          </div>
           <span v-else class="hint nums">阈值 {{ alertThreshold }}</span>
         </div>
         <div v-if="loading" class="space-y-3">
@@ -576,6 +613,14 @@ onUnmounted(() => {
             </div>
           </li>
         </ul>
+        <p
+          v-if="alertNotice"
+          class="hint mt-3"
+          :class="alertFailed ? 'text-[var(--danger)]' : 'accent-text'"
+          role="status"
+        >
+          {{ alertNotice }}
+        </p>
       </div>
 
       <div v-if="canSeeLogs" class="card">

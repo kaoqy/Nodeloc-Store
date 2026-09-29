@@ -22,6 +22,18 @@ export async function listNotifications(page = 1, pageSize = 20): Promise<Notifi
 
 export const markAsRead = (id: number) => client.post(`/notifications/${id}/read`)
 
+/** How many messages are still unread in this operator's own inbox. */
+export async function unreadCount(): Promise<number> {
+  const { data } = await client.get<{ unread: number }>('/notifications/unread')
+  return Number(data.unread ?? 0)
+}
+
+/** Read the whole inbox in one go; returns how many rows actually flipped. */
+export async function markAllRead(): Promise<number> {
+  const { data } = await client.post<{ marked: number }>('/notifications/read-all')
+  return Number(data.marked ?? 0)
+}
+
 // Send to one user; the backend requires an explicit user_id.
 export const sendNotification = (payload: NotificationPayload & { user_id: number }) =>
   client.post('/notifications', payload).then((r) => r.data)

@@ -1,15 +1,30 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import SideBar from './components/SideBar.vue'
 import RouteProgress from './components/RouteProgress.vue'
 import { useAuthStore } from './stores/auth'
+import { useInboxStore } from './stores/inbox'
 import { useThemeStore } from './stores/theme'
 
 const route = useRoute()
 const auth = useAuthStore()
+const inbox = useInboxStore()
 const theme = useThemeStore()
 const open = ref(false)
+
+// A restock warning arrives from the background sweep rather than from a click,
+// so nothing in the shell would otherwise refresh the dot: it is read when a
+// session opens and when one ends. The inbox page and the dashboard each refresh
+// it after they change the unread count themselves.
+watch(
+  () => auth.isAuthenticated,
+  (signedIn) => {
+    if (signedIn) void inbox.refresh()
+    else inbox.reset(0)
+  },
+  { immediate: true },
+)
 
 const titles: Record<string, string> = {
   '/': '仪表盘',

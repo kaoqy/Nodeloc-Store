@@ -2,12 +2,14 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useInboxStore } from '../stores/inbox'
 import { shopInitials, shopLogo, shopName } from '../utils/identity'
 
 defineProps<{ open: boolean }>()
 defineEmits(['close'])
 
 const auth = useAuthStore()
+const inbox = useInboxStore()
 const route = useRoute()
 
 const roleLabel = computed(() => {
@@ -59,6 +61,10 @@ const numbered = computed(() => {
             ...item,
             index: String(index).padStart(2, '0'),
             active: item.path === '/' ? route.path === '/' : route.path.startsWith(item.path),
+            // The 通知中心 entry carries the unread count: restock warnings,
+            // broadcasts and payment notices all land in the same inbox, and the
+            // operator needs to see that something arrived without opening it.
+            unread: item.path === '/notifications' ? inbox.unread : 0,
           }
         }),
     }))
@@ -97,6 +103,12 @@ const numbered = computed(() => {
             >
               <span class="nums side-index">{{ item.index }}</span>
               <span class="truncate">{{ item.label }}</span>
+              <span
+                v-if="item.unread"
+                class="nums ml-auto shrink-0 rounded-full bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--accent)]"
+                :aria-label="`${item.unread} 条未读通知`"
+                >{{ item.unread > 99 ? '99+' : item.unread }}</span
+              >
             </RouterLink>
           </li>
         </ul>

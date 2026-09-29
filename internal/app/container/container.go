@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/kaoqy/Nodeloc-Store/internal/app/stockwatch"
 	"github.com/kaoqy/Nodeloc-Store/internal/authz"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
@@ -30,6 +31,10 @@ type Container struct {
 	Catalog      *catalog.Module
 	Notification *notification.Module
 	Audit        *audit.Module
+	// Stock warns the accounts that refill shelves when a published product runs
+	// short. The maintenance loop sweeps it and the back office can ask for one
+	// pass on demand.
+	Stock *stockwatch.Watcher
 }
 
 // inbox is the payment module's order events written into the buyer's
@@ -118,6 +123,15 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 	}
 	auditMod := audit.Wire(db)
 
+	// Restock warnings are the one thing that closes the loop for the shop
+	// itself: the catalogue already knows which shelves are short, the inbox
+	// already reaches the accounts that refill them, and only this wire joins
+	// the two.
+	stockWatch := stockwatch.New(catalogMod.Service, restockOutbox{service: notificationMod.Service}, restockRoster(db))
+	// The back office can also ask for one pass instead of waiting for the
+	// background sweep, so the catalogue's route needs the same watcher.
+	catalogMod.Handler.SetRestockWarner(stockWatch)
+
 	// The loop closes in the other direction here: a card import tells the money
 	// side that the stock a waiting order was short of has arrived, so the buyer
 	// is delivered on the spot instead of on the next background sweep.
@@ -144,5 +158,6 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		Catalog:      catalogMod,
 		Notification: notificationMod,
 		Audit:        auditMod,
+		Stock:        stockWatch,
 	}, nil
 }

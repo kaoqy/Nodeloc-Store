@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification/contract"
@@ -27,6 +28,25 @@ func (s *GormStore) CreateBatch(ctx context.Context, notifications []*models.Not
 		return nil
 	}
 	return s.db.WithContext(ctx).CreateInBatches(notifications, 500).Error
+}
+
+// HasRecent looks for one exact message in one inbox since a moment. The link
+// belongs to that identity: the same wording about another product is another
+// warning, and a message that carries no link matches only messages with none,
+// since an empty column and a written empty string are the same absence.
+func (s *GormStore) HasRecent(ctx context.Context, userID uint, notificationType, link string, since time.Time) (bool, error) {
+	query := s.db.WithContext(ctx).Model(&models.Notification{}).
+		Where("user_id = ? AND type = ? AND created_at >= ?", userID, notificationType, since)
+	if link == "" {
+		query = query.Where("link IS NULL OR link = ''")
+	} else {
+		query = query.Where("link = ?", link)
+	}
+	var matches int64
+	if err := query.Count(&matches).Error; err != nil {
+		return false, err
+	}
+	return matches > 0, nil
 }
 
 func (s *GormStore) ListByUser(ctx context.Context, userID uint, limit, offset int, filter contract.InboxFilter) ([]models.Notification, int64, error) {

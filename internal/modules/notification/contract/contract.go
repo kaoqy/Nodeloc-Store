@@ -2,6 +2,7 @@ package contract
 
 import (
 	"context"
+	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
 )
@@ -9,6 +10,10 @@ import (
 type NotificationRepo interface {
 	Create(ctx context.Context, notification *models.Notification) error
 	CreateBatch(ctx context.Context, notifications []*models.Notification) error
+	// HasRecent answers whether this exact message already reached this account at
+	// or after the given moment, so a warning the shop re-checks every few minutes
+	// can go out once a day instead of once a pass.
+	HasRecent(ctx context.Context, userID uint, notificationType, link string, since time.Time) (bool, error)
 	ListByUser(ctx context.Context, userID uint, limit, offset int, filter InboxFilter) ([]models.Notification, int64, error)
 	// ListFacets counts an inbox by message kind, unread included, so the page
 	// offers only the tabs the buyer actually has.

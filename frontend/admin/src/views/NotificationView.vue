@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import PaginationFooter from '../components/PaginationFooter.vue'
-import { broadcastNotification, listNotifications, markAsRead, sendNotification } from '../api/notifications'
-import { errorMessage, when } from '../utils/format'
+import { broadcastNotification, listNotifications, markAllRead, markAsRead, sendNotification } from '../api/notifications'
+import { errorMessage, notificationKind, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
+import { useInboxStore } from '../stores/inbox'
 import type { Notification } from '../types'
 
 const PageSize = 20
 
 const auth = useAuthStore()
+const inbox = useInboxStore()
 // Sending and broadcasting are one guarded route pair on the server; the form
 // stays visible so a 客服 account sees what they are missing, but nothing in it
 // is pressable without the grant.
@@ -18,6 +20,9 @@ const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
+// The list confirms its own reads; the composer confirms what it sent. One
+// shared sentence would show the same words on both sides of the page.
+const listNotice = ref('')
 const notifications = ref<Notification[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -39,6 +44,9 @@ async function load() {
   } finally {
     loading.value = false
   }
+  // The sidebar dot is the server's count, not this page's, so a restock warning
+  // that arrived while this screen was open still shows up.
+  void inbox.refresh()
 }
 
 async function read(item: Notification) {
@@ -46,8 +54,26 @@ async function read(item: Notification) {
   try {
     await markAsRead(item.id)
     item.is_read = true
+    if (inbox.unread > 0) inbox.reset(inbox.unread - 1)
   } catch (err) {
     error.value = errorMessage(err, '标记已读失败')
+  }
+}
+
+async function readAll() {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  listNotice.value = ''
+  try {
+    const marked = await markAllRead()
+    notifications.value = notifications.value.map((item) => ({ ...item, is_read: true }))
+    inbox.reset(0)
+    listNotice.value = marked ? `已把 ${marked} 条标为已读。` : '这里已经没有未读消息了。'
+  } catch (err) {
+    error.value = errorMessage(err, '标记已读失败')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -85,6 +111,17 @@ function go(next: number) {
   load()
 }
 
+/**
+ * Where the message points inside the back office. A restock warning carries the
+ * card page of the shelf it is about, so reading it and acting on it are one
+ * click. An absolute link a shop broadcast instead stays a normal page open: it
+ * is not a router path this app owns.
+ */
+function routeOf(link?: string | null): string | null {
+  if (!link) return null
+  return link.startsWith('/') && !link.startsWith('//') ? link : null
+}
+
 onMounted(load)
 </script>
 
@@ -95,6 +132,15 @@ onMounted(load)
         <div class="flex items-center gap-2">
           <h2 class="text-base font-semibold">我的通知</h2>
           <span v-if="unread" class="badge badge-accent">{{ unread }} 未读</span>
+          <button
+            v-if="inbox.unread || unread"
+            class="btn btn-quiet btn-sm"
+            :disabled="busy"
+            title="把这一页和后面的未读消息一次读完"
+            @click="readAll"
+          >
+            全部标为已读
+          </button>
         </div>
         <PaginationFooter
           class="!justify-end"
@@ -107,6 +153,7 @@ onMounted(load)
       </div>
 
       <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+      <p v-if="listNotice" class="alert alert-info" role="status">{{ listNotice }}</p>
 
       <div v-if="loading" class="space-y-2">
         <div v-for="i in 5" :key="i" class="skeleton h-20" />
@@ -126,7 +173,21 @@ onMounted(load)
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
               <h3 class="text-sm font-medium">{{ item.title }}</h3>
-              <span class="badge badge-neutral mono">{{ item.type }}</span>
+              <span class="badge badge-neutral">{{ notificationKind(item.type) }}</span>
+              <RouterLink
+                v-if="routeOf(item.link)"
+                :to="routeOf(item.link) as string"
+                class="text-xs accent-text underline-offset-2 hover:underline"
+                >去处理 →</RouterLink
+              >
+              <a
+                v-else-if="item.link"
+                :href="item.link"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-xs accent-text underline-offset-2 hover:underline"
+                >打开链接 ↗</a
+              >
             </div>
             <p v-if="item.content" class="mt-1 text-sm muted">{{ item.content }}</p>
             <p class="quiet mt-1.5 text-xs">{{ when(item.created_at) }}</p>

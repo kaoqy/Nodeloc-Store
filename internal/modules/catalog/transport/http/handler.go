@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -21,7 +22,22 @@ import (
 
 type Handler struct {
 	service *application.Service
+	// restockWarner is the shop-wide restock sweep. The alert route starts one
+	// on demand; who gets warned is decided outside the catalogue, so this layer
+	// only asks for a pass and reports what it counted.
+	restockWarner restockWarner
 }
+
+// restockWarner is the shape that sweep needs, declared here rather than
+// imported because the watch belongs to the shop as a whole, not to a shelf.
+type restockWarner interface {
+	Alert(ctx context.Context) (checked int, sent int, err error)
+}
+
+// SetRestockWarner attaches the sweep to the low-stock alert route. The container
+// calls it while wiring, and a catalogue without one answers 503 instead of
+// pretending a warning went out.
+func (h *Handler) SetRestockWarner(warner restockWarner) { h.restockWarner = warner }
 
 func NewHandler(service *application.Service) *Handler {
 	return &Handler{service: service}
@@ -57,6 +73,9 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	// A sibling of /products/:id would collide with the wildcard, so the
 	// restocking queue sits at its own path rather than under /products.
 	admin.GET("/low-stock", guard("products", "view"), h.listLowStock)
+	// The alert route belongs to restocking, not to reading the queue, so it
+	// gates on 卡密 rather than 商品.
+	admin.POST("/low-stock/alert", guard("cards", "view"), h.alertLowStock)
 	admin.GET("/products/:id", guard("products", "view"), h.getProduct)
 	admin.POST("/products", guard("products", "manage"), h.createProduct)
 	admin.PUT("/products/:id", guard("products", "manage"), h.updateProduct)
@@ -260,6 +279,30 @@ func (h *Handler) listLowStock(c *gin.Context) {
 	}
 	threshold := h.service.AlertThreshold()
 	c.JSON(http.StatusOK, gin.H{"data": products, "threshold": threshold})
+}
+
+// alertLowStock runs the restock sweep now instead of waiting for the background
+// pass, and answers in counts: how many shelves were short and how many warnings
+// left. The same shelf warned this morning counts as short again but sends
+// nothing, so a second click says so rather than spamming the inbox.
+func (h *Handler) alertLowStock(c *gin.Context) {
+	if h.restockWarner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "库存提醒还没有接上，请稍后再试或联系店主。",
+			"code":  "alerts_unavailable",
+		})
+		return
+	}
+	checked, sent, err := h.restockWarner.Alert(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"checked":   checked,
+		"sent":      sent,
+		"threshold": h.service.AlertThreshold(),
+	})
 }
 
 func contextUserID(c *gin.Context) uint {

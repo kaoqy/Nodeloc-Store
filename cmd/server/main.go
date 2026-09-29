@@ -17,6 +17,7 @@ import (
 
 	"github.com/kaoqy/Nodeloc-Store/internal/app/container"
 	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
+	"github.com/kaoqy/Nodeloc-Store/internal/app/stockwatch"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit/application"
@@ -130,19 +131,20 @@ func main() {
 		}
 	}()
 
-	// One background loop keeps payments honest without a person: it asks
-	// NodeLoc about orders a lost browser redirect left at 待支付, and retries
-	// delivery for orders already paid. It resolves the live container on every
-	// pass because saving settings rebuilds it and closes the old database.
+	// One background loop keeps the shop running without a person: it asks
+	// NodeLoc about orders a lost browser redirect left at 待支付, retries
+	// delivery for orders already paid, and warns whoever refills the shelves
+	// that a product is short. It resolves the live container on every pass
+	// because saving settings rebuilds it and closes the old database.
 	stopMaintenance := make(chan struct{})
 	go func() {
-		maintenanceLoop(stopMaintenance, func() *paymentapp.Service {
+		maintenanceLoop(stopMaintenance, func() maintenanceDeps {
 			liveMu.Lock()
 			defer liveMu.Unlock()
 			if live == nil {
-				return nil
+				return maintenanceDeps{}
 			}
-			return live.Payment.Service
+			return maintenanceDeps{payments: live.Payment.Service, stock: live.Stock}
 		})
 	}()
 
@@ -160,27 +162,46 @@ func main() {
 	log.Println("Server exited")
 }
 
-// maintenanceLoop keeps payment state self-healing: 查单 for orders the store
-// still calls 待支付 (a lost redirect must not cost a buyer their goods), and a
-// delivery retry for orders already paid. The first pass runs shortly after
+// maintenanceDeps is what the sweep needs this minute. Both halves are optional:
+// a container mid-rebuild answers with nothing, and the loop waits for the next
+// pass instead of failing on a service it has not been given.
+type maintenanceDeps struct {
+	payments *paymentapp.Service
+	stock    *stockwatch.Watcher
+}
+
+// maintenanceLoop keeps the shop self-healing: 查单 for orders the store still
+// calls 待支付 (a lost redirect must not cost a buyer their goods), a delivery
+// retry for orders already paid, and one restock warning pass so a short shelf
+// reaches the accounts that refill it. The first pass runs shortly after
 // start-up so a crash that dropped a delivery is fixed without waiting; after
 // that it runs every few minutes, which stays far below any sane rate limit on
 // the provider side.
-func maintenanceLoop(stop <-chan struct{}, resolve func() *paymentapp.Service) {
+func maintenanceLoop(stop <-chan struct{}, resolve func() maintenanceDeps) {
 	sweep := func() {
-		svc := resolve()
-		if svc == nil {
+		deps := resolve()
+		if deps.payments == nil && deps.stock == nil {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		if _, err := svc.AutoReconcilePending(ctx); err != nil {
-			log.Printf("payment maintenance: provider check failed: %v", err)
+		if deps.payments != nil {
+			if _, err := deps.payments.AutoReconcilePending(ctx); err != nil {
+				log.Printf("payment maintenance: provider check failed: %v", err)
+			}
+			if moved, err := deps.payments.RetryPendingDeliveries(ctx); err != nil {
+				log.Printf("delivery retry sweep: %v", err)
+			} else if moved > 0 {
+				log.Printf("delivery retry sweep: delivered %d order(s)", moved)
+			}
 		}
-		if moved, err := svc.RetryPendingDeliveries(ctx); err != nil {
-			log.Printf("delivery retry sweep: %v", err)
-		} else if moved > 0 {
-			log.Printf("delivery retry sweep: delivered %d order(s)", moved)
+		if deps.stock != nil {
+			result, err := deps.stock.Pass(ctx)
+			if err != nil {
+				log.Printf("restock sweep: %v", err)
+			} else if result.Sent > 0 {
+				log.Printf("restock sweep: %d product(s) short, %d warning(s) sent", result.Checked, result.Sent)
+			}
 		}
 	}
 

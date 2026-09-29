@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification/contract"
@@ -34,6 +35,28 @@ func (s *Service) Send(ctx context.Context, notification *models.Notification) e
 		return s.notifier.Notify(ctx, *notification)
 	}
 	return nil
+}
+
+// SendOnce writes the message only when the very same one has not reached this
+// account since `since`, and reports whether it landed. A shop that re-checks a
+// shelf every few minutes gets one warning a day out of it, and the caller can
+// still count the messages it really sent.
+func (s *Service) SendOnce(ctx context.Context, notification *models.Notification, since time.Time) (bool, error) {
+	if notification == nil || notification.UserID == 0 || strings.TrimSpace(notification.Type) == "" {
+		return false, ErrInvalidNotification
+	}
+	link := ""
+	if notification.Link != nil {
+		link = *notification.Link
+	}
+	recent, err := s.repo.HasRecent(ctx, notification.UserID, strings.TrimSpace(notification.Type), link, since)
+	if err != nil {
+		return false, err
+	}
+	if recent {
+		return false, nil
+	}
+	return true, s.Send(ctx, notification)
 }
 
 func (s *Service) Broadcast(ctx context.Context, notificationType, title string, content, link *string) (int, error) {

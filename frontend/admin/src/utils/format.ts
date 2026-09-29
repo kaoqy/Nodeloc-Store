@@ -128,6 +128,22 @@ export function providerStatus(status?: string): string {
   return PROVIDER_STATUS[status] || status
 }
 
+// The inbox stores the kind as the sender named it. These are the kinds this
+// shop writes itself; anything else (a 自定义 type from the broadcast form) stays
+// as written, because inventing a label for it would hide what was sent.
+const NOTIFICATION_KIND: Record<string, string> = {
+  order: '订单',
+  system: '系统',
+  promo: '促销',
+  announcement: '公告',
+  stock: '库存预警',
+}
+
+/** notificationKind labels one kind of inbox message for 通知中心. */
+export function notificationKind(type: string): string {
+  return NOTIFICATION_KIND[type] || type
+}
+
 export function errorCode(error: unknown): string {
   const data = (error as { response?: { data?: { code?: string } } })?.response?.data
   return data?.code ?? ''
