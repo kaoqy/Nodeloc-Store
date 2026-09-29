@@ -17,6 +17,9 @@ const (
 	// maxSearchLen keeps a keyword from turning into a full-table pattern match
 	// on the longest text column the log row carries.
 	maxSearchLen = 64
+	// maxExportLogs bounds one download. A shop that outgrows it should narrow
+	// the date range first instead of pulling its whole history into a file.
+	maxExportLogs = 20000
 )
 
 var ErrActionRequired = errors.New("audit action is required")
@@ -53,11 +56,7 @@ func (s *Service) LogAction(ctx context.Context, input domain.LogActionInput) (*
 }
 
 func (s *Service) QueryLogs(ctx context.Context, filter domain.LogFilter) (domain.Page, error) {
-	filter.Action = strings.TrimSpace(filter.Action)
-	filter.Search = strings.TrimSpace(filter.Search)
-	if runes := []rune(filter.Search); len(runes) > maxSearchLen {
-		filter.Search = string(runes[:maxSearchLen])
-	}
+	filter = normalizeFilter(filter)
 	if filter.Page < 1 {
 		filter.Page = defaultPage
 	}
@@ -79,6 +78,21 @@ func (s *Service) QueryLogs(ctx context.Context, filter domain.LogFilter) (domai
 		Items: items, Total: total, Page: filter.Page,
 		Limit: filter.Limit, TotalPages: totalPages,
 	}, nil
+}
+
+// ExportLogs runs a download through the exact same filter normalisation as the
+// page, so the CSV can only ever carry what the owner was looking at.
+func (s *Service) ExportLogs(ctx context.Context, filter domain.LogFilter) ([]domain.AuditLog, bool, error) {
+	return s.repo.Export(ctx, normalizeFilter(filter), maxExportLogs)
+}
+
+func normalizeFilter(filter domain.LogFilter) domain.LogFilter {
+	filter.Action = strings.TrimSpace(filter.Action)
+	filter.Search = strings.TrimSpace(filter.Search)
+	if runes := []rune(filter.Search); len(runes) > maxSearchLen {
+		filter.Search = string(runes[:maxSearchLen])
+	}
+	return filter
 }
 
 // ListActions names the actions this shop has recorded, so the log page can

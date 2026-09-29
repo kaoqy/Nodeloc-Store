@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"log"
@@ -29,7 +30,8 @@ func NewHandler(service *application.Service) *Handler {
 }
 
 // RegisterRoutes registers the audit-log reads for a role that holds the
-// logs:view grant: the filtered log page and the action names it suggests.
+// logs:view grant: the filtered log page, the action names it suggests, and the
+// CSV download of whatever that page is showing.
 func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
 	router.GET("/api/v1/admin/audit-logs",
 		middleware.JWTMiddleware(jwtConfig),
@@ -39,6 +41,10 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 		middleware.JWTMiddleware(jwtConfig),
 		middleware.RequirePermission(accounts, "logs", "view"),
 		h.ListAuditActions)
+	router.GET("/api/v1/admin/audit-logs/export",
+		middleware.JWTMiddleware(jwtConfig),
+		middleware.RequirePermission(accounts, "logs", "view"),
+		h.ExportAuditLogs)
 }
 
 // ListAuditLogs returns audit logs for the page, limit, action, search, actor
@@ -72,10 +78,96 @@ func (h *Handler) ListAuditActions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": actions})
 }
 
+// exportLogColumns is the CSV header. The id comes first because that is what
+// the log page numbers its rows with, so a line in the file can be pointed back
+// at the screen. The actor column carries the username, because a download that
+// only said "actor_id 7" cannot be read by anyone who was not looking at the
+// page when it happened.
+var exportLogColumns = []string{"日志ID", "时间", "操作者", "操作类型", "对象", "详情", "IP 地址"}
+
+// ExportAuditLogs writes the filtered log as a CSV download. The UTF-8 BOM is
+// not decoration: Excel opens a Chinese header row as mojibake without it.
+func (h *Handler) ExportAuditLogs(c *gin.Context) {
+	filter, err := parseAuditFilters(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "invalid_query"})
+		return
+	}
+
+	rows, truncated, err := h.service.ExportLogs(c.Request.Context(), filter)
+	if err != nil {
+		log.Printf("[audit] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "审计日志暂时导不出来，请稍后再试。", "code": "internal_error"})
+		return
+	}
+
+	// The filename carries no request input, so nothing from the query string can
+	// reach a response header.
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", `attachment; filename="audit-logs-`+time.Now().Format("20060102")+`.csv"`)
+	// The page reports these back to the owner instead of counting the rows
+	// itself: a detail carrying a newline would be miscounted.
+	c.Header("X-Export-Rows", strconv.Itoa(len(rows)))
+	if truncated {
+		c.Header("X-Export-Truncated", "1")
+	}
+	c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
+	writer := csv.NewWriter(c.Writer)
+	_ = writer.Write(exportLogColumns)
+	for _, entry := range rows {
+		_ = writer.Write([]string{
+			strconv.FormatUint(uint64(entry.ID), 10),
+			entry.CreatedAt.Format(time.RFC3339),
+			auditActor(entry),
+			entry.Action,
+			safeCell(deref(entry.Target)),
+			safeCell(deref(entry.Detail)),
+			safeCell(deref(entry.IP)),
+		})
+	}
+	writer.Flush()
+	if truncated {
+		_, _ = c.Writer.Write([]byte("# 结果已截断，请缩小日期范围或加筛选条件后再导出\n"))
+	}
+}
+
+// auditActor names who acted: a member by username, the shop itself as 系统, and
+// an account that has since been purged by id rather than as a blank.
+func auditActor(entry domain.AuditLog) string {
+	if entry.ActorName != "" {
+		return safeCell(entry.ActorName)
+	}
+	if entry.ActorID == nil {
+		return "系统"
+	}
+	return fmt.Sprintf("#%d（账号已删除）", *entry.ActorID)
+}
+
+func deref(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+// safeCell defuses spreadsheet formulas. Targets and details are built partly
+// from what users type, and a cell starting with = + - @ executes when the shop
+// owner opens the export in Excel — a download of logs has to stay data.
+func safeCell(value string) string {
+	if value == "" {
+		return value
+	}
+	switch value[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + value
+	}
+	return value
+}
+
 func parseAuditQuery(c *gin.Context) (domain.LogFilter, error) {
-	filter := domain.LogFilter{
-		Action: strings.TrimSpace(c.Query("action")),
-		Search: strings.TrimSpace(c.Query("search")),
+	filter, err := parseAuditFilters(c)
+	if err != nil {
+		return filter, err
 	}
 
 	page, err := positiveIntQuery(c, "page", 1)
@@ -87,6 +179,17 @@ func parseAuditQuery(c *gin.Context) (domain.LogFilter, error) {
 		return filter, err
 	}
 	filter.Page, filter.Limit = page, limit
+	return filter, nil
+}
+
+// parseAuditFilters reads the conditions the log page filters by, minus
+// pagination. The list and the CSV download both use it, so a download can only
+// ever carry the batch the page was showing.
+func parseAuditFilters(c *gin.Context) (domain.LogFilter, error) {
+	filter := domain.LogFilter{
+		Action: strings.TrimSpace(c.Query("action")),
+		Search: strings.TrimSpace(c.Query("search")),
+	}
 
 	if raw := strings.TrimSpace(c.Query("actor")); raw != "" {
 		if strings.EqualFold(raw, "system") {

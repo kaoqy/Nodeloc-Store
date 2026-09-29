@@ -83,6 +83,48 @@ func (s *GormStore) attachActorNames(ctx context.Context, logs []domain.AuditLog
 	}
 }
 
+// exportBatch is how many log rows one download query pulls. Walking the
+// filtered set in batches keeps a busy shop's whole week out of a single
+// result set.
+const exportBatch = 500
+
+// Export walks the same WHERE clauses as List but across pages, so the CSV a
+// shop owner downloads carries the batch the log page was showing rather than
+// only its first screen. The second return says the cap was hit: a shortened
+// file must never read like a complete one.
+func (s *GormStore) Export(ctx context.Context, filter domain.LogFilter, limit int) ([]domain.AuditLog, bool, error) {
+	var logs []domain.AuditLog
+	for {
+		size := exportBatch
+		if room := limit - len(logs); room < size {
+			size = room
+		}
+		if size <= 0 {
+			return logs, true, nil
+		}
+
+		// Ask for one row beyond the batch: it answers whether anything is left,
+		// so a download that fits the cap exactly is not reported as cut short.
+		batch := make([]domain.AuditLog, 0, size+1)
+		if err := s.filtered(ctx, filter).Order("created_at DESC, id DESC").
+			Offset(len(logs)).Limit(size + 1).Find(&batch).Error; err != nil {
+			return nil, false, err
+		}
+		if len(batch) <= size {
+			s.attachActorNames(ctx, batch)
+			return append(logs, batch...), false, nil
+		}
+		batch = batch[:size]
+		// Names are resolved per batch: the download can span thousands of rows,
+		// and one giant id list is not worth the single query it saves.
+		s.attachActorNames(ctx, batch)
+		logs = append(logs, batch...)
+		if len(logs) >= limit {
+			return logs, true, nil
+		}
+	}
+}
+
 // Actions returns the distinct recorded action names.
 func (s *GormStore) Actions(ctx context.Context) ([]string, error) {
 	actions := make([]string, 0)

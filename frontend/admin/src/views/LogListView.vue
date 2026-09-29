@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PaginationFooter from '../components/PaginationFooter.vue'
-import { listAuditActions, listAuditLogs } from '../api/logs'
+import { exportAuditLogs, listAuditActions, listAuditLogs } from '../api/logs'
 import { errorMessage, when } from '../utils/format'
 import type { AuditLog } from '../types'
 
@@ -167,6 +167,36 @@ function go(next: number) {
   load()
 }
 
+const exporting = ref(false)
+const notice = ref('')
+
+/**
+ * 导出的是当前这批日志：出事之后要把记录贴进工单、或者自己拉进表格里排时间线，
+ * 照着屏幕上 25 条一页地抄是办不成的。传的是筛选条件，不含分页。
+ */
+async function downloadLogs() {
+  if (exporting.value) return
+  exporting.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const { rows, truncated } = await exportAuditLogs({
+      action: actionFilter.value.trim() || undefined,
+      search: searchFilter.value.trim() || undefined,
+      actor: systemOnly.value ? 'system' : actorFilter.value.trim() || undefined,
+      since: since.value || undefined,
+      until: until.value || undefined,
+    })
+    notice.value = truncated
+      ? `已导出 ${rows} 条日志，但符合条件的记录比这更多，文件只装了前面那些 —— 请把日期范围缩小后再导一次。`
+      : `已导出${filtered.value ? '当前筛选的' : '全部'} ${rows} 条日志。`
+  } catch (err) {
+    error.value = errorMessage(err, '导出日志失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
 function toggleDetail(id: number) {
   openDetail.value = openDetail.value === id ? 0 : id
 }
@@ -265,13 +295,26 @@ async function loadAuditActions() {
     </div>
 
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <p v-if="actorLabel" class="flex flex-wrap items-center gap-2 text-sm">
-        <span class="chip chip-active">{{ actorLabel }}</span>
-        <button class="btn btn-quiet btn-sm" @click="clearActor">取消该筛选</button>
+      <p class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="quiet text-xs mono">{{ filtered ? `符合筛选 ${total} 条` : `共 ${total} 条` }}</span>
+        <template v-if="actorLabel">
+          <span class="chip chip-active">{{ actorLabel }}</span>
+          <button class="btn btn-quiet btn-sm" @click="clearActor">取消该筛选</button>
+        </template>
       </p>
-      <p class="quiet text-xs mono">{{ filtered ? `符合筛选 ${total} 条` : `共 ${total} 条` }}</p>
+      <!-- 导出只是读，所以跟这一页本身走：能打开日志页就导得动。 -->
+      <button
+        class="btn btn-quiet btn-sm"
+        :disabled="exporting || loading"
+        :title="filtered ? '按当前筛选导出' : '导出全部日志'"
+        @click="downloadLogs"
+      >
+        <span v-if="exporting" class="spinner" />
+        {{ exporting ? '正在生成…' : filtered ? '导出当前筛选' : '导出日志 CSV' }}
+      </button>
     </div>
 
+    <p v-if="notice" class="alert alert-info" role="status">{{ notice }}</p>
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <div class="table-container">
