@@ -70,7 +70,11 @@ type NodeLocConfig struct {
 	ClientSecret string `mapstructure:"client_secret"`
 	RedirectURI  string `mapstructure:"redirect_uri"`
 	Scopes       string `mapstructure:"scopes"`
-	PaymentID    string `mapstructure:"payment_id"`
+	// PaymentBaseURL is where 下单/查单/转账 are sent. It defaults to BaseURL
+	// because most shops have only one NodeLoc host, but a forum mirrored on a
+	// second domain must not have its money requests dragged along with it.
+	PaymentBaseURL string `mapstructure:"payment_base_url"`
+	PaymentID      string `mapstructure:"payment_id"`
 	// PaymentToken (tk_xxx) signs outbound create-payment and transfer calls.
 	PaymentToken string `mapstructure:"payment_token"`
 	// PaymentSecret is the merchant key: it signs 查单 and verifies callbacks.

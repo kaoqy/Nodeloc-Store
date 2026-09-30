@@ -16,6 +16,10 @@ const (
 	UserIDKey   = "user_id"
 	UserRoleKey = "user_role"
 	IsAdminKey  = "is_admin"
+	// AuditDetailKey is where a handler leaves the one line that makes its own
+	// mutation readable afterwards. The URL alone says "somebody moved money";
+	// only the handler knows how much and to whom.
+	AuditDetailKey = "audit_detail"
 )
 
 // JWTMiddleware validates JWT tokens and sets user context.
@@ -177,7 +181,12 @@ func AdminAudit(writer AuditWriter) gin.HandlerFunc {
 		target := strings.TrimPrefix(c.Request.URL.Path, adminAPIPrefix)
 		actor, _ := c.Get(UserIDKey)
 		actorID, _ := actor.(uint)
-		writer.Record(auditAction(c.Request.Method, target), target, "", actorID, c.ClientIP())
+		// A handler that knows more than the URL does (how much moved, which card
+		// was deleted) says so through AuditDetailKey; everything else keeps the
+		// empty detail it always had.
+		detail, _ := c.Get(AuditDetailKey)
+		detailText, _ := detail.(string)
+		writer.Record(auditAction(c.Request.Method, target), target, detailText, actorID, c.ClientIP())
 	}
 }
 

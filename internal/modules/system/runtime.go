@@ -5,6 +5,7 @@
 package system
 
 import (
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -58,10 +59,33 @@ type OAuthConfig struct {
 type PaymentConfig struct {
 	Enabled   bool   `json:"enabled"`
 	PaymentID string `json:"payment_id"`
+	// BaseURL is where 下单/查单/转账 go. Left empty they follow the OAuth host,
+	// which is right for a shop with one NodeLoc domain and wrong for one that
+	// logs in through a mirror — payments then leave for a host that has no
+	// payment application at all, and every buyer sees 「无法支付」.
+	BaseURL string `json:"base_url"`
 	// Token (tk_xxx) signs 下单/转账 requests; SecretKey signs 查单 and
 	// verifies the payment callback. They are two different credentials.
 	Token     string `json:"token"`
 	SecretKey string `json:"secret_key"`
+}
+
+// MissingCredentials names the payment settings that have to be filled before a
+// buyer can pay, in the order the shop owner reads them on the settings page.
+// A half-configured gateway is the single most common reason a storefront
+// refuses money, and "not configured" on its own says nothing about which field.
+func (p PaymentConfig) MissingCredentials() []string {
+	missing := make([]string, 0, 3)
+	if strings.TrimSpace(p.PaymentID) == "" {
+		missing = append(missing, "payment_id")
+	}
+	if strings.TrimSpace(p.Token) == "" {
+		missing = append(missing, "token")
+	}
+	if strings.TrimSpace(p.SecretKey) == "" {
+		missing = append(missing, "secret_key")
+	}
+	return missing
 }
 
 type FeaturesConfig struct {
@@ -193,6 +217,18 @@ func (r *RuntimeConfig) Normalize() {
 	// the one setting that reaches the browser as style rather than as text.
 	r.Theme.Primary = strings.ToLower(primary)
 
+	// A payment host that is not a host would send 下单 to a nonsense URL, and
+	// the buyer would see a store that cannot take money. Empty means "use the
+	// OAuth host", which is what ApplyTo does with it.
+	if base := strings.TrimSpace(r.Payment.BaseURL); !isProviderOrigin(base) {
+		r.Payment.BaseURL = ""
+	} else {
+		r.Payment.BaseURL = strings.TrimRight(base, "/")
+	}
+	if oauth := strings.TrimSpace(r.OAuth.BaseURL); oauth != "" && isProviderOrigin(oauth) {
+		r.OAuth.BaseURL = strings.TrimRight(oauth, "/")
+	}
+
 	locale := strings.TrimSpace(r.Theme.Locale)
 	if !localeTag.MatchString(locale) {
 		locale = defaultLocale
@@ -241,6 +277,24 @@ func isSafeImageURL(value string) bool {
 	return isSafeFooterURL(value)
 }
 
+// isProviderOrigin accepts only what a NodeLoc API call can be sent to: an
+// absolute http(s) URL with a host and no path, query or fragment hanging off
+// it. The gateway appends its own paths, so anything more than an origin here
+// would quietly produce "/login/payment/pay_xxx/process" style addresses.
+func isProviderOrigin(value string) bool {
+	if value == "" {
+		return false
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return false
+	}
+	return parsed.Path == "" || parsed.Path == "/"
+}
+
 func trimRunes(value string, limit int) string {
 	value = strings.TrimSpace(value)
 	runes := []rune(value)
@@ -287,6 +341,14 @@ func (r *RuntimeConfig) ApplyTo(cfg *config.Config) {
 	}
 	if r.OAuth.BaseURL != "" {
 		cfg.NodeLoc.BaseURL = r.OAuth.BaseURL
+	}
+	// Payments default to the OAuth host and can be pointed somewhere else: a
+	// shop that signs people in through a mirror still has to send money
+	// requests to the domain holding its payment application.
+	if r.Payment.BaseURL != "" {
+		cfg.NodeLoc.PaymentBaseURL = r.Payment.BaseURL
+	} else {
+		cfg.NodeLoc.PaymentBaseURL = cfg.NodeLoc.BaseURL
 	}
 	if r.OAuth.ClientID != "" {
 		cfg.NodeLoc.ClientID = r.OAuth.ClientID

@@ -3,13 +3,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProductCard from '../components/ProductCard.vue'
 import { couponQuoteMessage, getProduct, listProducts, listStoreCoupons, quoteCoupon } from '../api/products'
-import { createOrder, createPayment } from '../api/payment'
+import { checkoutAdvice, createOrder, createPayment } from '../api/payment'
 import { errorMessage, errorStatus } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useSiteStore } from '../stores/site'
 import { setPageTitle } from '../utils/identity'
 import { money, when } from '../utils/format'
-import type { CouponQuote, Product, StorefrontCoupon } from '../types'
+import type { CouponQuote, Order, Product, StorefrontCoupon } from '../types'
 
 const MaxQuantity = 20
 
@@ -25,6 +25,10 @@ const note = ref('')
 const loading = ref(true)
 const submitting = ref(false)
 const error = ref('')
+// Set once an order exists but its 下单 request was refused, so the page can
+// point at that order instead of leaving the buyer to start a second one.
+const unpaidOrderNo = ref('')
+const payAdvice = ref('')
 const related = ref<Product[]>([])
 
 const couponCode = ref('')
@@ -122,6 +126,26 @@ watch(quantity, () => {
   if (couponCode.value.trim()) void applyQuote()
 })
 
+/**
+ * Ask NodeLoc for the payment page of one order. A refused 下单 leaves the order
+ * itself in place, so the failure copy has to say where that order went rather
+ * than send the buyer back to 立即购买 for a second one.
+ */
+async function openPayment(orderNo: string, goods: string) {
+  submitting.value = true
+  error.value = ''
+  payAdvice.value = ''
+  try {
+    const payment = await createPayment(orderNo, goods)
+    if (!payment.payment_url) throw new Error('支付通道未返回付款地址，请稍后在订单页重试')
+    window.location.href = payment.payment_url
+  } catch (e) {
+    error.value = errorMessage(e, '发起支付失败')
+    payAdvice.value = checkoutAdvice(e)
+    submitting.value = false
+  }
+}
+
 async function purchase() {
   const item = product.value
   if (!item || submitting.value) return
@@ -131,21 +155,32 @@ async function purchase() {
   }
   submitting.value = true
   error.value = ''
+  payAdvice.value = ''
+  unpaidOrderNo.value = ''
+  let order: Order
   try {
-    const order = await createOrder({
+    order = await createOrder({
       slug: item.slug,
       quantity: quantity.value,
       contact: contact.value.trim() || undefined,
       note: note.value.trim() || undefined,
       coupon_code: quote.value?.accepted ? quote.value.code : undefined,
     })
-    const payment = await createPayment(order.order_no, item.name)
-    if (!payment.payment_url) throw new Error('支付通道未返回付款地址，请稍后在订单页重试')
-    window.location.href = payment.payment_url
   } catch (e) {
     error.value = errorMessage(e, '下单失败，请稍后重试')
     submitting.value = false
+    return
   }
+  unpaidOrderNo.value = order.order_no
+  await openPayment(order.order_no, item.name)
+}
+
+/** 再试一次支付：重发这一单的 下单请求，不再新建订单。 */
+async function retryPayment() {
+  const orderNo = unpaidOrderNo.value
+  const item = product.value
+  if (!orderNo || !item || submitting.value) return
+  await openPayment(orderNo, item.name)
 }
 
 async function loadRelated(item: Product) {
@@ -387,7 +422,18 @@ watch(
             </div>
           </div>
 
-          <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+          <div v-if="error" class="alert alert-danger" role="alert">
+            <p>{{ error }}</p>
+            <p v-if="payAdvice" class="mt-1 font-normal">{{ payAdvice }}</p>
+            <div v-if="unpaidOrderNo" class="mt-2.5 flex flex-wrap items-center gap-2 font-normal">
+              <button class="btn btn-secondary btn-sm" type="button" :disabled="submitting" @click="retryPayment">
+                再试一次支付
+              </button>
+              <RouterLink :to="`/orders/${unpaidOrderNo}`" class="hint underline hover:text-[var(--text)]">
+                或去订单 {{ unpaidOrderNo }} 继续支付
+              </RouterLink>
+            </div>
+          </div>
 
           <button class="btn btn-primary btn-lg w-full" type="submit" :disabled="submitting || soldOut">
             <span v-if="submitting" class="spinner spinner-light" />

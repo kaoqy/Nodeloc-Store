@@ -52,6 +52,21 @@ const CARD_STATUS: Record<string, StatusMeta> = {
   disabled: { label: '已停用', badge: 'badge-neutral' },
 }
 
+const TRANSFER_STATUS: Record<string, StatusMeta> = {
+  succeeded: { label: '已到账', badge: 'badge-success' },
+  pending: { label: '处理中', badge: 'badge-warning' },
+  failed: { label: '未成功', badge: 'badge-danger' },
+}
+
+/**
+ * transferStatus labels one 转账 row. A refusal is kept in the ledger, so it needs
+ * a reading of its own: 「未成功」 is not the same statement as 「没有发生过」.
+ */
+export function transferStatus(status?: string | null): StatusMeta {
+  if (!status) return { label: '—', badge: 'badge-neutral' }
+  return TRANSFER_STATUS[status] || { label: status, badge: 'badge-neutral' }
+}
+
 export function orderStatus(status: string): StatusMeta {
   return ORDER_STATUS[status] || { label: status || '未知', badge: 'badge-neutral' }
 }
@@ -137,6 +152,7 @@ const NOTIFICATION_KIND: Record<string, string> = {
   promo: '促销',
   announcement: '公告',
   stock: '库存预警',
+  transfer: '店家转账',
 }
 
 /** notificationKind labels one kind of inbox message for 通知中心. */

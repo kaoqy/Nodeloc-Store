@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity"
+	identitydomain "github.com/kaoqy/Nodeloc-Store/internal/modules/identity/domain"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification"
 	notificationapp "github.com/kaoqy/Nodeloc-Store/internal/modules/notification/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment"
@@ -99,6 +101,12 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 
 	identityFind := func(ctx context.Context, userID uint) (*models.User, error) {
 		user, err := identityMod.Service.Me(ctx, userID)
+		if errors.Is(err, identitydomain.ErrUserNotFound) {
+			// Payment asks "who is this account" before a 转账 or a refund. "There
+			// is no such account" is an answer, not a fault, and payment words its
+			// own refusal once it sees nil.
+			return nil, nil
+		}
 		if err != nil {
 			return nil, err
 		}

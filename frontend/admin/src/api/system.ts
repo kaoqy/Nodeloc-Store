@@ -85,8 +85,17 @@ export async function install(payload: InstallPayload): Promise<void> {
   markInitialized()
 }
 
+// SettingsDocument is what GET /admin/settings answers. Alongside the editable
+// config it carries the server's own reading of whether payments can actually
+// run — the owner's switch says what they want, this says what the shop can do.
+export interface SettingsDocument {
+  settings: RuntimeSettings
+  payment_ready?: boolean
+  payment_missing?: string[]
+}
+
 export const getRuntimeSettings = () =>
-  client.get<{ settings: RuntimeSettings }>('/admin/settings').then((r) => r.data.settings)
+  client.get<SettingsDocument>('/admin/settings').then((r) => r.data)
 
 // `restart_pending` tells the page that the row is on disk but the runtime
 // rebuild failed, so it must not claim the change is live already.

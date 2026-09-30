@@ -56,8 +56,15 @@ func Wire(db *gorm.DB, cfg *config.Config, identityFind func(ctx context.Context
 	if err := store.Migrate(context.Background()); err != nil {
 		return nil, err
 	}
+	// 下单/查单/转账 follow the payment host when the shop named one, because a
+	// storefront that logs in through a mirror still has to send its money
+	// requests to the domain holding the payment application.
+	paymentBaseURL := cfg.NodeLoc.PaymentBaseURL
+	if paymentBaseURL == "" {
+		paymentBaseURL = cfg.NodeLoc.BaseURL
+	}
 	gateway := infrastructure.NewNodeLocGateway(
-		cfg.NodeLoc.BaseURL,
+		paymentBaseURL,
 		cfg.NodeLoc.PaymentID,
 		cfg.NodeLoc.PaymentToken,
 		cfg.NodeLoc.PaymentSecret,

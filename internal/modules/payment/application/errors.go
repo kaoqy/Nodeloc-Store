@@ -36,7 +36,12 @@ func Classify(err error) *Failure {
 	if err == nil {
 		return nil
 	}
+	var failure *GrantFailure
 	switch {
+	case errors.As(err, &failure):
+		// A refused 转账 already carries the copy and the status the route should
+		// answer with, written for the person who pressed the button.
+		return &Failure{Code: failure.Code, Status: failure.Status, Message: failure.Message, Retryable: failure.Retryable, Detail: failure.Message}
 	case errors.Is(err, ErrInvalidInput):
 		return &Failure{Code: "invalid_input", Status: http.StatusBadRequest, Message: "订单信息有误，请检查后重新提交。"}
 	case errors.Is(err, ErrForbidden):
@@ -55,6 +60,8 @@ func Classify(err error) *Failure {
 		return &Failure{Code: "not_complete", Status: http.StatusConflict, Message: "NodeLoc 回报这笔支付尚未完成。", Retryable: true, Detail: err.Error()}
 	case errors.Is(err, ErrRefundRecipientUnknown):
 		return &Failure{Code: "refund_recipient_unknown", Status: http.StatusConflict, Message: err.Error()}
+	case errors.Is(err, ErrGrantRecipientUnknown):
+		return &Failure{Code: "grant_recipient_unknown", Status: http.StatusConflict, Message: err.Error()}
 	case errors.Is(err, ErrCouponUnavailable):
 		// Checkout and the quote box run the same coupon rules, so the refusal the
 		// catalogue already worded for the buyer is reused verbatim instead of a

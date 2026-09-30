@@ -31,7 +31,39 @@ func NewGormStore(db *gorm.DB) *GormStore {
 }
 
 func (s *GormStore) Migrate(ctx context.Context) error {
-	return s.db.WithContext(ctx).AutoMigrate(&domain.PaymentOrder{}, &domain.Transaction{})
+	return s.db.WithContext(ctx).AutoMigrate(&domain.PaymentOrder{}, &domain.Transaction{}, &domain.Transfer{})
+}
+
+func (s *GormStore) CreateTransfer(ctx context.Context, transfer *domain.Transfer) error {
+	return s.db.WithContext(ctx).Create(transfer).Error
+}
+
+func (s *GormStore) SaveTransfer(ctx context.Context, transfer *domain.Transfer) error {
+	return s.db.WithContext(ctx).Save(transfer).Error
+}
+
+// ListTransfers returns the 转账 ledger, newest first. A zero userID means the
+// whole shop rather than one account, which is what the back office ledger shows.
+func (s *GormStore) ListTransfers(ctx context.Context, userID uint, limit, offset int) ([]domain.Transfer, int64, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query := s.db.WithContext(ctx).Model(&domain.Transfer{})
+	if userID != 0 {
+		query = query.Where("user_id = ?", userID)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []domain.Transfer
+	if err := query.Order("id DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
 }
 
 func (s *GormStore) CreatePaymentOrder(ctx context.Context, paymentOrder *domain.PaymentOrder) error {

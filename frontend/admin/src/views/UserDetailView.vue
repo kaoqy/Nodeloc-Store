@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { adjustPoints, getUser, setRole, toggleActive, toggleAdmin } from '../api/users'
-import { errorMessage, roleMeta, when } from '../utils/format'
+import { adjustPoints, getUser, grantTransfer, listUserTransfers, setRole, toggleActive, toggleAdmin } from '../api/users'
+import { errorMessage, roleMeta, transferStatus, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
-import type { User } from '../types'
+import type { Transfer, User } from '../types'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,9 +17,24 @@ const notice = ref('')
 const user = ref<User | null>(null)
 const delta = ref<number | ''>('')
 
+const GrantMax = 1000
+const grantAmount = ref<number | ''>(10)
+const grantNote = ref('')
+const granting = ref(false)
+const transfers = ref<Transfer[]>([])
+const transferTotal = ref(0)
+
 const current = computed(() => roleMeta(user.value?.role))
 const bound = computed(() => Boolean(user.value?.oauth_provider))
 const points = computed(() => Number(delta.value || 0))
+// 转账 needs more than a bound provider: the money goes to a NodeLoc uid, and an
+// account that predates the binding has nowhere to arrive.
+const nodeLocBound = computed(
+  () => Boolean((user.value?.oauth_uid || '').trim() || (user.value?.oauth_username || '').trim()),
+)
+const grantAmountValid = computed(
+  () => Number.isInteger(Number(grantAmount.value)) && Number(grantAmount.value) >= 1 && Number(grantAmount.value) <= GrantMax,
+)
 
 const canManageUsers = computed(() => auth.allows('users', 'manage'))
 const canManageRoles = computed(() => auth.allows('roles', 'manage'))
@@ -72,11 +87,49 @@ async function load() {
   }
   try {
     user.value = await getUser(id)
+    loadTransfers(id)
   } catch (err) {
     user.value = null
     error.value = errorMessage(err, '用户加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+// The ledger read is not allowed to fail the page: an owner who cannot see the
+// history still has the account in front of them, and vice versa.
+async function loadTransfers(id: number) {
+  try {
+    const result = await listUserTransfers(id, { limit: 8 })
+    transfers.value = result.data
+    transferTotal.value = result.total
+  } catch {
+    transfers.value = []
+    transferTotal.value = 0
+  }
+}
+
+async function submitGrant() {
+  if (!user.value || granting.value || !grantAmountValid.value) return
+  granting.value = true
+  error.value = ''
+  notice.value = ''
+  const target = user.value.id
+  try {
+    const row = await grantTransfer(target, {
+      amount: Number(grantAmount.value),
+      note: grantNote.value.trim() || undefined,
+    })
+    notice.value = `已向 ${user.value.username} 的 NodeLoc 账户转出 ${row.amount} NL（流水号 ${row.reference}）`
+    grantNote.value = ''
+    grantAmount.value = 10
+  } catch (err) {
+    // NodeLoc's own reason is what makes a refusal fixable, so it is shown as the
+    // server worded it.
+    error.value = errorMessage(err, '转账未能完成')
+  } finally {
+    granting.value = false
+    await loadTransfers(target)
   }
 }
 
@@ -260,6 +313,65 @@ onMounted(load)
             <button class="btn btn-primary btn-sm" :disabled="busy || !points" @click="submitPoints">
               {{ busy ? '处理中…' : '确认调账' }}
             </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="mb-1 text-sm font-semibold">转账 NL</h3>
+          <p class="quiet mb-4 text-xs">
+            <template v-if="canManageUsers">
+              通过 NodeLoc 把积分转到这位买家的论坛账户，单次 1–{{ GrantMax }} NL 的整数。这不是商店积分，转出后商店无法自行撤回。
+            </template>
+            <template v-else>这名账号的转账流水。当前角色只能查看，转出需要 users:manage。</template>
+          </p>
+          <p v-if="canManageUsers && !nodeLocBound" class="alert alert-warning mb-4">
+            这个账号还没有绑定 NodeLoc，积分没有可转入的账户。请让对方先在个人中心用 NodeLoc 登录一次。
+          </p>
+          <div v-if="canManageUsers" class="flex flex-wrap items-end gap-3">
+            <div>
+              <label class="label" for="grant-amount">金额（NL）</label>
+              <input
+                id="grant-amount"
+                v-model.number="grantAmount"
+                type="number"
+                class="input nums w-32"
+                min="1"
+                :max="GrantMax"
+                step="1"
+                :disabled="granting"
+              />
+            </div>
+            <div class="min-w-40 flex-1">
+              <label class="label" for="grant-note">留言（可选，买家可见）</label>
+              <input id="grant-note" v-model="grantNote" class="input" maxlength="200" placeholder="例如：补差价" :disabled="granting" />
+            </div>
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="granting || !nodeLocBound || !grantAmountValid"
+              @click="submitGrant"
+            >
+              {{ granting ? '转账中…' : '确认转出' }}
+            </button>
+          </div>
+
+          <div class="mt-5">
+            <p class="quiet text-xs">最近转账<template v-if="transferTotal"> · 共 {{ transferTotal }} 笔</template></p>
+            <div v-if="transfers.length" class="mt-2 space-y-1.5">
+              <div
+                v-for="row in transfers"
+                :key="row.id"
+                class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--stroke-quiet)] pb-1.5 text-sm"
+              >
+                <span class="nums font-medium">{{ row.amount }} NL</span>
+                <span class="badge" :class="transferStatus(row.status).badge">{{ transferStatus(row.status).label }}</span>
+                <span class="mono quiet flex-1 truncate text-xs" :title="row.note || row.detail || row.reference">
+                  {{ row.note || row.detail || row.reference }}
+                </span>
+                <span class="quiet text-xs whitespace-nowrap">{{ when(row.created_at) }}</span>
+                <span v-if="row.operator_name" class="quiet text-xs whitespace-nowrap">by {{ row.operator_name }}</span>
+              </div>
+            </div>
+            <p v-else class="quiet mt-2 text-xs">还没有向这个账号转过账。</p>
           </div>
         </div>
       </div>

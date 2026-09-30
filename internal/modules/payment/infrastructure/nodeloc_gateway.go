@@ -47,6 +47,29 @@ func NewNodeLocGateway(baseURL, paymentID, token, secretKey string, client *http
 	}
 }
 
+// Missing reports which of the four payment settings are still empty, named the
+// way the 设置 page names its fields. A storefront that cannot take money is
+// otherwise diagnosed by guessing, and the guess is usually wrong.
+func (g *NodeLocGateway) Missing() []string {
+	missing := make([]string, 0, 4)
+	if g == nil {
+		return append(missing, "payment 网关未初始化")
+	}
+	if strings.TrimSpace(g.baseURL) == "" {
+		missing = append(missing, "base_url")
+	}
+	if strings.TrimSpace(g.paymentID) == "" {
+		missing = append(missing, "payment_id")
+	}
+	if strings.TrimSpace(g.token) == "" {
+		missing = append(missing, "token")
+	}
+	if strings.TrimSpace(g.secretKey) == "" {
+		missing = append(missing, "secret_key")
+	}
+	return missing
+}
+
 func (g *NodeLocGateway) CreatePayment(ctx context.Context, request contract.CreatePaymentRequest) (*contract.CreatePaymentResult, error) {
 	params := map[string]string{
 		"amount":      strconv.Itoa(request.Amount),
@@ -126,8 +149,13 @@ func (g *NodeLocGateway) secretKeyFn() (string, error) {
 }
 
 func (g *NodeLocGateway) post(ctx context.Context, path string, params map[string]string, keyOf func() (string, error)) (map[string]any, []byte, error) {
-	if g.baseURL == "" || g.paymentID == "" || g.secretKey == "" {
-		return nil, nil, domain.ErrPaymentNotConfigured
+	// Every call needs all four settings, even the ones the docs only sign with
+	// one of them: a store that can 下单 but not 查单 would take money it can
+	// never settle, which is a worse failure than refusing the sale. The message
+	// names the missing fields so the shop owner fixes one setting instead of
+	// guessing why the storefront says 无法支付.
+	if missing := g.Missing(); len(missing) > 0 {
+		return nil, nil, fmt.Errorf("%w：缺少 %s", domain.ErrPaymentNotConfigured, strings.Join(missing, "、"))
 	}
 	key, err := keyOf()
 	if err != nil {

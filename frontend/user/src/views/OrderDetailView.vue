@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { createPayment, getOrder, reconcileMessage, reconcileOrder, reconcileRetryable } from '../api/payment'
+import { checkoutAdvice, createPayment, getOrder, reconcileMessage, reconcileOrder, reconcileRetryable } from '../api/payment'
 import { errorMessage } from '../api/client'
 import { useInboxStore } from '../stores/inbox'
 import { setPageTitle } from '../utils/identity'
@@ -16,6 +16,7 @@ const loading = ref(true)
 const paying = ref(false)
 const error = ref('')
 const payError = ref('')
+const payAdvice = ref('')
 const copied = ref(false)
 const copiedNo = ref(false)
 const confirming = ref(false)
@@ -109,12 +110,16 @@ async function pay() {
   if (!current || paying.value) return
   paying.value = true
   payError.value = ''
+  payAdvice.value = ''
   try {
     const payment = await createPayment(current.order_no, current.product?.name)
     if (!payment.payment_url) throw new Error('支付通道未返回付款地址，请稍后重试')
     window.location.href = payment.payment_url
   } catch (e) {
     payError.value = errorMessage(e, '发起支付失败')
+    // 「联系店家」 beats 「再试一次」 when the shop's own credentials are the
+    // problem; without this the buyer taps 继续支付 until the button wears out.
+    payAdvice.value = checkoutAdvice(e)
     paying.value = false
   }
 }
@@ -296,7 +301,10 @@ async function refreshDelivery() {
           </div>
         </div>
 
-        <div v-if="payError" class="alert alert-danger mt-5" role="alert">{{ payError }}</div>
+        <div v-if="payError" class="alert alert-danger mt-5" role="alert">
+          <p>{{ payError }}</p>
+          <p v-if="payAdvice" class="mt-1 font-normal">{{ payAdvice }}</p>
+        </div>
         <p v-if="error" class="alert alert-warning mt-5" role="alert">{{ error }}</p>
 
         <div v-if="order.status === 'pending'" class="mt-5 flex flex-wrap items-center gap-3">

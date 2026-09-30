@@ -41,7 +41,7 @@ const settings = reactive<RuntimeSettings>({
     announcement: '',
   },
   oauth: { enabled: true, base_url: '', client_id: '', client_secret: '', redirect_uri: '', scopes: '' },
-  payment: { enabled: true, payment_id: '', token: '', secret_key: '' },
+  payment: { enabled: true, payment_id: '', token: '', secret_key: '', base_url: '' },
   features: { enabled_registration: true, enabled_checkin: true, enabled_coupons: true, stock_alert_threshold: 5 },
   theme: { theme_primary: '#f2704a', default_locale: 'zh-CN' },
 })
@@ -61,6 +61,37 @@ const paymentIncomplete = computed(
     settings.payment.token.trim() === '' ||
     settings.payment.secret_key.trim() === '',
 )
+
+// What the server says is missing, as opposed to what this half-typed form looks
+// like. The two disagree exactly when a secret is stored and masked as ********,
+// and the owner deserves the store's own reading, not a guess from the inputs.
+const MISSING_LABELS: Record<string, string> = {
+  payment_id: 'Payment ID',
+  token: 'Payment Token',
+  secret_key: 'Secret Key',
+  base_url: 'NodeLoc 域名',
+}
+const serverMissing = ref<string[]>([])
+const missingLabels = computed(() => serverMissing.value.map((name) => MISSING_LABELS[name] || name))
+const paymentBlocked = computed(
+  () => settings.payment.enabled && (paymentIncomplete.value || serverMissing.value.length > 0),
+)
+const paymentBasePreview = computed(
+  () =>
+    (settings.payment.base_url || '').trim() ||
+    (settings.oauth.base_url || '').trim() ||
+    '未设置：请先填 NodeLoc 域名或这里的支付地址',
+)
+
+async function refreshReadiness() {
+  try {
+    const doc = await getRuntimeSettings()
+    serverMissing.value = doc.payment_missing ?? []
+  } catch {
+    // A failed diagnostic read must not block the page that fixes the problem.
+    serverMissing.value = []
+  }
+}
 
 const footerLinks = computed(() => settings.app.footer_links ?? [])
 const linksFull = computed(() => footerLinks.value.length >= MaxFooterLinks)
@@ -111,7 +142,8 @@ function linkTargetValid(url: string) {
 async function load() {
   loading.value = true
   try {
-    const result = await getRuntimeSettings()
+    const document = await getRuntimeSettings()
+    const result = document.settings
     Object.assign(settings.app, result.app)
     settings.app.footer_links = (result.app.footer_links ?? []).map((link) => ({ ...link }))
     Object.assign(settings.oauth, result.oauth)
@@ -120,6 +152,7 @@ async function load() {
     Object.assign(settings.theme, result.theme)
     stockThreshold.value = String(settings.features.stock_alert_threshold ?? 5)
     snapshot.value = JSON.stringify(settings)
+    serverMissing.value = document.payment_missing ?? []
     // Remembered as the colour on file, so a save that fails can put it back.
     savedBrand.value = settings.theme.theme_primary
   } catch (err) {
@@ -152,6 +185,9 @@ async function save() {
       message.value = '已保存，运行时配置已重建并立即生效'
       messageType.value = 'ok'
     }
+    // Ask the store what it now believes is missing, rather than letting a stale
+    // warning sit under a form that was just fixed.
+    refreshReadiness()
   } catch (err) {
     // The saved colour is still the truth, so the page puts on it again. The
     // picker keeps the rejected choice: the save usually fails for a different
@@ -355,6 +391,7 @@ onMounted(load)
             </div>
             <div class="flex items-center gap-2">
               <span class="hint">{{ settings.payment.enabled ? '已启用' : '已禁用' }}</span>
+              <span v-if="paymentBlocked" class="badge badge-danger" title="开关是开的，但凭据不完整，买家下单仍会失败">还收不了款</span>
               <button
                 class="switch"
                 :class="{ 'switch-on': settings.payment.enabled }"
@@ -383,9 +420,28 @@ onMounted(load)
                 <input id="payment-secret" v-model="settings.payment.secret_key" type="password" class="input mono" placeholder="保持 ******** 则不修改" autocomplete="off" />
                 <p class="hint mt-1">原样用于查单签名与回调验签，不要填成 Token。</p>
               </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="payment-base">支付 API 地址（可选）</label>
+                <input
+                  id="payment-base"
+                  v-model="settings.payment.base_url"
+                  class="input mono"
+                  placeholder="留空则使用 NodeLoc 域名"
+                />
+                <p class="hint mt-1">
+                  下单、查单、转账都发往这里。只有当你的论坛域名与支付应用不在同一个域时才需要填，
+                  例如登录走镜像站而收款走主站；填错会让每个买家都收不到付款页。
+                </p>
+                <p class="quiet mt-1 text-xs mono">当前发往：{{ paymentBasePreview }}</p>
+              </div>
             </div>
             <p v-if="paymentIncomplete" class="alert alert-warning" role="alert">
               三项都要填写：Payment ID 决定收款应用，Payment Token 用于下单，Secret Key 用于查单和回调验签。缺任何一项，买家下单都会失败。
+            </p>
+            <p v-else-if="serverMissing.length" class="alert alert-warning" role="alert">
+              开关是开着的，但商店还收不了钱：服务端认为缺少
+              <strong>{{ missingLabels.join('、') }}</strong>。
+              填好后点「保存配置」，再用下面的「测试支付网关」复核。
             </p>
             <div class="flex flex-wrap items-center gap-3">
               <button class="btn btn-secondary btn-sm" type="button" :disabled="testingPayment" @click="runPaymentTest">

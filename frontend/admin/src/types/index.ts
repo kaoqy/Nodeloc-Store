@@ -29,6 +29,27 @@ export interface AuthTokens {
   refresh_token?: string
 }
 
+// Transfer is one 店家主动转账: NL the shop sent to a buyer's NodeLoc account.
+// Both outcomes are kept, so a refusal is still something to point at later.
+export interface Transfer {
+  id: number
+  user_id: number
+  username: string
+  to_user_id: string
+  to_username?: string
+  reference: string
+  provider?: string
+  provider_transaction_id?: string | null
+  amount: number
+  status: string
+  note?: string
+  detail?: string
+  operator_id: number
+  operator_name?: string
+  created_at?: string
+  completed_at?: string | null
+}
+
 export interface LoginResponse {
   user: User
   tokens: AuthTokens
@@ -341,6 +362,8 @@ export interface RuntimeSettings {
   payment: {
     enabled: boolean
     payment_id: string
+    // 支付 API 地址：留空则跟随 OAuth 域名。
+    base_url?: string
     token: string
     secret_key: string
   }

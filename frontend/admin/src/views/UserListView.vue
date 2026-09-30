@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import PaginationFooter from '../components/PaginationFooter.vue'
-import { listUsers, toggleActive } from '../api/users'
-import { errorMessage, roleMeta, when } from '../utils/format'
+import { grantTransfer, listTransfers, listUserTransfers, listUsers, toggleActive } from '../api/users'
+import { errorMessage, roleMeta, transferStatus, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
-import type { User } from '../types'
+import type { Transfer, User } from '../types'
 
 const PageSize = 20
+// The shop's own ceiling, kept in step with the server's; NodeLoc's application
+// limits are stricter and are reported by the provider when they bite.
+const GrantMax = 1000
 
 const auth = useAuthStore()
 const loading = ref(true)
@@ -23,6 +26,29 @@ const page = computed(() => Math.floor(offset.value / PageSize) + 1)
 const pages = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
 const from = computed(() => (users.value.length ? offset.value + 1 : 0))
 const to = computed(() => offset.value + users.value.length)
+
+const transferTarget = ref<User | null>(null)
+const transferHistory = ref<Transfer[]>([])
+const transferTotal = ref(0)
+const amount = ref(10)
+const note = ref('')
+const sending = ref(false)
+const transferError = ref('')
+const sent = ref<Transfer | null>(null)
+const ledgerOpen = ref(false)
+const ledger = ref<Transfer[]>([])
+const ledgerTotal = ref(0)
+const ledgerLoading = ref(false)
+const ledgerError = ref('')
+
+// 转账 needs a NodeLoc account: the money moves at the provider, and a shop
+// account with no bound forum user has nowhere to send it.
+const recipientBound = computed(() => {
+  const target = transferTarget.value
+  if (!target) return false
+  return Boolean((target.oauth_uid || '').trim() || (target.oauth_username || '').trim())
+})
+const amountValid = computed(() => Number.isInteger(amount.value) && amount.value >= 1 && amount.value <= GrantMax)
 
 async function load() {
   loading.value = true
@@ -66,6 +92,65 @@ async function toggle(user: User) {
   }
 }
 
+function openTransfer(user: User) {
+  transferTarget.value = user
+  amount.value = 10
+  note.value = ''
+  transferError.value = ''
+  sent.value = null
+  transferHistory.value = []
+  transferTotal.value = 0
+  // Past transfers are context, not a gate: an owner about to pay somebody twice
+  // should see it, but a slow read must not hold the form up.
+  listUserTransfers(user.id, { limit: 5 })
+    .then((result) => {
+      transferHistory.value = result.data
+      transferTotal.value = result.total
+    })
+    .catch(() => {})
+}
+
+async function submitTransfer() {
+  const target = transferTarget.value
+  if (!target || sending.value) return
+  sending.value = true
+  transferError.value = ''
+  try {
+    const row = await grantTransfer(target.id, { amount: amount.value, note: note.value.trim() || undefined })
+    sent.value = row
+    transferHistory.value = [row, ...transferHistory.value].slice(0, 5)
+    transferTotal.value += 1
+  } catch (err) {
+    // NodeLoc's refusal comes back already worded in Chinese, with the reason the
+    // shop has to fix: balance, limits, or a credential mismatch.
+    transferError.value = errorMessage(err, '转账未能完成')
+  } finally {
+    sending.value = false
+  }
+}
+
+// The whole shop's 转账流水, opened from the header. It reads fresh every time
+// because a refusal is written to the ledger too: caching here would drop the
+// rows the owner most wants to see after a failed attempt.
+async function loadLedger() {
+  ledgerLoading.value = true
+  ledgerError.value = ''
+  try {
+    const result = await listTransfers({ limit: 50 })
+    ledger.value = result.data
+    ledgerTotal.value = result.total
+  } catch (err) {
+    ledgerError.value = errorMessage(err, '转账流水加载失败')
+  } finally {
+    ledgerLoading.value = false
+  }
+}
+
+async function openLedger() {
+  ledgerOpen.value = true
+  await loadLedger()
+}
+
 onMounted(load)
 </script>
 
@@ -83,7 +168,10 @@ onMounted(load)
         />
         <button class="btn btn-secondary btn-sm" @click="applyFilters">筛选</button>
       </div>
-      <p class="quiet text-xs mono">共 {{ total }} 位用户</p>
+      <div class="flex items-center gap-3">
+        <p class="quiet text-xs mono">共 {{ total }} 位用户</p>
+        <button class="btn btn-secondary btn-sm" title="查看店家向用户转出 NL 的流水" @click="openLedger">转账流水</button>
+      </div>
     </div>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
@@ -157,6 +245,7 @@ onMounted(load)
             <td class="text-sm quiet">{{ when(user.created_at) }}</td>
             <td class="text-right whitespace-nowrap">
               <RouterLink :to="`/users/${user.id}`" class="btn btn-ghost btn-sm">详情</RouterLink>
+              <button v-if="canManage" class="btn btn-ghost btn-sm" @click="openTransfer(user)">转账</button>
               <button v-if="canManage" class="btn btn-ghost btn-sm" :disabled="busy" @click="toggle(user)">
                 {{ user.is_active ? '禁用' : '启用' }}
               </button>
@@ -173,5 +262,154 @@ onMounted(load)
       :summary="`第 ${from}–${to} 条 · 共 ${total} 条`"
       @change="goTo"
     />
+
+    <!-- 转账 overlay -->
+    <div
+      v-if="transferTarget"
+      class="overlay" role="dialog" aria-modal="true" aria-label="向用户转账"
+      @click.self="transferTarget = null"
+    >
+      <div class="card w-full max-w-md !p-5">
+        <h3 class="text-base font-semibold">转账 NL · {{ transferTarget.username }}</h3>
+        <p class="quiet mt-1 text-xs">
+          通过 NodeLoc 把积分转到这位买家的论坛账户。这不是商店积分，转出后商店无法自行撤回。
+        </p>
+
+        <p v-if="recipientBound" class="mt-3 text-xs mono muted">
+          收款账户：{{ transferTarget.oauth_username || '（无用户名）' }}
+          <span v-if="transferTarget.oauth_uid" class="quiet"> · uid {{ transferTarget.oauth_uid }}</span>
+        </p>
+        <p v-else class="alert alert-warning mt-3">
+          这个账号还没有绑定 NodeLoc，积分没有可转入的账户。请让对方先在个人中心用 NodeLoc 登录一次。
+        </p>
+
+        <div class="mt-4 space-y-3">
+          <div>
+            <label class="label" for="t-amount">金额（NL）</label>
+            <input
+              id="t-amount"
+              v-model.number="amount"
+              class="input nums w-36"
+              type="number"
+              min="1"
+              :max="GrantMax"
+              step="1"
+              :disabled="sending"
+            />
+            <p class="quiet mt-1 text-xs">单次 1–{{ GrantMax }} NL 的整数；NodeLoc 为支付应用另设的限额会更严格。</p>
+          </div>
+          <div>
+            <label class="label" for="t-note">留言（可选，买家可见）</label>
+            <input
+              id="t-note"
+              v-model="note"
+              class="input"
+              maxlength="200"
+              placeholder="例如：补差价"
+              :disabled="sending"
+            />
+          </div>
+        </div>
+
+        <p v-if="transferError" class="alert alert-danger mt-3" role="alert">{{ transferError }}</p>
+        <!-- Only a landed 转账 answers with a row, so the status would repeat the
+             「已到账」 this sentence already says. -->
+        <p v-else-if="sent" class="alert alert-success mt-3">
+          已向 {{ transferTarget.username }} 转出 {{ sent.amount }} NL · 流水号 {{ sent.reference }}
+        </p>
+
+        <div v-if="transferHistory.length" class="mt-4 border-t border-[var(--stroke)] pt-3">
+          <p class="quiet text-xs">最近转账 · 共 {{ transferTotal }} 笔</p>
+          <ul class="mt-2 space-y-1">
+            <li v-for="row in transferHistory" :key="row.id" class="flex items-center justify-between gap-2 text-xs">
+              <span class="nums">{{ row.amount }} NL</span>
+              <span class="mono quiet truncate">{{ row.note || row.reference }}</span>
+              <span class="badge" :class="transferStatus(row.status).badge">{{ transferStatus(row.status).label }}</span>
+              <span class="quiet whitespace-nowrap">{{ when(row.created_at) }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="mt-5 flex justify-end gap-2">
+          <button class="btn btn-secondary btn-sm" :disabled="sending" @click="transferTarget = null">
+            {{ sent ? '关闭' : '取消' }}
+          </button>
+          <button
+            class="btn btn-primary btn-sm"
+            :disabled="sending || !recipientBound || !amountValid"
+            @click="submitTransfer"
+          >
+            {{ sending ? '转账中…' : `确认转出 ${amountValid ? amount : 0} NL` }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- 转账流水 overlay -->
+    <div
+      v-if="ledgerOpen"
+      class="overlay" role="dialog" aria-modal="true" aria-label="转账流水"
+      @click.self="ledgerOpen = false"
+    >
+      <div class="card w-full max-w-3xl !p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="text-base font-semibold">转账流水</h3>
+            <p class="quiet mt-1 text-xs">
+              店家通过 NodeLoc 转给买家的每一笔，含未成功的尝试。最近 {{ ledger.length }} 条 · 共 {{ ledgerTotal }} 条。
+            </p>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary btn-sm" :disabled="ledgerLoading" @click="loadLedger">刷新</button>
+            <button class="btn btn-ghost btn-sm" @click="ledgerOpen = false">关闭</button>
+          </div>
+        </div>
+
+        <p v-if="ledgerError" class="alert alert-danger mt-3" role="alert">{{ ledgerError }}</p>
+
+        <div class="table-container mt-4 max-h-[60vh] overflow-y-auto">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>收款人</th>
+                <th class="text-right">金额</th>
+                <th>状态</th>
+                <th>流水号 / 留言</th>
+                <th>操作者</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="ledgerLoading && !ledger.length">
+                <td colspan="6"><div class="skeleton h-6" /></td>
+              </tr>
+              <tr v-else-if="!ledger.length">
+                <td colspan="6">
+                  <div class="empty-state">
+                    <p class="empty-glyph" aria-hidden="true">◌</p>
+                    <p class="empty-title">还没有转账记录</p>
+                    <p class="empty-hint">在用户列表里点「转账」，就会通过 NodeLoc 把 NL 转给那位买家。</p>
+                  </div>
+                </td>
+              </tr>
+              <tr v-for="row in ledger" :key="row.id">
+                <td class="quiet whitespace-nowrap text-xs">{{ when(row.created_at) }}</td>
+                <td class="text-sm">
+                  <RouterLink :to="`/users/${row.user_id}`" class="hover:text-[var(--accent)]">{{ row.username }}</RouterLink>
+                  <span v-if="row.to_username" class="quiet text-xs mono"> · {{ row.to_username }}</span>
+                </td>
+                <td class="nums text-right text-sm">{{ row.amount }}</td>
+                <td>
+                  <span class="badge" :class="transferStatus(row.status).badge">{{ transferStatus(row.status).label }}</span>
+                </td>
+                <td class="max-w-[240px] truncate text-xs mono quiet" :title="row.detail || row.reference">
+                  {{ row.note || row.reference }}
+                </td>
+                <td class="quiet text-xs">{{ row.operator_name || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </section>
 </template>

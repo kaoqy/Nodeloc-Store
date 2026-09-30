@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -75,6 +76,18 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	adminReconcile := router.Group("/api/v1/admin/reconcile")
 	adminReconcile.Use(middleware.JWTMiddleware(jwtConfig))
 	adminReconcile.POST("/pending", guard("orders", "manage"), h.AdminReconcilePending)
+
+	// 店家转账 hangs off the user routes because that is where the shop decides to
+	// pay somebody. :id is spelled as identity's admin routes do, so both modules
+	// land on one path segment instead of fighting over the tree.
+	adminUsers := router.Group("/api/v1/admin/users")
+	adminUsers.Use(middleware.JWTMiddleware(jwtConfig))
+	adminUsers.POST("/:id/transfer", guard("users", "manage"), h.AdminGrantTransfer)
+	adminUsers.GET("/:id/transfers", guard("users", "view"), h.AdminListUserTransfers)
+
+	adminTransfers := router.Group("/api/v1/admin/transfers")
+	adminTransfers.Use(middleware.JWTMiddleware(jwtConfig))
+	adminTransfers.GET("", guard("users", "view"), h.AdminListTransfers)
 
 	// NodeLoc notifies via a browser GET redirect (signature-verified); POST is
 	// accepted as well for server-push style integrations.
@@ -699,4 +712,89 @@ func (h *Handler) AdminReconcilePending(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, report)
+}
+
+// ── 店家转账 ───────────────────────────────────────────────────────
+
+type adminGrantRequest struct {
+	Amount int    `json:"amount"`
+	Note   string `json:"note"`
+}
+
+// AdminGrantTransfer moves NL from the shop's NodeLoc application to one buyer.
+// The operator is whoever the session belongs to, never whatever the request body
+// claimed: a ledger that trusts an "operator_id" from the client can be written to
+// blame somebody else for a transfer.
+func (h *Handler) AdminGrantTransfer(c *gin.Context) {
+	userID, ok := routeAccountID(c)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "用户 ID 无效", "code": "invalid_request"})
+		return
+	}
+	operatorID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录。", "code": "unauthenticated"})
+		return
+	}
+	var request adminGrantRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整或格式错误", "code": "invalid_request"})
+		return
+	}
+	transfer, err := h.service.Grant(c.Request.Context(), application.GrantInput{
+		UserID:     userID,
+		Amount:     request.Amount,
+		Note:       request.Note,
+		OperatorID: operatorID,
+	})
+	if err != nil {
+		// The refusal still reached the ledger, so the audit row has to say what
+		// was attempted; otherwise a failed 转账 leaves no trace at all.
+		c.Set(middleware.AuditDetailKey, fmt.Sprintf("向用户 %d 转出失败：%s", userID, application.Classify(err).Message))
+		writeError(c, err)
+		return
+	}
+	c.Set(middleware.AuditDetailKey, fmt.Sprintf("向 %s（NodeLoc uid %s）转出 %d NL，流水号 %s",
+		transfer.Username, transfer.ToUserID, transfer.Amount, transfer.Reference))
+	c.JSON(http.StatusOK, gin.H{"data": transfer})
+}
+
+// AdminListUserTransfers is one buyer's 转账流水, newest first.
+func (h *Handler) AdminListUserTransfers(c *gin.Context) {
+	userID, ok := routeAccountID(c)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "用户 ID 无效", "code": "invalid_request"})
+		return
+	}
+	h.listTransfers(c, userID)
+}
+
+// AdminListTransfers is the whole shop's ledger.
+func (h *Handler) AdminListTransfers(c *gin.Context) {
+	h.listTransfers(c, 0)
+}
+
+func (h *Handler) listTransfers(c *gin.Context, userID uint) {
+	limit, err := parseNonNegativeInt(c.DefaultQuery("limit", "50"))
+	if err != nil || limit == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "limit 需为正整数", "code": "invalid_request"})
+		return
+	}
+	offset, err := parseNonNegativeInt(c.DefaultQuery("offset", "0"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "offset 需为非负整数", "code": "invalid_request"})
+		return
+	}
+	transfers, total, err := h.service.ListTransfers(c.Request.Context(), userID, limit, offset)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": transfers, "total": total, "limit": limit, "offset": offset})
+}
+
+// routeAccountID reads the :id of an admin user route.
+func routeAccountID(c *gin.Context) (uint, bool) {
+	parsed, err := strconv.ParseUint(strings.TrimSpace(c.Param("id")), 10, 64)
+	return uint(parsed), err == nil && parsed > 0
 }

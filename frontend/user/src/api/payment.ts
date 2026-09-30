@@ -60,6 +60,20 @@ export function reconcileRetryable(error: unknown): boolean {
   return errorRetryable(error)
 }
 
+/**
+ * What the buyer can actually do about a refused 下单. The server already wrote
+ * the reason in Chinese against its machine-readable code; this only adds the
+ * next step, because a 付款配置 problem looks identical to a transient one from
+ * the storefront and the buyer would otherwise keep pressing the button.
+ */
+export function checkoutAdvice(error: unknown): string {
+  if (errorRetryable(error)) return '稍等片刻再点一次通常就好了，商店也会持续向 NodeLoc 核实。'
+  const code = errorCode(error)
+  if (code === 'not_configured' || code === 'provider_rejected' || code === 'amount_mismatch' || code === 'foreign_transaction')
+    return '这是商店与 NodeLoc 之间的问题，重复点击不会有不同结果，请把订单号发给店家处理。'
+  return ''
+}
+
 export async function listOrders(limit = 50, offset = 0, status = '', q = '') {
   const { data } = await client.get<{ orders: Order[]; total: number }>('/payment/orders', {
     params: { limit, offset, status: status || undefined, q: q.trim() || undefined },

@@ -495,7 +495,15 @@ func (s *Service) GetSettings() (map[string]any, error) {
 	view.OAuth.ClientSecret = maskSecret(view.OAuth.ClientSecret)
 	view.Payment.Token = maskSecret(view.Payment.Token)
 	view.Payment.SecretKey = maskSecret(view.Payment.SecretKey)
-	return map[string]any{"settings": view}, nil
+	// The owner's switch says what they want; this says whether the shop can act
+	// on it. Without it a storefront with an empty Payment Token advertises
+	// 「支付已启用」 while every buyer is refused at 下单.
+	missing := rt.Payment.MissingCredentials()
+	return map[string]any{
+		"settings":        view,
+		"payment_ready":   rt.Payment.Enabled && len(missing) == 0,
+		"payment_missing": missing,
+	}, nil
 }
 
 // SaveSettings applies an update and rebuilds the application so the change
@@ -590,6 +598,12 @@ func (s *Service) TestOAuth() (string, error) {
 }
 
 // TestPayment probes the NodeLoc payment gateway with the current settings.
+//
+// The probe asks about a transaction id that does not exist, so a healthy gateway
+// answers with a refusal — and the admin needs to know *which* refusal. An
+// unreachable host, an empty field, a rejected signature and an unknown
+// transaction are four different fixes, and reporting them all as 「支付网关可达」
+// is how a wrong Secret Key survives a settings page.
 func (s *Service) TestPayment(ctx context.Context) (bool, string) {
 	s.mu.Lock()
 	probe := s.paymentProbe
@@ -602,9 +616,15 @@ func (s *Service) TestPayment(ctx context.Context) (bool, string) {
 		return true, "支付网关连通正常"
 	}
 	msg := err.Error()
+	lower := strings.ToLower(msg)
 	switch {
-	case strings.Contains(msg, "not fully configured"), strings.Contains(msg, "payment is not configured"):
-		return false, "支付参数未配置完整（Payment ID / Secret Key）"
+	case strings.Contains(msg, "payment is not configured"):
+		return false, "支付参数未配置完整，缺少 " + describePaymentMissing(msg)
+	case strings.Contains(lower, "signature") && (strings.Contains(lower, "invalid") || strings.Contains(lower, "mismatch")):
+		return false, "网关可达，但 NodeLoc 拒绝了商店的签名：Secret Key 与这个 Payment ID 不匹配，请到 NodeLoc 后台重新核对"
+	case strings.Contains(lower, "not found") && (strings.Contains(lower, "transaction") || strings.Contains(lower, "order")),
+		strings.Contains(msg, "交易不存在"), strings.Contains(msg, "订单不存在"):
+		return true, "支付网关连通正常，签名已被 NodeLoc 接受（探测用的交易号本就不存在）"
 	case strings.Contains(msg, "NodeLoc returned HTTP"):
 		return true, "支付网关可达（NodeLoc 返回: " + msg + "）"
 	case strings.Contains(msg, "no such host"), strings.Contains(msg, "connection refused"), strings.Contains(msg, "timeout"), strings.Contains(msg, "TLS"):
@@ -612,6 +632,33 @@ func (s *Service) TestPayment(ctx context.Context) (bool, string) {
 	default:
 		return false, msg
 	}
+}
+
+// paymentFieldLabels name the payment settings the way the 设置 page labels them,
+// so a diagnostic points at a field the owner can see.
+var paymentFieldLabels = map[string]string{
+	"base_url":   "支付 API 地址",
+	"payment_id": "Payment ID",
+	"token":      "Payment Token",
+	"secret_key": "Secret Key",
+}
+
+func describePaymentMissing(msg string) string {
+	tail := msg
+	if idx := strings.Index(msg, "缺少 "); idx >= 0 {
+		tail = msg[idx+len("缺少 "):]
+	} else if idx := strings.LastIndex(msg, "："); idx >= 0 {
+		tail = msg[idx+len("："):]
+	}
+	labels := make([]string, 0, 4)
+	for _, name := range strings.Split(strings.TrimSpace(tail), "、") {
+		if label, ok := paymentFieldLabels[name]; ok {
+			labels = append(labels, label)
+			continue
+		}
+		labels = append(labels, name)
+	}
+	return strings.Join(labels, "、")
 }
 
 func maskSecret(v string) string {

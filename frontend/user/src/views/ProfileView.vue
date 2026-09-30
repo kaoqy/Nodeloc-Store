@@ -169,6 +169,8 @@ const kindLabels: Record<string, string> = {
   system: '系统',
   promo: '促销',
   announcement: '公告',
+  stock: '库存预警',
+  transfer: '店家转账',
 }
 
 function kindLabel(kind: string) {

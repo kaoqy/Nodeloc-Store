@@ -50,6 +50,12 @@ type OrderRepo interface {
 	ListReconcilableOrders(ctx context.Context, limit int, minAge time.Duration) ([]models.Order, error)
 	UpdateOrderStatus(ctx context.Context, orderNo string, status string) (*models.Order, error)
 	SetOrderDeliveryContent(ctx context.Context, orderNo string, content string) (*models.Order, error)
+	// Transfers are the ledger of 店家主动转账: money the shop sent to a buyer's
+	// NodeLoc account with no order behind it. Both outcomes are recorded, so a
+	// rejected attempt is still something the owner can point at.
+	CreateTransfer(ctx context.Context, transfer *domain.Transfer) error
+	SaveTransfer(ctx context.Context, transfer *domain.Transfer) error
+	ListTransfers(ctx context.Context, userID uint, limit, offset int) ([]domain.Transfer, int64, error)
 }
 
 // UserLookup is a lightweight interface for checking user existence/status.

@@ -39,6 +39,10 @@ var (
 	// shop turned 优惠码 off in the meantime. The buyer re-quotes rather than
 	// paying an amount they were never shown.
 	ErrCouponUnavailable = errors.New("coupon cannot be applied to this order")
+	// ErrGrantRecipientUnknown stops a 店家转账 before it reaches NodeLoc: points
+	// can only land in a NodeLoc account, and a shop buyer who signed up locally
+	// has none. Saying so is the operator's cue to ask them to bind it.
+	ErrGrantRecipientUnknown = errors.New("这个账号没有绑定 NodeLoc 用户，积分没有可转入的账户；请让对方在个人中心用 NodeLoc 登录一次")
 )
 
 // maxOrderQuantity bounds a single storefront order so one buyer cannot drain
@@ -254,6 +258,10 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 		Amount: order.TotalAmount, Description: description, OrderID: order.OrderNo,
 	})
 	if err != nil {
+		// A refused 下单 has to leave a trace the shop owner can read. Until it
+		// does, "买家说付不了款" is unanswerable: the buyer only ever sees the
+		// generic sentence, and the provider's reason disappears with the request.
+		s.recordCheckoutFailure(ctx, order, err)
 		if errors.Is(err, domain.ErrPaymentNotConfigured) {
 			return nil, err
 		}
@@ -305,6 +313,9 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 		}
 	}
 	transaction.Status = status
+	// A retry that gets through must not keep the previous refusal: the order
+	// detail would read "支付失败" next to a working payment link.
+	transaction.FailureReason = nil
 	// provider_transaction_id is unique, and a checkout whose response carried no
 	// id would store an empty one — so two such orders would collide on the index
 	// and the second payment attempt would fail with a database error.
@@ -328,6 +339,43 @@ func (s *Service) savePaymentOrder(ctx context.Context, paymentOrder *domain.Pay
 		return s.orders.CreatePaymentOrder(ctx, paymentOrder)
 	}
 	return s.orders.SavePaymentOrder(ctx, paymentOrder)
+}
+
+// recordCheckoutFailure leaves a refused 下单 on the order's payment transaction.
+// Before this, a buyer's "付不了款" was unanswerable: the storefront only ever saw
+// the generic sentence and NodeLoc's reason died with the request.
+//
+// A row that already shows money having moved is left alone — a callback for that
+// transaction is the truth about it, and stamping this attempt's failure over it
+// would destroy the receipt for a paid order.
+func (s *Service) recordCheckoutFailure(ctx context.Context, order *models.Order, cause error) {
+	reason := Classify(cause).Code + "：" + cause.Error()
+	log.Printf("payment checkout %s: NodeLoc refused the 下单 request (%s)", order.OrderNo, reason)
+
+	transaction, err := s.orders.GetLatestTransaction(ctx, order.OrderNo, domain.TransactionTypePayment)
+	if err != nil {
+		log.Printf("payment checkout %s: failure not recorded, the payment transaction could not be read: %v", order.OrderNo, err)
+		return
+	}
+	if transaction != nil && (transaction.Status == domain.StatusPaid || transaction.Status == domain.StatusSucceeded) {
+		return
+	}
+	if transaction == nil {
+		transaction = &domain.Transaction{
+			OrderID: order.ID, OrderNo: order.OrderNo, Provider: "nodeloc",
+			Type: domain.TransactionTypePayment, Amount: order.TotalAmount, Currency: "points",
+		}
+	}
+	transaction.Status = domain.StatusFailed
+	transaction.FailureReason = &reason
+	if transaction.ID != 0 {
+		err = s.orders.SaveTransaction(ctx, transaction)
+	} else {
+		err = s.orders.CreateTransaction(ctx, transaction)
+	}
+	if err != nil {
+		log.Printf("payment checkout %s: failure could not be written: %v", order.OrderNo, err)
+	}
 }
 
 // HandleCallback settles the order behind NodeLoc's signed browser redirect.
@@ -453,6 +501,7 @@ func (s *Service) settle(ctx context.Context, orderNo string, paymentOrder *doma
 	}
 	if paymentTransaction != nil {
 		paymentTransaction.Status = domain.StatusPaid
+		paymentTransaction.FailureReason = nil
 		paymentTransaction.ProviderTransactionID = stringPointer(transactionID)
 		paymentTransaction.CompletedAt = &now
 		if err := s.orders.SaveTransaction(ctx, paymentTransaction); err != nil {

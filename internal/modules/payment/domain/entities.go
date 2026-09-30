@@ -44,6 +44,31 @@ type PaymentOrder struct {
 	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
+// Transfer is one 店家主动转账: points the shop sends to a buyer's NodeLoc
+// account without any order behind it. It keeps the NodeLoc reference the
+// provider deduplicates on, the recipient it actually addressed, and the
+// operator who pressed the button, because a moved balance has to be
+// explainable afterwards to both sides.
+type Transfer struct {
+	ID                    uint       `gorm:"primaryKey" json:"id"`
+	UserID                uint       `gorm:"not null;index" json:"user_id"`
+	Username              string     `gorm:"size:64;not null" json:"username"`
+	ToUserID              string     `gorm:"size:64;not null" json:"to_user_id"`
+	ToUsername            string     `gorm:"size:64" json:"to_username"`
+	Reference             string     `gorm:"size:64;not null;uniqueIndex" json:"reference"`
+	Provider              string     `gorm:"size:32;not null;default:nodeloc" json:"provider"`
+	ProviderTransactionID *string    `gorm:"size:128;index" json:"provider_transaction_id,omitempty"`
+	Amount                int        `gorm:"not null" json:"amount"`
+	Status                string     `gorm:"size:24;not null;index" json:"status"`
+	Note                  string     `gorm:"size:255" json:"note"`
+	Detail                string     `gorm:"type:text" json:"detail,omitempty"`
+	OperatorID            uint       `gorm:"not null;index" json:"operator_id"`
+	OperatorName          string     `gorm:"size:64" json:"operator_name"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
+	CompletedAt           *time.Time `json:"completed_at,omitempty"`
+}
+
 const (
 	TransactionTypePayment  = "payment"
 	TransactionTypeQuery    = "query"
