@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { adjustPoints, getUser, grantTransfer, listUserTransfers, setRole, toggleActive, toggleAdmin } from '../api/users'
-import { errorMessage, roleMeta, transferStatus, when } from '../utils/format'
+import { errorMessage, money, roleMeta, transferStatus, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 import type { Transfer, User } from '../types'
 
@@ -120,7 +120,7 @@ async function submitGrant() {
       amount: Number(grantAmount.value),
       note: grantNote.value.trim() || undefined,
     })
-    notice.value = `已向 ${user.value.username} 的 NodeLoc 账户转出 ${row.amount} NL（流水号 ${row.reference}）`
+    notice.value = `已向 ${user.value.username} 的 NodeLoc 账户转出 ${money(row.amount)}（流水号 ${row.reference}）`
     grantNote.value = ''
     grantAmount.value = 10
   } catch (err) {
@@ -362,7 +362,7 @@ onMounted(load)
                 :key="row.id"
                 class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--stroke-quiet)] pb-1.5 text-sm"
               >
-                <span class="nums font-medium">{{ row.amount }} NL</span>
+                <span class="nums font-medium">{{ money(row.amount) }}</span>
                 <span class="badge" :class="transferStatus(row.status).badge">{{ transferStatus(row.status).label }}</span>
                 <span class="mono quiet flex-1 truncate text-xs" :title="row.note || row.detail || row.reference">
                   {{ row.note || row.detail || row.reference }}

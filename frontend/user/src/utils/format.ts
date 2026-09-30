@@ -1,19 +1,33 @@
-const currency = new Intl.NumberFormat('zh-CN', {
-  style: 'currency',
-  currency: 'CNY',
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 2,
-})
+// This file is kept in step with frontend/admin/src/utils/format.ts: buyer and
+// shopkeeper must not disagree about what the same number or the same status is
+// called. A price is a number of NodeLoc points (NL) — the checkout has NodeLoc
+// deduct that many from the buyer's forum account, so a 「¥」 in front of it
+// named a currency that never moves. The in-shop 积分 from checking in is a
+// different balance and keeps its own word.
+const amount = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+
+export const PRICE_UNIT = 'NL'
 
 const dateTime = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
+const dayFormat = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' })
 
-/** Points are the store's unit of value, but they are priced and shown as money. */
-export function money(value: number): string {
-  return currency.format(value)
+/** money renders one of the shop's amounts, which are quoted and charged in NL. */
+export function money(value?: number | string | null): string {
+  return `${amount.format(Number(value || 0))} ${PRICE_UNIT}`
 }
 
 export function when(value?: string | null): string {
-  return value ? dateTime.format(new Date(value)) : '—'
+  if (!value) return '—'
+  const date = new Date(value)
+  // A zero time is stored as year 1 and would read as 「1年1月1日」; unparseable
+  // text is not a date either. Neither is worth showing a buyer.
+  if (Number.isNaN(date.getTime()) || date.getFullYear() < 1970) return '—'
+  return dateTime.format(date)
+}
+
+export function dayLabel(value: string): string {
+  const date = new Date(`${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? value : dayFormat.format(date)
 }
 
 export interface StatusMeta {
@@ -96,8 +110,12 @@ export function paymentNotice(code?: string | null): StatusMeta | null {
   return PAYMENT_NOTICE[code] || PAYMENT_NOTICE.error
 }
 
+// normalizeStatus() on the server collapses NodeLoc's spellings onto a small
+// set; whatever still slips through is shown as evidence inside a Chinese
+// sentence rather than as a bare English badge on the order page.
 const PROVIDER_STATUS: Record<string, string> = {
   pending: '处理中',
+  succeeded: '已到账',
   failed: '失败',
   cancelled: '已取消',
   refunded: '已退款',
@@ -108,7 +126,9 @@ const PROVIDER_STATUS: Record<string, string> = {
 /** providerStatus names what NodeLoc recorded for the payment, in Chinese. */
 export function providerStatus(status?: string): string {
   if (!status) return '未知状态'
-  return PROVIDER_STATUS[status] || status
+  const known = PROVIDER_STATUS[status]
+  if (known) return known
+  return `未知道账状态（${status}）`
 }
 
 const OAUTH_ERROR: Record<string, string> = {

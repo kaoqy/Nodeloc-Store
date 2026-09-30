@@ -1,21 +1,26 @@
-const currency = new Intl.NumberFormat('zh-CN', {
-  style: 'currency',
-  currency: 'CNY',
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 2,
-})
+// Two balances live in this shop and they must not borrow each other's word.
+// A price is a number of NodeLoc points (NL) — the checkout asks NodeLoc to
+// deduct exactly this many from the buyer's forum account, so printing 「¥99」
+// showed a currency that never moves. 商店积分 (User.Points, the check-in
+// ledger) is a separate in-shop balance and stays 积分.
+const amount = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+
+export const PRICE_UNIT = 'NL'
 
 const dateTime = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
-const dayFormat = new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' })
+const dayFormat = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' })
 
 export function money(value?: number | string | null): string {
-  return currency.format(Number(value || 0))
+  return `${amount.format(Number(value || 0))} ${PRICE_UNIT}`
 }
 
 export function when(value?: string | null): string {
   if (!value) return '—'
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : dateTime.format(date)
+  // A zero time is stored as year 1 and would otherwise read as 「1年1月1日」,
+  // which is a date nobody asked for. Unparseable text is not a date either.
+  if (Number.isNaN(date.getTime()) || date.getFullYear() < 1970) return '—'
+  return dateTime.format(date)
 }
 
 export function dayLabel(value: string): string {
@@ -128,8 +133,15 @@ const RECONCILE_HINT: Record<string, string> = {
   not_found: '订单或支付记录已不存在，无法查询。',
 }
 
+// What the gateway records for a payment is a small closed set on purpose:
+// normalizeStatus() collapses NodeLoc's own spellings onto these, and an
+// unnormalised word can still arrive (the gateway passes an unknown status
+// through). Both cases need Chinese on screen — a badge reading 「succeeded」 in
+// an otherwise Chinese order list is the bug, so an unrecognised word is kept
+// as the evidence and framed in Chinese rather than shown bare.
 const PROVIDER_STATUS: Record<string, string> = {
   pending: '处理中',
+  succeeded: '已到账',
   failed: '失败',
   cancelled: '已取消',
   refunded: '已退款',
@@ -140,7 +152,9 @@ const PROVIDER_STATUS: Record<string, string> = {
 /** providerStatus names what NodeLoc recorded for a payment, in Chinese. */
 export function providerStatus(status?: string): string {
   if (!status) return '未知状态'
-  return PROVIDER_STATUS[status] || status
+  const known = PROVIDER_STATUS[status]
+  if (known) return known
+  return `未知道账状态（${status}）`
 }
 
 // The inbox stores the kind as the sender named it. These are the kinds this

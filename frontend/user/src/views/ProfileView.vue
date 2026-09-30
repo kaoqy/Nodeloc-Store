@@ -19,7 +19,7 @@ import type { InboxKind, InboxQuery } from '../api/notifications'
 import { useAuthStore } from '../stores/auth'
 import { useInboxStore } from '../stores/inbox'
 import { useSiteStore } from '../stores/site'
-import { oauthErrorText, when } from '../utils/format'
+import { dayLabel, oauthErrorText, when } from '../utils/format'
 import type { AppNotification, CheckinRecord, CheckinStatus, PointEntry } from '../types'
 
 const POINTS_PAGE = 20
@@ -66,12 +66,6 @@ const profileComplete = computed(() => {
   return Boolean((current.nickname || current.username) && current.email && (current.avatar_url || current.oauth_avatar))
 })
 const morePoints = computed(() => entries.value.length < pointsTotal.value)
-
-function dayLabel(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '—'
-  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date)
-}
 
 async function reloadAccountPanels() {
   const [status, history, ledger, messages] = await Promise.allSettled([

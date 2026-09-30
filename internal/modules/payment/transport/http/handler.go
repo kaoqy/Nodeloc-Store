@@ -495,12 +495,13 @@ func readOrderFilter(c *gin.Context) (orderFilter, string) {
 	return filter, ""
 }
 
-// exportOrderColumns name the CSV header. The amounts are labelled in 元 because
-// that is the unit the shop prices, displays and charges in: an order for a ¥99
-// product reads 99.00 here, on the storefront, and in what NodeLoc was asked to
-// collect. A download that rescaled them would not reconcile with anything.
+// exportOrderColumns name the CSV header. The amounts are labelled in NL because
+// that is what they are: an order for a 99 NL product reads 99 on the
+// storefront, 99 in this file, and 99 in what NodeLoc was asked to deduct. A
+// download that rescaled them — or dressed them up as currency — would not
+// reconcile with anything.
 var exportOrderColumns = []string{
-	"订单号", "状态", "交付状态", "商品", "数量", "单价(元)", "优惠(元)", "实付(元)", "优惠码",
+	"订单号", "状态", "交付状态", "商品", "数量", "单价(NL)", "优惠(NL)", "实付(NL)", "优惠码",
 	"买家ID", "买家用户名", "买家邮箱", "联系方式", "NodeLoc交易号", "卡密数",
 	"下单时间", "支付时间", "交付时间",
 }
@@ -555,9 +556,9 @@ func (h *Handler) AdminExportOrders(c *gin.Context) {
 			order.FulfillmentStatus,
 			safeCell(productName(order)),
 			strconv.Itoa(order.Quantity),
-			yuan(order.UnitPrice),
-			yuan(order.DiscountAmount),
-			yuan(order.TotalAmount),
+			amountText(order.UnitPrice),
+			amountText(order.DiscountAmount),
+			amountText(order.TotalAmount),
 			safeCell(order.CouponCode),
 			buyerID,
 			safeCell(username),
@@ -604,10 +605,11 @@ func formatTime(value *time.Time) string {
 	return value.Format(time.RFC3339)
 }
 
-// yuan renders an order amount the way a statement reads it: the shop's own
-// number, two decimals, no rescaling.
-func yuan(amount int) string {
-	return strconv.FormatFloat(float64(amount), 'f', 2, 64)
+// amountText writes one NL amount into the export. NodeLoc points are whole, so
+// the shop's own integer goes out unchanged: no rescaling, and no ".00" that
+// would make a point count look like a price in a currency.
+func amountText(amount int) string {
+	return strconv.Itoa(amount)
 }
 
 func (h *Handler) AdminGetOrder(c *gin.Context) {

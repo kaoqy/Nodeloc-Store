@@ -25,13 +25,14 @@ func TestSafeCellDefusesFormulaStarts(t *testing.T) {
 	}
 }
 
-// The export must write the amount the shop set and the buyer was charged, so
-// the number is rendered with two decimals and never rescaled.
-func TestYuanRendersStatementAmount(t *testing.T) {
-	cases := map[int]string{0: "0.00", 1: "1.00", 99: "99.00", 999: "999.00", 123456789: "123456789.00"}
+// The export must write the amount the shop set and the buyer was charged. NodeLoc
+// points are whole, so the number goes out unchanged — with no ".00" and no ¥,
+// which would make a point count read as a currency the shop never charges in.
+func TestAmountTextWritesTheShopsOwnNumber(t *testing.T) {
+	cases := map[int]string{0: "0", 1: "1", 99: "99", 999: "999", 123456789: "123456789"}
 	for amount, want := range cases {
-		if got := yuan(amount); got != want {
-			t.Errorf("yuan(%d) = %q, want %q", amount, got, want)
+		if got := amountText(amount); got != want {
+			t.Errorf("amountText(%d) = %q, want %q", amount, got, want)
 		}
 	}
 }

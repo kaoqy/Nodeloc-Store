@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import PaginationFooter from '../components/PaginationFooter.vue'
 import { grantTransfer, listTransfers, listUserTransfers, listUsers, toggleActive } from '../api/users'
-import { errorMessage, roleMeta, transferStatus, when } from '../utils/format'
+import { errorMessage, money, roleMeta, transferStatus, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 import type { Transfer, User } from '../types'
 
@@ -315,14 +315,14 @@ onMounted(load)
         <!-- Only a landed 转账 answers with a row, so the status would repeat the
              「已到账」 this sentence already says. -->
         <p v-else-if="sent" class="alert alert-success mt-3">
-          已向 {{ transferTarget.username }} 转出 {{ sent.amount }} NL · 流水号 {{ sent.reference }}
+          已向 {{ transferTarget.username }} 转出 {{ money(sent.amount) }} · 流水号 {{ sent.reference }}
         </p>
 
         <div v-if="transferHistory.length" class="mt-4 border-t border-[var(--stroke)] pt-3">
           <p class="quiet text-xs">最近转账 · 共 {{ transferTotal }} 笔</p>
           <ul class="mt-2 space-y-1">
             <li v-for="row in transferHistory" :key="row.id" class="flex items-center justify-between gap-2 text-xs">
-              <span class="nums">{{ row.amount }} NL</span>
+              <span class="nums">{{ money(row.amount) }}</span>
               <span class="mono quiet truncate">{{ row.note || row.reference }}</span>
               <span class="badge" :class="transferStatus(row.status).badge">{{ transferStatus(row.status).label }}</span>
               <span class="quiet whitespace-nowrap">{{ when(row.created_at) }}</span>
@@ -397,7 +397,7 @@ onMounted(load)
                   <RouterLink :to="`/users/${row.user_id}`" class="hover:text-[var(--accent)]">{{ row.username }}</RouterLink>
                   <span v-if="row.to_username" class="quiet text-xs mono"> · {{ row.to_username }}</span>
                 </td>
-                <td class="nums text-right text-sm">{{ row.amount }}</td>
+                <td class="nums text-right text-sm">{{ money(row.amount) }}</td>
                 <td>
                   <span class="badge" :class="transferStatus(row.status).badge">{{ transferStatus(row.status).label }}</span>
                 </td>

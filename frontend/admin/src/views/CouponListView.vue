@@ -294,7 +294,7 @@ onMounted(load)
           </div>
           <div>
             <label class="label" for="k-desc">说明（买家可见）</label>
-            <input id="k-desc" v-model="editing.description" class="input" placeholder="新人首单立减 10 元" />
+            <input id="k-desc" v-model="editing.description" class="input" placeholder="新人首单立减 10 NL" />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -305,7 +305,7 @@ onMounted(load)
               </select>
             </div>
             <div>
-              <label class="label" for="k-value">{{ editing.discount_type === 'percent' ? '折扣（%）' : '立减（元）' }} *</label>
+              <label class="label" for="k-value">{{ editing.discount_type === 'percent' ? '折扣（%）' : '立减（NL）' }} *</label>
               <input id="k-value" v-model.number="editing.discount_value" type="number" min="1" class="input nums" />
             </div>
           </div>

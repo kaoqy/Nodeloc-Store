@@ -65,7 +65,7 @@ func TestBuyerEventPointsAtTheBuyersOwnOrder(t *testing.T) {
 	}
 
 	refunded, ok := buyerEvent(order, eventRefunded)
-	if !ok || !strings.Contains(refunded.Content, "¥180") {
+	if !ok || !strings.Contains(refunded.Content, "180 NL") {
 		t.Errorf("a refund must say what came back, got %+v ok=%v", refunded, ok)
 	}
 }

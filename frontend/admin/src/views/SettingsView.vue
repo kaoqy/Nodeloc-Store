@@ -387,7 +387,7 @@ onMounted(load)
           <div class="mb-5 flex items-center justify-between gap-4">
             <div>
               <h3 class="font-semibold">NodeLoc Payments 支付</h3>
-              <p class="hint mt-0.5">下单扣减积分，回调地址由订单号自动拼接</p>
+              <p class="hint mt-0.5">下单从买家的 NodeLoc 账户扣 NL，回调地址由订单号自动拼接</p>
             </div>
             <div class="flex items-center gap-2">
               <span class="hint">{{ settings.payment.enabled ? '已启用' : '已禁用' }}</span>

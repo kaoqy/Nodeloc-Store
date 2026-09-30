@@ -88,8 +88,10 @@ func buyerEvent(order *models.Order, kind string) (contract.BuyerEvent, bool) {
 		event.Content = "订单 " + order.OrderNo + " 的 " + name + " 已由商家交付，内容可以在订单页查看。"
 	case eventRefunded:
 		event.Title = "退款已到账"
-		event.Content = "订单 " + order.OrderNo + " 的 ¥" + strconv.Itoa(order.TotalAmount) +
-			" 已退回你的 NodeLoc 账户。"
+		// The refund arrives as NodeLoc points, which is what the buyer paid in,
+		// so the message names that unit instead of a ¥ nobody can spend here.
+		event.Content = "订单 " + order.OrderNo + " 的 " + strconv.Itoa(order.TotalAmount) +
+			" NL 已退回你的 NodeLoc 账户。"
 	default:
 		return contract.BuyerEvent{}, false
 	}

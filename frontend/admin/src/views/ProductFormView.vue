@@ -201,12 +201,12 @@ onMounted(load)
           <h3 class="mb-4 text-sm font-semibold">价格与库存</h3>
           <div class="grid gap-4 sm:grid-cols-2">
             <div>
-              <label class="label" for="p-price">售价（元）*</label>
-              <input id="p-price" v-model.number="form.price" type="number" min="0" step="0.01" class="input nums" />
+              <label class="label" for="p-price">售价（NL）*</label>
+              <input id="p-price" v-model.number="form.price" type="number" min="0" step="1" class="input nums" />
             </div>
             <div>
-              <label class="label" for="p-original">划线原价（可选）</label>
-              <input id="p-original" v-model.number="form.original_price" type="number" min="0" step="0.01" class="input nums" />
+              <label class="label" for="p-original">划线原价（可选，NL）</label>
+              <input id="p-original" v-model.number="form.original_price" type="number" min="0" step="1" class="input nums" />
             </div>
             <div v-if="isEdit">
               <span class="label">当前库存</span>
