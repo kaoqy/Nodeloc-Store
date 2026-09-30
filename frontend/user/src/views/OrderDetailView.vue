@@ -264,7 +264,7 @@ async function refreshDelivery() {
             <RouterLink
               v-if="order.product"
               :to="`/products/${order.product.slug}`"
-              class="text-[15px] font-semibold underline-offset-4 hover:underline"
+              class="break-words text-[15px] font-semibold underline-offset-4 hover:underline"
             >
               {{ order.product.name }}
             </RouterLink>
@@ -381,7 +381,7 @@ async function refreshDelivery() {
 
         <template v-if="order.delivery_note">
           <h3 class="mt-6 text-[13px] font-semibold text-[var(--text-dim)]">商家说明</h3>
-          <p class="mt-2 whitespace-pre-line text-sm leading-7 text-[var(--text-dim)]">{{ order.delivery_note }}</p>
+          <p class="mt-2 break-words whitespace-pre-line text-sm leading-7 text-[var(--text-dim)]">{{ order.delivery_note }}</p>
         </template>
       </section>
 
@@ -418,9 +418,9 @@ async function refreshDelivery() {
             <dt class="text-[var(--text-quiet)]">联系方式</dt>
             <dd class="mono mt-0.5 break-all">{{ order.customer_contact }}</dd>
           </div>
-          <div v-if="order.customer_note">
+          <div v-if="order.customer_note" class="min-w-0">
             <dt class="text-[var(--text-quiet)]">我的备注</dt>
-            <dd class="mt-0.5 whitespace-pre-line text-[var(--text-dim)]">{{ order.customer_note }}</dd>
+            <dd class="mt-0.5 break-words whitespace-pre-line text-[var(--text-dim)]">{{ order.customer_note }}</dd>
           </div>
         </dl>
       </section>

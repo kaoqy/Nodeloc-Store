@@ -229,7 +229,7 @@ onMounted(load)
 
         <template v-if="order.delivery_note">
           <h3 class="mb-3 mt-6 text-sm font-semibold">商家说明</h3>
-          <p class="whitespace-pre-wrap text-sm muted">{{ order.delivery_note }}</p>
+          <p class="break-words whitespace-pre-wrap text-sm muted">{{ order.delivery_note }}</p>
         </template>
       </div>
 
@@ -256,7 +256,7 @@ onMounted(load)
             </div>
             <div class="flex justify-between gap-3">
               <dt class="quiet">备注</dt>
-              <dd class="text-right">{{ order.customer_note || '—' }}</dd>
+              <dd class="min-w-0 break-words text-right">{{ order.customer_note || '—' }}</dd>
             </div>
           </dl>
         </div>

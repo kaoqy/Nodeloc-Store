@@ -259,7 +259,7 @@ watch(
     </div>
 
     <div v-else class="fade-in grid items-start gap-8 lg:grid-cols-[1.5fr_1fr]">
-      <section>
+      <section class="min-w-0">
         <RouterLink to="/" class="hint inline-flex items-center gap-1.5 transition-colors hover:text-[var(--text)]">
           ← 全部商品
         </RouterLink>
@@ -288,13 +288,13 @@ watch(
               <span v-if="product.is_featured" class="badge badge-accent">店长推荐</span>
             </div>
 
-            <h1 class="mt-4 text-3xl font-bold">{{ product.name }}</h1>
+            <h1 class="mt-4 break-words text-3xl font-bold">{{ product.name }}</h1>
             <p v-if="product.summary" class="mt-2 text-[15px] text-[var(--text-dim)]">{{ product.summary }}</p>
             <p class="hint mt-2 nums">已售 {{ product.sold_count ?? 0 }} 件</p>
 
             <div v-if="product.description" class="my-6 divider" />
 
-            <p v-if="product.description" class="whitespace-pre-line text-[15px] leading-7 text-[var(--text-dim)]">
+            <p v-if="product.description" class="break-words whitespace-pre-line text-[15px] leading-7 text-[var(--text-dim)]">
               {{ product.description }}
             </p>
           </div>
@@ -359,7 +359,7 @@ watch(
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <p class="mono text-sm font-semibold">{{ promo.code }}</p>
-                  <p class="hint mt-1">
+                  <p class="hint mt-1 break-words">
                     {{ promoWorth(promo) }}
                     <span v-if="promo.min_order_amount"> · 满 {{ money(promo.min_order_amount) }} 可用</span>
                     <span v-if="promo.description"> · {{ promo.description }}</span>
@@ -397,7 +397,7 @@ watch(
                 {{ quoting ? '核对中…' : '使用' }}
               </button>
             </div>
-            <p v-if="quote?.accepted" class="alert alert-success mt-2">
+            <p v-if="quote?.accepted" class="alert alert-success mt-2 break-words">
               已优惠 {{ money(quote.discount) }}
               <span v-if="quote.description"> · {{ quote.description }}</span>
             </p>

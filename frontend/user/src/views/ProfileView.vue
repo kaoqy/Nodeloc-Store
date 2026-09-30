@@ -398,7 +398,7 @@ onMounted(async () => {
             {{ user?.email || '未绑定邮箱' }}
             <span v-if="emailLocked" class="opacity-70">· 来自 NodeLoc</span>
           </p>
-          <p v-if="user?.bio" class="mt-2 whitespace-pre-line text-[13px] leading-relaxed text-[var(--text-dim)]">
+          <p v-if="user?.bio" class="mt-2 break-words whitespace-pre-line text-[13px] leading-relaxed text-[var(--text-dim)]">
             {{ user.bio }}
           </p>
         </div>
@@ -637,7 +637,7 @@ onMounted(async () => {
             <span class="mt-1.5 size-2 shrink-0 rounded-full" :class="item.is_read ? 'bg-[var(--stroke-hi)]' : 'bg-[var(--accent)]'" />
             <span class="min-w-0 flex-1">
               <span class="block truncate font-medium">{{ item.title }}</span>
-              <span v-if="item.content" class="hint mt-1 block line-clamp-2 whitespace-pre-line">{{ item.content }}</span>
+              <span v-if="item.content" class="hint mt-1 block line-clamp-2 break-words whitespace-pre-line">{{ item.content }}</span>
               <span class="hint mt-1 block">{{ when(item.created_at) }}</span>
             </span>
             <span v-if="item.link" aria-hidden="true" class="hint shrink-0">→</span>

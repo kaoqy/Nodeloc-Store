@@ -447,6 +447,14 @@ html[data-theme='light'] {
     -webkit-backdrop-filter: blur(3px);
     animation: fadeIn 180ms var(--ease) both;
   }
+  /* The coupon form measures ~706px, which is taller than a 1366×768 laptop's
+     viewport. A centred flex child that overflows its container is cut off at
+     *both* ends and there is nothing to scroll, so the topmost field could never
+     be reached. The dialog scrolls itself instead. */
+  .overlay > * {
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+  }
 
   .spinner {
     width: 16px;

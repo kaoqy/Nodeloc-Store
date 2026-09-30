@@ -73,7 +73,7 @@ async function logout() {
         </button>
 
         <template v-if="auth.isAuthenticated">
-          <RouterLink to="/profile" class="btn btn-quiet btn-sm max-w-[12rem] gap-2">
+          <RouterLink to="/profile" class="btn btn-quiet btn-sm max-w-[8rem] gap-2 sm:max-w-[12rem]">
             <span class="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--surface-hi)] text-[11px] font-bold">
               <img v-if="avatar" :src="avatar" alt="" class="size-full object-cover" />
               <span v-else>{{ initial }}</span>
@@ -86,8 +86,9 @@ async function logout() {
               >{{ badge }}</span
             >
           </RouterLink>
-          <!-- Plain anchor: /admin is a separate SPA, so it needs a full load. -->
-          <a v-if="auth.canEnterAdmin" href="/admin/" class="btn btn-quiet btn-sm">进入后台</a>
+          <!-- Plain anchor: /admin is a separate SPA, so it needs a full load.
+               Narrow phones list this in the ☰ drawer instead, next to 退出登录. -->
+          <a v-if="auth.canEnterAdmin" href="/admin/" class="btn btn-quiet btn-sm hidden sm:inline-flex">进入后台</a>
           <button class="btn btn-ghost btn-sm hidden sm:inline-flex" @click="logout">退出</button>
         </template>
         <template v-else>

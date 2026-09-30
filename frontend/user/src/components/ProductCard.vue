@@ -31,7 +31,7 @@ defineProps<{ product: Product }>()
 
     <div class="flex flex-1 flex-col p-5">
       <div class="flex items-start justify-between gap-3">
-        <h3 class="text-[15px] font-semibold">{{ product.name }}</h3>
+        <h3 class="line-clamp-2 min-w-0 break-words text-[15px] font-semibold">{{ product.name }}</h3>
         <span v-if="product.category" class="badge badge-neutral shrink-0">{{ product.category.name }}</span>
       </div>
 

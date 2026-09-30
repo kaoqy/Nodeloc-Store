@@ -189,7 +189,7 @@ onMounted(load)
                 >打开链接 ↗</a
               >
             </div>
-            <p v-if="item.content" class="mt-1 text-sm muted">{{ item.content }}</p>
+            <p v-if="item.content" class="mt-1 break-words text-sm muted">{{ item.content }}</p>
             <p class="quiet mt-1.5 text-xs">{{ when(item.created_at) }}</p>
           </div>
           <button v-if="!item.is_read" class="btn btn-ghost btn-sm" :disabled="busy" @click="read(item)">标为已读</button>

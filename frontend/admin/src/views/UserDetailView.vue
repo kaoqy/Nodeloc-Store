@@ -227,9 +227,9 @@ onMounted(load)
         >
           {{ user.username.slice(0, 1).toUpperCase() }}
         </div>
-        <h3 class="text-lg font-semibold">{{ user.nickname || user.username }}</h3>
+        <h3 class="break-words text-lg font-semibold">{{ user.nickname || user.username }}</h3>
         <p class="quiet mt-1 text-sm mono">#{{ user.id }}</p>
-        <p class="quiet mt-0.5 text-sm">{{ user.email || '未设置邮箱' }}</p>
+        <p class="quiet mt-0.5 break-words text-sm">{{ user.email || '未设置邮箱' }}</p>
         <div class="mt-5 grid grid-cols-2 gap-3 text-left">
           <div class="card-quiet !p-3">
             <p class="eyebrow">积分</p>

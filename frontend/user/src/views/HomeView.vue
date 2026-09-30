@@ -163,7 +163,7 @@ onMounted(async () => {
       role="status"
     >
       <span aria-hidden="true" class="accent-text mt-px">📣</span>
-      <span class="flex-1 whitespace-pre-line">{{ announcement }}</span>
+      <span class="min-w-0 flex-1 break-words whitespace-pre-line">{{ announcement }}</span>
       <button class="hint shrink-0 transition-colors hover:text-[var(--text)]" aria-label="关闭公告" @click="hideAnnouncement">
         知道了
       </button>
