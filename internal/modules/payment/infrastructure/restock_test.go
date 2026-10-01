@@ -8,6 +8,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
@@ -97,7 +98,7 @@ func TestRestockDeliversWhatWasWaitingForIt(t *testing.T) {
 	ctx := context.Background()
 	store := NewGormStore(db)
 	notifier := &restockNotifier{}
-	service := application.NewService(store, restockGateway{}, store, restockLookup{}, restockPricing{}, notifier, "pay")
+	service := application.NewService(store, restockGateway{}, store, restockLookup{}, restockPricing{}, notifier, "pay", config.FeaturesConfig{})
 
 	keyProduct := &models.Product{Slug: "keys", Name: "卡密商品", Price: 30, ProductType: "card", AutoDeliver: true, IsPublished: true}
 	otherProduct := &models.Product{Slug: "other", Name: "另一件商品", Price: 30, ProductType: "card", AutoDeliver: true, IsPublished: true}
@@ -227,7 +228,7 @@ func TestRestockDoesNotResellToAnOrderThatAlreadyHasItsCards(t *testing.T) {
 	db := newRestockDB(t)
 	ctx := context.Background()
 	store := NewGormStore(db)
-	service := application.NewService(store, restockGateway{}, store, restockLookup{}, restockPricing{}, &restockNotifier{}, "pay")
+	service := application.NewService(store, restockGateway{}, store, restockLookup{}, restockPricing{}, &restockNotifier{}, "pay", config.FeaturesConfig{})
 
 	product := &models.Product{Slug: "keys", Name: "卡密商品", Price: 30, ProductType: "card", AutoDeliver: true, IsPublished: true}
 	if err := db.Create(product).Error; err != nil {

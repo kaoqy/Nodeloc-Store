@@ -151,6 +151,9 @@ export interface Coupon {
   category_id?: number | null
   product_id?: number | null
   per_user_limit?: number
+  /** Orders still holding this code's quota, paid ones and live checkouts. */
+  held?: number
+  remaining?: number | null
   created_at?: string
   updated_at?: string
 }

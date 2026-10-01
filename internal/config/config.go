@@ -34,11 +34,20 @@ type FeaturesConfig struct {
 	CheckinDisabled     bool `mapstructure:"checkin_disabled"`
 	CouponsDisabled     bool `mapstructure:"coupons_disabled"`
 	StockAlertThreshold int  `mapstructure:"stock_alert_threshold"`
+	// The two NodeLoc 启用 switches on 设置 live here too. They used to be stored
+	// and never read, so turning NodeLoc 登录 or 收款 off changed nothing but the
+	// badge on the settings card.
+	OAuthDisabled    bool `mapstructure:"oauth_disabled"`
+	PaymentsDisabled bool `mapstructure:"payments_disabled"`
 }
 
 func (f FeaturesConfig) CheckinOn() bool { return !f.CheckinDisabled }
 
 func (f FeaturesConfig) CouponsOn() bool { return !f.CouponsDisabled }
+
+func (f FeaturesConfig) OAuthOn() bool { return !f.OAuthDisabled }
+
+func (f FeaturesConfig) PaymentsOn() bool { return !f.PaymentsDisabled }
 
 // AlertThreshold is how little stock still counts as 库存告急.
 func (f FeaturesConfig) AlertThreshold() int {

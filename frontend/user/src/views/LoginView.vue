@@ -49,21 +49,25 @@ async function submit() {
       <div class="brand-mark mb-6">N</div>
       <p class="eyebrow">{{ site.name }}</p>
       <h1 class="mt-2 text-2xl font-bold">登录</h1>
-      <p class="mt-2 text-sm text-[var(--text-dim)]">使用 NodeLoc 账号即可下单，无需重复注册。</p>
+      <p class="mt-2 text-sm text-[var(--text-dim)]">
+        {{ site.oauthEnabled ? '使用 NodeLoc 账号即可下单，无需重复注册。' : '用店里的账号密码登录即可下单。' }}
+      </p>
 
       <div v-if="oauthError" class="alert alert-warning mt-6" role="alert">
         {{ oauthErrorText(oauthError) }}
       </div>
 
-      <button class="btn btn-primary btn-lg mt-7 w-full" type="button" @click="startOAuth">
-        使用 NodeLoc 账号继续
-      </button>
+      <template v-if="site.oauthEnabled">
+        <button class="btn btn-primary btn-lg mt-7 w-full" type="button" @click="startOAuth">
+          使用 NodeLoc 账号继续
+        </button>
 
-      <div class="my-6 flex items-center gap-3">
-        <span class="h-px flex-1 bg-[var(--stroke)]" />
-        <span class="hint">或使用账号密码</span>
-        <span class="h-px flex-1 bg-[var(--stroke)]" />
-      </div>
+        <div class="my-6 flex items-center gap-3">
+          <span class="h-px flex-1 bg-[var(--stroke)]" />
+          <span class="hint">或使用账号密码</span>
+          <span class="h-px flex-1 bg-[var(--stroke)]" />
+        </div>
+      </template>
 
       <form class="card space-y-4" @submit.prevent="submit">
         <div>

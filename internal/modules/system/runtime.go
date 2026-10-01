@@ -49,7 +49,10 @@ type FooterLink struct {
 }
 
 type OAuthConfig struct {
-	Enabled      bool   `json:"enabled"`
+	// Enabled is a pointer for the same reason the 签到/优惠码 switches are: an
+	// absent key means 开, so a settings document written before the switch was
+	// honoured does not switch NodeLoc 登录 off underneath the shop.
+	Enabled      *bool  `json:"enabled"`
 	BaseURL      string `json:"base_url"`
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
@@ -57,8 +60,10 @@ type OAuthConfig struct {
 	Scopes       string `json:"scopes"`
 }
 
+func (o OAuthConfig) On() bool { return o.Enabled == nil || *o.Enabled }
+
 type PaymentConfig struct {
-	Enabled   bool   `json:"enabled"`
+	Enabled *bool `json:"enabled"`
 	PaymentID string `json:"payment_id"`
 	// BaseURL is where 下单/查单/转账 go. Left empty they follow the OAuth host,
 	// which is right for a shop with one NodeLoc domain and wrong for one that
@@ -70,6 +75,9 @@ type PaymentConfig struct {
 	Token     string `json:"token"`
 	SecretKey string `json:"secret_key"`
 }
+
+// On reports whether the owner left NodeLoc 收款 switched on. Absent means on.
+func (p PaymentConfig) On() bool { return p.Enabled == nil || *p.Enabled }
 
 // MissingCredentials names the payment settings that have to be filled before a
 // buyer can pay, in the order the shop owner reads them on the settings page.
@@ -198,11 +206,11 @@ func Default() *RuntimeConfig {
 			Scheme: "https",
 		},
 		OAuth: OAuthConfig{
-			Enabled: true,
+			Enabled: &yes,
 			BaseURL: "https://www.nodeloc.com",
 			Scopes:  "openid profile",
 		},
-		Payment:  PaymentConfig{Enabled: true},
+		Payment:  PaymentConfig{Enabled: &yes},
 		Features: FeaturesConfig{RegistrationEnabled: true, Checkin: &yes, Coupons: &yes, StockAlertThreshold: &threshold},
 		Theme:    ThemeConfig{Primary: defaultAccent, Locale: defaultLocale},
 	}
@@ -436,4 +444,6 @@ func (r *RuntimeConfig) ApplyTo(cfg *config.Config) {
 	cfg.Features.CheckinDisabled = !r.Features.CheckinEnabled()
 	cfg.Features.CouponsDisabled = !r.Features.CouponsEnabled()
 	cfg.Features.StockAlertThreshold = r.Features.AlertThreshold()
+	cfg.Features.OAuthDisabled = !r.OAuth.On()
+	cfg.Features.PaymentsDisabled = !r.Payment.On()
 }

@@ -459,21 +459,53 @@ func (r *GormCouponRepo) Delete(ctx context.Context, id uint) error {
 }
 
 // UsedBy counts the orders an account holds against this code. A cancelled
-// order is not a spend, so it does not use up 每人限用.
-func (r *GormCouponRepo) UsedBy(ctx context.Context, couponID, userID uint) (int64, error) {
+// order is not a spend, and neither is an unpaid one the buyer walked away
+// from before since — otherwise every abandoned 立即购买 permanently burns a
+// slot of 每人限用 while the shop's counter still reads 0.
+func (r *GormCouponRepo) UsedBy(ctx context.Context, couponID, userID uint, since time.Time) (int64, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Table("orders").
-		Where("coupon_id = ? AND user_id = ? AND status <> ? AND deleted_at IS NULL", couponID, userID, "cancelled").
-		Count(&count).Error
+	err := r.quotaHeld(ctx, couponID, since).Where("user_id = ?", userID).Count(&count).Error
 	return count, err
 }
 
-// UsedTotal is the same count without the account filter: how many live orders
-// this code is already committed to, paid and still-pending alike.
-func (r *GormCouponRepo) UsedTotal(ctx context.Context, couponID uint) (int64, error) {
+// UsedTotal is the same count without the account filter: how many orders this
+// code is still committed to, paid ones and checkouts that are fresh enough to
+// still be in front of a buyer.
+func (r *GormCouponRepo) UsedTotal(ctx context.Context, couponID uint, since time.Time) (int64, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Table("orders").
-		Where("coupon_id = ? AND status <> ? AND deleted_at IS NULL", couponID, "cancelled").
-		Count(&count).Error
+	err := r.quotaHeld(ctx, couponID, since).Count(&count).Error
 	return count, err
+}
+
+// quotaHeld is the one rule both quota counts share, spelled once so the promo
+// shelf, 总量限用 and 每人限用 cannot drift apart.
+func (r *GormCouponRepo) quotaHeld(ctx context.Context, couponID uint, since time.Time) *gorm.DB {
+	return r.db.WithContext(ctx).Table("orders").
+		Where("coupon_id = ? AND deleted_at IS NULL", couponID).
+		Where("status <> ?", "cancelled").
+		Where("status <> ? OR created_at >= ?", "pending", since)
+}
+
+// HeldByCoupons runs quotaHeld's rule for every code at once, because the promo
+// table lists them all. Codes nobody is holding simply do not appear.
+func (r *GormCouponRepo) HeldByCoupons(ctx context.Context, since time.Time) (map[uint]int64, error) {
+	var rows []struct {
+		CouponID uint
+		Held     int64
+	}
+	err := r.db.WithContext(ctx).Table("orders").
+		Select("coupon_id, COUNT(*) AS held").
+		Where("coupon_id IS NOT NULL AND deleted_at IS NULL").
+		Where("status <> ?", "cancelled").
+		Where("status <> ? OR created_at >= ?", "pending", since).
+		Group("coupon_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	held := make(map[uint]int64, len(rows))
+	for _, row := range rows {
+		held[row.CouponID] = row.Held
+	}
+	return held, nil
 }

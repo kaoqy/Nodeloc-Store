@@ -72,6 +72,10 @@ func Classify(err error) *Failure {
 			return &Failure{Code: refusal.CouponCode(), Status: http.StatusUnprocessableEntity, Message: refusal.CouponMessage()}
 		}
 		return &Failure{Code: "coupon_unavailable", Status: http.StatusUnprocessableEntity, Message: "优惠码已经用不了了（可能过期、额度用满或不适用于本单），请重新确认后再下单。"}
+	case errors.Is(err, domain.ErrPaymentsDisabled):
+		// Not a failure of the buyer's, and not a broken gateway: the owner closed
+		// 收款 on 设置. They can reopen it without retyping a single credential.
+		return &Failure{Code: "payments_disabled", Status: http.StatusServiceUnavailable, Message: "本店已暂停收款，暂时下不了单。这不是你的操作问题，请店家在后台重新打开「NodeLoc Payments 支付」后再试。", Detail: err.Error()}
 	case errors.Is(err, domain.ErrPaymentNotConfigured):
 		return &Failure{Code: "not_configured", Status: http.StatusServiceUnavailable, Message: "商店的 NodeLoc 支付还没有配置好，请稍后再试或联系店家。", Detail: err.Error()}
 	case errors.Is(err, domain.ErrProviderClockSkew):

@@ -2,6 +2,7 @@ package contract
 
 import (
 	"context"
+	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/domain"
 )
@@ -68,13 +69,21 @@ type CouponRepo interface {
 	Create(ctx context.Context, coupon *domain.Coupon) error
 	Update(ctx context.Context, coupon *domain.Coupon) error
 	Delete(ctx context.Context, id uint) error
-	// UsedBy counts the orders an account has already placed with this code,
-	// including the pending ones, so 每人限用 can be enforced before the money
-	// moves rather than reconciled after.
-	UsedBy(ctx context.Context, couponID, userID uint) (int64, error)
+	// UsedBy counts the orders an account has already placed with this code, so
+	// 每人限用 can be enforced before the money moves rather than reconciled
+	// after. Unpaid orders older than since do not count: the buyer walked away,
+	// and a code they burned by pressing 立即购买 would stay burned for the rest
+	// of the promotion while the shop's 已使用 counter still reads 0.
+	UsedBy(ctx context.Context, couponID, userID uint, since time.Time) (int64, error)
 	// UsedTotal counts the live orders a code sits on, shop-wide. 总量限用 is
 	// checked against this rather than the coupon's used_count, because that
 	// column only moves when NodeLoc confirms a payment: two buyers racing to
-	// check out would both be told 额度还有 for the last code.
-	UsedTotal(ctx context.Context, couponID uint) (int64, error)
+	// check out would both be told 额度还有 for the last code. It carries the same
+	// unpaid cutoff as UsedBy so abandoned checkouts cannot eat the quota.
+	UsedTotal(ctx context.Context, couponID uint, since time.Time) (int64, error)
+	// HeldByCoupons is the back office's 使用情况 column in one pass: how many
+	// orders still hold each code's quota, keyed by coupon ID. The promo table
+	// shows every code the shop has ever made, so counting them one at a time
+	// turned a single page load into a query per code.
+	HeldByCoupons(ctx context.Context, since time.Time) (map[uint]int64, error)
 }

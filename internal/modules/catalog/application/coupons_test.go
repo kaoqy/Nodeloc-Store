@@ -28,11 +28,19 @@ func (r *shelfRepo) GetByCode(context.Context, string) (*domain.Coupon, error) {
 func (r *shelfRepo) Create(context.Context, *domain.Coupon) error { return nil }
 func (r *shelfRepo) Update(context.Context, *domain.Coupon) error { return nil }
 func (r *shelfRepo) Delete(context.Context, uint) error           { return nil }
-func (r *shelfRepo) UsedBy(context.Context, uint, uint) (int64, error) {
+func (r *shelfRepo) UsedBy(context.Context, uint, uint, time.Time) (int64, error) {
 	return 0, nil
 }
-func (r *shelfRepo) UsedTotal(_ context.Context, couponID uint) (int64, error) {
+func (r *shelfRepo) UsedTotal(_ context.Context, couponID uint, _ time.Time) (int64, error) {
 	return r.used[couponID], nil
+}
+
+func (r *shelfRepo) HeldByCoupons(_ context.Context, _ time.Time) (map[uint]int64, error) {
+	held := make(map[uint]int64, len(r.used))
+	for couponID, count := range r.used {
+		held[couponID] = count
+	}
+	return held, nil
 }
 
 func at(value time.Time) *time.Time { return &value }

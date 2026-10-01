@@ -75,7 +75,7 @@ func Wire(db *gorm.DB, cfg *config.Config, identityFind func(ctx context.Context
 	// The store owns card allocation and delivery records, so it also performs
 	// fulfillment; keeping both in one transactional implementation avoids the
 	// two divergent delivery paths that used to coexist here.
-	svc := application.NewService(store, gateway, store, lookup, coupons, events, cfg.NodeLoc.PaymentID)
+	svc := application.NewService(store, gateway, store, lookup, coupons, events, cfg.NodeLoc.PaymentID, cfg.Features)
 	handler := http.NewHandler(svc)
 	return &Module{Service: svc, Handler: handler, Gateway: gateway}, nil
 }

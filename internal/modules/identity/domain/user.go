@@ -26,6 +26,10 @@ var (
 	// is missing a field the login round trip needs. It names them, so the shop
 	// owner fixes one setting instead of watching 登录 do nothing.
 	ErrOAuthNotConfigured = errors.New("NodeLoc 登录还没有配置完整")
+	// ErrOAuthDisabled is the owner's 「启用 NodeLoc OAuth 登录」 switch turned off.
+	// Distinct from 没配置: the credentials are there, the shop just closed that
+	// door, and the login page has to say so instead of blaming the buyer.
+	ErrOAuthDisabled = errors.New("本店已暂停 NodeLoc 登录，请改用账号密码登录")
 	// ErrOAuthRejected means NodeLoc answered and refused; ErrOAuthUnreachable
 	// means it never answered. They are two different fixes — wrong credentials
 	// versus no egress — and the login page has to say which.

@@ -21,6 +21,8 @@ export const useSiteStore = defineStore('site', () => {
   const registrationEnabled = ref(true)
   const checkinEnabled = ref(true)
   const couponsEnabled = ref(true)
+  const oauthEnabled = ref(true)
+  const paymentsEnabled = ref(true)
 
   async function load() {
     try {
@@ -40,6 +42,8 @@ export const useSiteStore = defineStore('site', () => {
         registrationEnabled.value = status.features.registration !== false
         checkinEnabled.value = status.features.checkin !== false
         couponsEnabled.value = status.features.coupons !== false
+        oauthEnabled.value = status.features.oauth !== false
+        paymentsEnabled.value = status.features.payments !== false
       }
       // The owner's chosen colour is style, not copy: it repaints the tokens in
       // style.css and is remembered for the next boot splash. The locale rides
@@ -72,6 +76,8 @@ export const useSiteStore = defineStore('site', () => {
     registrationEnabled,
     checkinEnabled,
     couponsEnabled,
+    oauthEnabled,
+    paymentsEnabled,
     initials,
     hasFooter,
     load,

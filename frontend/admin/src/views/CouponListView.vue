@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { listCategories } from '../api/categories'
 import { createCoupon, deleteCoupon, listCoupons, updateCoupon } from '../api/coupons'
 import { listProducts } from '../api/products'
+import PaginationFooter from '../components/PaginationFooter.vue'
 import { errorMessage, money, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 import { closeOnEscape } from '../utils/dialog'
@@ -105,7 +106,9 @@ function changeScope(value: string) {
 
 // Dates are calendar days chosen in the admin's timezone: convert with local
 // parts, never with toISOString(), whose UTC rendering shifts the day by the
-// timezone offset.
+// timezone offset. The picker gives a day, the server stores an instant, and
+// the two halves of the window are different instants of that day — see
+// fromDateInput.
 function toDateInput(value?: string | null): string {
   if (!value) return ''
   const date = new Date(value)
@@ -114,8 +117,12 @@ function toDateInput(value?: string | null): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
-function fromDateInput(value: string): string | null {
-  return value ? new Date(`${value}T00:00:00`).toISOString() : null
+// 生效日期 is the first moment of the chosen day; 最后可用日期 is the last one,
+// otherwise a code advertised as running through the 5th dies at midnight
+// going into the 5th and every buyer that morning sees it refused.
+function fromDateInput(value: string, endOfDay = false): string | null {
+  if (!value) return null
+  return new Date(`${value}T${endOfDay ? '23:59:59.999' : '00:00:00'}`).toISOString()
 }
 
 async function save() {
@@ -192,6 +199,70 @@ function expiry(coupon: Coupon): string {
   return `${toDateInput(coupon.valid_from) || '立即'} → ${toDateInput(coupon.valid_until) || '长期'}`
 }
 
+// 启用/停用 alone is not the answer the owner is asking for when a buyer says
+// 「码用不了」: a switched-on code still cannot be spent before its window, after
+// it, or once its 限量 is committed. This reads the same rules the storefront
+// quote runs on, so the row and the refusal agree.
+function couponState(coupon: Coupon): { label: string; tone: string; note: string } {
+  const now = Date.now()
+  if (!coupon.is_active) return { label: '已停用', tone: 'badge-neutral', note: '买家输入会被告知「优惠码已停用」。' }
+  if (coupon.valid_from && new Date(coupon.valid_from).getTime() > now) {
+    return { label: '未开始', tone: 'badge-info', note: `${toDateInput(coupon.valid_from)} 那天零点才生效。` }
+  }
+  if (coupon.valid_until && new Date(coupon.valid_until).getTime() < now) {
+    return { label: '已过期', tone: 'badge-danger', note: `${toDateInput(coupon.valid_until)} 那天结束就失效了，重开要把日期改到今后。` }
+  }
+  if (coupon.max_uses && (coupon.remaining ?? 0) <= 0) {
+    return { label: '已抢完', tone: 'badge-warning', note: `${coupon.max_uses} 个额度都排在单上（含刚下单未付款的），付完或过期后会腾出来。` }
+  }
+  return { label: '可用', tone: 'badge-success', note: '买家现在就能用上。' }
+}
+
+// A shop that runs promotions keeps every code it ever made, and the owner
+// arriving here is looking for one: the code a buyer just typed, or the ones
+// that are refusing people. Search and filter narrow the table, and the page
+// size keeps a long history from turning into an endless scroll.
+const STATES = ['可用', '未开始', '已抢完', '已过期', '已停用']
+const search = ref('')
+const stateFilter = ref('all')
+const page = ref(1)
+const PAGE_SIZE = 20
+
+const filtered = computed(() => {
+  const needle = search.value.trim().toLowerCase()
+  return coupons.value.filter((coupon) => {
+    if (stateFilter.value !== 'all' && couponState(coupon).label !== stateFilter.value) return false
+    if (!needle) return true
+    return (
+      coupon.code.toLowerCase().includes(needle) ||
+      (coupon.description || '').toLowerCase().includes(needle)
+    )
+  })
+})
+
+const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
+const current = computed(() => Math.min(page.value, pages.value))
+const shown = computed(() => {
+  const start = (current.value - 1) * PAGE_SIZE
+  return filtered.value.slice(start, start + PAGE_SIZE)
+})
+const summary = computed(() => {
+  if (!filtered.value.length) return ''
+  const start = (current.value - 1) * PAGE_SIZE + 1
+  const end = Math.min(current.value * PAGE_SIZE, filtered.value.length)
+  return `第 ${start}–${end} 条 · 共 ${filtered.value.length} 条`
+})
+
+watch([search, stateFilter], () => {
+  page.value = 1
+})
+
+function clearFilters() {
+  search.value = ''
+  stateFilter.value = 'all'
+  page.value = 1
+}
+
 onMounted(load)
 </script>
 
@@ -208,6 +279,21 @@ onMounted(load)
     <p v-if="!canManage" class="quiet text-xs">当前角色只能查看优惠码，新建与修改需要「优惠码管理」权限。</p>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+
+    <div v-if="coupons.length" class="flex flex-wrap items-center gap-2">
+      <input
+        v-model="search"
+        class="input max-w-[240px]"
+        type="search"
+        aria-label="搜索优惠码"
+        placeholder="搜码或活动说明…"
+      />
+      <select v-model="stateFilter" class="input w-auto" aria-label="按状态筛选优惠码">
+        <option value="all">全部状态</option>
+        <option v-for="label in STATES" :key="label" :value="label">{{ label }}</option>
+      </select>
+      <p class="quiet text-xs">筛出 {{ filtered.length }} / {{ coupons.length }} 个码</p>
+    </div>
 
     <div class="table-container">
       <table>
@@ -239,7 +325,20 @@ onMounted(load)
               </div>
             </td>
           </tr>
-          <tr v-for="coupon in coupons" :key="coupon.id">
+          <tr v-else-if="!shown.length">
+            <td colspan="9">
+              <div class="empty-state">
+                <p class="empty-title">没有符合条件的优惠码</p>
+                <p class="empty-hint">
+                  {{ coupons.length }} 个码里没有匹配的，换个关键字或把状态筛选放开。
+                </p>
+                <button class="btn btn-secondary btn-sm mt-3" type="button" @click="clearFilters">
+                  清空筛选
+                </button>
+              </div>
+            </td>
+          </tr>
+          <tr v-for="coupon in shown" :key="coupon.id">
             <td>
               <code class="mono text-sm">{{ coupon.code }}</code>
               <p v-if="coupon.description" class="quiet max-w-[220px] truncate text-xs">{{ coupon.description }}</p>
@@ -249,6 +348,7 @@ onMounted(load)
             <td class="nums text-sm muted">{{ coupon.min_order_amount ? money(coupon.min_order_amount) : '不限' }}</td>
             <td class="nums text-sm">
               <p>{{ coupon.used_count }} / {{ coupon.max_uses || '∞' }}</p>
+              <p v-if="coupon.max_uses" class="quiet text-xs">在单 {{ coupon.held ?? 0 }} · 剩 {{ coupon.remaining ?? coupon.max_uses }}</p>
               <p v-if="coupon.per_user_limit" class="quiet text-xs">每人 {{ coupon.per_user_limit }} 次</p>
             </td>
             <td class="text-xs quiet">{{ expiry(coupon) }}</td>
@@ -271,6 +371,11 @@ onMounted(load)
               <span class="badge" :class="coupon.is_active ? 'badge-success' : 'badge-neutral'">
                 {{ coupon.is_active ? '启用' : '停用' }}
               </span>
+              <p class="mt-1">
+                <span class="badge" :class="couponState(coupon).tone" :title="couponState(coupon).note">
+                  {{ couponState(coupon).label }}
+                </span>
+              </p>
             </td>
             <td v-if="canManage" class="whitespace-nowrap text-right">
               <button class="btn btn-ghost btn-sm" @click="editing = { ...coupon }">编辑</button>
@@ -281,6 +386,15 @@ onMounted(load)
         </tbody>
       </table>
     </div>
+
+    <PaginationFooter
+      v-if="filtered.length > PAGE_SIZE"
+      :page="current"
+      :pages="pages"
+      :loading="loading"
+      :summary="summary"
+      @change="page = $event"
+    />
 
     <div
       v-if="editing"
@@ -370,13 +484,13 @@ onMounted(load)
               />
             </div>
             <div>
-              <label class="label" for="k-until">失效日期</label>
+              <label class="label" for="k-until">最后可用日期</label>
               <input
                 id="k-until"
                 :value="toDateInput(editing.valid_until)"
                 type="date"
                 class="input"
-                @input="editing.valid_until = fromDateInput(($event.target as HTMLInputElement).value)"
+                @input="editing.valid_until = fromDateInput(($event.target as HTMLInputElement).value, true)"
               />
             </div>
           </div>

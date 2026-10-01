@@ -208,6 +208,8 @@ export interface SiteStatus {
     registration?: boolean
     checkin?: boolean
     coupons?: boolean
+    oauth?: boolean
+    payments?: boolean
   }
   theme?: {
     primary?: string

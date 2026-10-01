@@ -141,6 +141,7 @@ const OAUTH_ERROR: Record<string, string> = {
   rejected:
     'NodeLoc 拒绝了这次登录请求：后台凭据不对、授权码已用过或已过期，或回调地址不在白名单里。',
   unreachable: '本店此刻连不上 NodeLoc，可能是对方短暂不可用或服务器的出网设置。',
+  disabled: '本店已暂停 NodeLoc 登录，店家可以在后台「设置 → NodeLoc OAuth 登录」重新打开。',
 }
 
 /**

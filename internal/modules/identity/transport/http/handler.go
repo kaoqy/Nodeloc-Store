@@ -518,6 +518,8 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 // so 「设置里没填」 and 「NodeLoc 拒绝了」 are not the same sentence on the storefront.
 func oauthFailReason(err error) string {
 	switch {
+	case errors.Is(err, domain.ErrOAuthDisabled):
+		return "disabled"
 	case errors.Is(err, domain.ErrOAuthNotConfigured):
 		return "not_configured"
 	case errors.Is(err, domain.ErrOAuthRejected):
@@ -698,6 +700,8 @@ func errorCopy(err error) (int, string, string) {
 	// (credentials or a used code), NodeLoc was unreachable (egress). All three
 	// used to land on 「服务器开小差了」, which is why a broken login reads as bad
 	// luck rather than a setting.
+	case errors.Is(err, domain.ErrOAuthDisabled):
+		return http.StatusServiceUnavailable, "oauth_disabled", err.Error()
 	case errors.Is(err, domain.ErrOAuthNotConfigured):
 		// This one names the store's own empty fields and no secret value, and the
 		// person who can fix it is usually the one testing the login.

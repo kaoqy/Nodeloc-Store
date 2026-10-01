@@ -369,7 +369,16 @@ onMounted(() => {
               <p v-if="order.user?.email" class="hint mono mt-0.5 truncate">{{ order.user.email }}</p>
             </td>
             <td class="max-w-[220px] truncate text-sm">{{ order.product?.name || `#${order.product_id}` }}</td>
-            <td class="nums text-sm">{{ money(order.total_amount) }} <span class="quiet">×{{ order.quantity }}</span></td>
+            <td class="nums text-sm">
+              {{ money(order.total_amount) }} <span class="quiet">×{{ order.quantity }}</span>
+              <!-- The code and its cut belong on the list: when a buyer says
+                   「优惠码没减」, the owner should see at a glance whether this
+                   order carried one at all. -->
+              <p v-if="order.discount_amount" class="mt-0.5 text-xs text-[var(--success)]">
+                <span class="mono">{{ order.coupon_code || '优惠码' }}</span>
+                -{{ money(order.discount_amount) }}
+              </p>
+            </td>
             <td>
               <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
             </td>

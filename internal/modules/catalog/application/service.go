@@ -392,8 +392,40 @@ func (s *Service) DeleteCategory(ctx context.Context, id uint) error {
 	return s.categories.Delete(ctx, id)
 }
 
-func (s *Service) ListCoupons(ctx context.Context) ([]domain.Coupon, error) {
-	return s.coupons.List(ctx)
+// AdminCoupon is one row of the back office's coupon table: the stored code
+// plus what the live orders say about its quota. A buyer is refused against the
+// live count, not used_count, which only moves when NodeLoc settles a payment —
+// without held/remaining the owner reads 已使用 0 次 while the codes are gone.
+type AdminCoupon struct {
+	domain.Coupon
+	Held      int64 `json:"held"`
+	Remaining *int  `json:"remaining"`
+}
+
+func (s *Service) ListCoupons(ctx context.Context) ([]AdminCoupon, error) {
+	coupons, err := s.coupons.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	held, err := s.coupons.HeldByCoupons(ctx, now.Add(-checkoutHoldWindow))
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]AdminCoupon, 0, len(coupons))
+	for _, coupon := range coupons {
+		row := AdminCoupon{Coupon: coupon}
+		if coupon.MaxUses > 0 {
+			row.Held = held[coupon.ID]
+			left := coupon.MaxUses - int(row.Held)
+			if left < 0 {
+				left = 0
+			}
+			row.Remaining = &left
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func (s *Service) GetCouponByCode(ctx context.Context, code string) (*domain.Coupon, error) {
@@ -495,7 +527,7 @@ func (s *Service) StorefrontCoupons(ctx context.Context) ([]StorefrontCoupon, er
 			entry.Description = *coupon.Description
 		}
 		if coupon.MaxUses > 0 {
-			used, err := s.coupons.UsedTotal(ctx, coupon.ID)
+			used, err := s.coupons.UsedTotal(ctx, coupon.ID, now.Add(-checkoutHoldWindow))
 			if err != nil {
 				return nil, err
 			}
@@ -522,6 +554,12 @@ func (s *Service) StorefrontCoupons(ctx context.Context) ([]StorefrontCoupon, er
 	})
 	return list, nil
 }
+
+// checkoutHoldWindow is how long an order a buyer never paid keeps a code's
+// quota. A checkout left unpaid is not a sale, and without a cutoff every
+// 立即购买 pressed by mistake would burn 限量/每人限用 for good — the code reads
+// 已达使用上限 to the next buyer while the shop's 已使用 counter still says 0.
+const checkoutHoldWindow = 2 * time.Hour
 
 // CouponQuote is the answer the storefront shows under the 优惠码 field. It
 // carries the reason a code was refused in the shop's own words, because the
@@ -571,14 +609,15 @@ func (s *Service) QuoteCoupon(ctx context.Context, userID uint, productID uint, 
 		return nil, err
 	}
 	total := unitPrice * quantity
-	if err := couponApplies(coupon, product, total, s.now()); err != nil {
+	now := s.now()
+	if err := couponApplies(coupon, product, total, now); err != nil {
 		return nil, err
 	}
 	if coupon.MaxUses > 0 {
 		// Live orders, not coupon.UsedCount: that column only moves when NodeLoc
 		// confirms the payment, so the last code of a 限量 promotion would be sold
 		// to everyone who asked before the first buyer paid.
-		committed, err := s.coupons.UsedTotal(ctx, coupon.ID)
+		committed, err := s.coupons.UsedTotal(ctx, coupon.ID, now.Add(-checkoutHoldWindow))
 		if err != nil {
 			return nil, err
 		}
@@ -587,7 +626,7 @@ func (s *Service) QuoteCoupon(ctx context.Context, userID uint, productID uint, 
 		}
 	}
 	if coupon.PerUserLimit > 0 && userID != 0 {
-		used, err := s.coupons.UsedBy(ctx, coupon.ID, userID)
+		used, err := s.coupons.UsedBy(ctx, coupon.ID, userID, now.Add(-checkoutHoldWindow))
 		if err != nil {
 			return nil, err
 		}

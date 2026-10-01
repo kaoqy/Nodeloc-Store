@@ -13,6 +13,10 @@ var (
 	// ErrPaymentNotConfigured is returned when the Payment ID / Secret Key pair
 	// is missing, so the buyer gets a clear message instead of a generic 500.
 	ErrPaymentNotConfigured = errors.New("商店还没有配置 NodeLoc 支付凭据")
+	// ErrPaymentsDisabled is the owner's 「启用 NodeLoc Payments 支付」 switch turned
+	// off: the credentials are fine, the shop just is not taking money right now.
+	// Refunds keep working, so only 下单 and 去支付 check it.
+	ErrPaymentsDisabled = errors.New("商店已暂停收款")
 	// ErrProviderUnreachable means NodeLoc was never able to answer: DNS, TLS,
 	// timeout, an HTTP 5xx or a body that is not JSON. Nothing about the order is
 	// known, so the caller is told to try again.

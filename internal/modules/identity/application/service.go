@@ -146,6 +146,9 @@ func (s *Service) ProbeOAuth(ctx context.Context) contract.OAuthProbe {
 }
 
 func (s *Service) InitiateOAuth(state string) (string, string, error) {
+	if !s.features.OAuthOn() {
+		return "", "", domain.ErrOAuthDisabled
+	}
 	state = strings.TrimSpace(state)
 	if state == "" {
 		buffer := make([]byte, 32)

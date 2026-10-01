@@ -151,6 +151,8 @@ func (s *Service) Status() map[string]any {
 				"registration": rt.Features.RegistrationEnabled,
 				"checkin":      rt.Features.CheckinEnabled(),
 				"coupons":      rt.Features.CouponsEnabled(),
+				"oauth":        rt.OAuth.On(),
+				"payments":     rt.Payment.On(),
 			}
 			// Both SPAs recolour from this: style.css derives every accent token
 			// from --brand, so one hex repaints buttons, focus rings and glow.
@@ -315,12 +317,13 @@ func (s *Service) runInstall(req InstallRequest) (*gorm.DB, error) {
 		Features: req.Features,
 		Theme:    req.Theme,
 	}
-	rt.OAuth.Enabled = true
-	// The wizard's payment block is complete when the application is named and the
-	// owner has pasted its secret — whichever of the two boxes NodeLoc handed them.
-	// Requiring both made a shop that could take money switch itself off at install.
-	rt.Payment.Enabled = strings.TrimSpace(req.Payment.PaymentID) != "" &&
-		(strings.TrimSpace(req.Payment.Token) != "" || strings.TrimSpace(req.Payment.SecretKey) != "")
+	// Both switches start on: whether the credentials are complete is a separate
+	// question the gateway answers with its own 「还没有配置 NodeLoc 支付凭据」, and a
+	// derived switch here switched unfinished setups off at install without anyone
+	// asking.
+	on := true
+	rt.OAuth.Enabled = &on
+	rt.Payment.Enabled = &on
 	rt.MergeDefaults()
 	// The wizard's fields are as user-typed as the settings page's, so they go
 	// through the same bounds and colour checks before they are stored.
@@ -545,7 +548,7 @@ func (s *Service) GetSettings() (map[string]any, error) {
 	missing := rt.Payment.MissingCredentials()
 	return map[string]any{
 		"settings":         view,
-		"payment_ready":    rt.Payment.Enabled && len(missing) == 0,
+		"payment_ready":    rt.Payment.On() && len(missing) == 0,
 		"payment_missing":  missing,
 		"payment_warnings": rt.PaymentWarnings(),
 	}, nil
@@ -597,12 +600,14 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	if next.Payment.SecretKey == Redacted {
 		next.Payment.SecretKey = existing.Payment.SecretKey
 	}
-	// The owner's switch stays off only when there is no application named or no
-	// secret at all to sign with. Either box counts: which one NodeLoc hands out
-	// depends on the payment application's release, and a store that can sign 下单
-	// must not be switched off because the other box is empty.
-	hasSecret := next.Payment.Token != "" || next.Payment.SecretKey != ""
-	next.Payment.Enabled = next.Payment.Enabled && next.Payment.PaymentID != "" && hasSecret
+	// The switch is the owner's words, not a fact to recompute: 「凭据还没填齐」 is
+	// already said by the 还收不了款 badge and by the gateway's own 「还没有配置 NodeLoc
+	// 支付凭据」, and deriving it from the credentials turned an unfinished setup into
+	// 「本店已暂停收款」 the moment the buyer pressed 下单. An absent value is an older
+	// document, so the stored choice carries over.
+	if next.Payment.Enabled == nil {
+		next.Payment.Enabled = existing.Payment.Enabled
+	}
 	// A settings document that does not mention a switch at all is an older one,
 	// not an instruction to turn it on, so the stored value carries over first.
 	if next.Features.Checkin == nil {

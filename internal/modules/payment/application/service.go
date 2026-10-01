@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/domain"
@@ -59,6 +60,8 @@ type Service struct {
 	// events is optional: a store with no inbox still has to be able to take money.
 	events    contract.BuyerNotifier
 	paymentID string
+	// features carries the owner's 收款 switch; see CreateOrder's gate.
+	features config.FeaturesConfig
 }
 
 type CreatePaymentInput struct {
@@ -123,11 +126,11 @@ type RefundInput struct {
 	ToUsername string
 }
 
-func NewService(orders contract.OrderRepo, gateway contract.PaymentGateway, fulfillment contract.FulfillmentService, users contract.UserLookup, coupons contract.CouponPricing, events contract.BuyerNotifier, paymentID string) *Service {
+func NewService(orders contract.OrderRepo, gateway contract.PaymentGateway, fulfillment contract.FulfillmentService, users contract.UserLookup, coupons contract.CouponPricing, events contract.BuyerNotifier, paymentID string, features config.FeaturesConfig) *Service {
 	if orders == nil || gateway == nil || fulfillment == nil || users == nil {
 		panic("payment: nil dependency")
 	}
-	return &Service{orders: orders, gateway: gateway, fulfillment: fulfillment, users: users, coupons: coupons, events: events, paymentID: strings.TrimSpace(paymentID)}
+	return &Service{orders: orders, gateway: gateway, fulfillment: fulfillment, users: users, coupons: coupons, events: events, paymentID: strings.TrimSpace(paymentID), features: features}
 }
 
 func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*models.Order, error) {
@@ -141,6 +144,11 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 	}
 	if quantity < 1 || quantity > maxOrderQuantity {
 		return nil, fmt.Errorf("%w: quantity must be between 1 and %d", ErrInvalidInput, maxOrderQuantity)
+	}
+	// The switch on 设置 means "this shop is not taking money right now", so the
+	// order stops here instead of piling up pending rows nobody can ever pay.
+	if !s.features.PaymentsOn() {
+		return nil, domain.ErrPaymentsDisabled
 	}
 
 	user, err := s.users.FindByID(ctx, input.UserID)
@@ -231,6 +239,9 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 	input.OrderNo = strings.TrimSpace(input.OrderNo)
 	if input.UserID == 0 || input.OrderNo == "" {
 		return nil, ErrInvalidInput
+	}
+	if !s.features.PaymentsOn() {
+		return nil, domain.ErrPaymentsDisabled
 	}
 	user, err := s.users.FindByID(ctx, input.UserID)
 	if err != nil {

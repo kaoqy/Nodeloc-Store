@@ -49,6 +49,11 @@ const limit = computed(() => {
 })
 
 const soldOut = computed(() => limit.value === 0)
+const buyLabel = computed(() => {
+  if (!site.paymentsEnabled) return '本店暂停收款'
+  if (soldOut.value) return '暂时缺货'
+  return submitting.value ? '正在跳转支付…' : '立即购买'
+})
 const gross = computed(() => (product.value?.price ?? 0) * quantity.value)
 /** What NodeLoc is asked to collect: the quoted discount is already off it. */
 const payable = computed(() => (quote.value?.accepted ? quote.value.payable : gross.value))
@@ -154,6 +159,7 @@ async function openPayment(orderNo: string, goods: string) {
 async function purchase() {
   const item = product.value
   if (!item || submitting.value) return
+  if (!site.paymentsEnabled) return
   if (!auth.isAuthenticated) {
     await router.push({ name: 'login', query: { redirect: route.fullPath } })
     return
@@ -162,6 +168,24 @@ async function purchase() {
   error.value = ''
   payAdvice.value = ''
   unpaidOrderNo.value = ''
+  const code = couponCode.value.trim()
+  let couponForOrder: string | undefined
+  if (code) {
+    // A code the buyer typed has to either be priced into this order or stop the
+    // click in front of them. Sending it only when an earlier quote happened to
+    // land charges full price for a discount the buyer can still see on screen.
+    if (quote.value?.accepted && quote.value.code === code) {
+      couponForOrder = code
+    } else {
+      await applyQuote()
+      if (!quote.value?.accepted || quote.value.code !== code) {
+        submitting.value = false
+        error.value = couponError.value || '优惠码无法使用，请修正后再下单。'
+        return
+      }
+      couponForOrder = quote.value.code
+    }
+  }
   let order: Order
   try {
     order = await createOrder({
@@ -169,7 +193,7 @@ async function purchase() {
       quantity: quantity.value,
       contact: contact.value.trim() || undefined,
       note: note.value.trim() || undefined,
-      coupon_code: quote.value?.accepted ? quote.value.code : undefined,
+      coupon_code: couponForOrder,
     })
   } catch (e) {
     error.value = errorMessage(e, '下单失败，请稍后重试')
@@ -440,13 +464,23 @@ watch(
             </div>
           </div>
 
-          <button class="btn btn-primary btn-lg w-full" type="submit" :disabled="submitting || soldOut">
+          <button
+            class="btn btn-primary btn-lg w-full"
+            type="submit"
+            :disabled="submitting || soldOut || !site.paymentsEnabled"
+          >
             <span v-if="submitting" class="spinner spinner-light" />
-            {{ soldOut ? '暂时缺货' : submitting ? '正在跳转支付…' : '立即购买' }}
+            {{ buyLabel }}
           </button>
 
           <p class="hint text-center">
-            {{ auth.isAuthenticated ? '点击后跳转至 Nodeloc Payments 完成扣款' : '登录后即可下单，订单会保留你的选择' }}
+            {{
+              !site.paymentsEnabled
+                ? '店家已在后台关闭收款，重新打开后即可下单。'
+                : auth.isAuthenticated
+                  ? '点击后跳转至 Nodeloc Payments 完成扣款'
+                  : '登录后即可下单，订单会保留你的选择'
+            }}
           </p>
         </form>
 
