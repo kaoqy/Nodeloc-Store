@@ -36,7 +36,13 @@ const routes = [
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/NotFoundView.vue'), meta: { staffOnly: true, title: '页面不存在' } },
 ]
 
-const router = createRouter({ history: createWebHistory(import.meta.env.BASE_URL), routes })
+const router = createRouter({
+  history: createWebHistory(import.meta.env.BASE_URL),
+  routes,
+  // The back office is long pages: opening a paginated list from the bottom of
+  // the dashboard left the new page scrolled to some unrelated middle row.
+  scrollBehavior: () => ({ top: 0 }),
+})
 
 // After an upgrade the hashed chunks an open tab has already loaded are gone, so
 // a lazy route import fails and the view never renders. Reload once for that

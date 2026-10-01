@@ -422,6 +422,14 @@ func (h *Handler) Logout(c *gin.Context) {
 func (h *Handler) InitiateOAuth(c *gin.Context) {
 	redirectURL, state, err := h.service.InitiateOAuth("")
 	if err != nil {
+		// This route is where a browser navigation starts, so a buyer who pressed
+		// 用 NodeLoc 登录 on an unconfigured store must land back on the login page
+		// with the reason, not on a wall of JSON.
+		if c.Query("redirect") == "true" {
+			log.Printf("nodeloc oauth: the login could not start: %v", err)
+			h.oauthFailure(c, oauthFailReason(err), err, c.Query("bind") == "true")
+			return
+		}
 		writeError(c, err)
 		return
 	}
@@ -484,7 +492,7 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	result, err := h.service.OAuthLogin(c.Request.Context(), c.Query("code"), params)
 	if err != nil {
 		log.Printf("nodeloc oauth: the code exchange failed: %v", err)
-		h.oauthFailure(c, "provider", err, false)
+		h.oauthFailure(c, oauthFailReason(err), err, false)
 		return
 	}
 	c.SetCookie(oauthStateCookie, "", -1, "/api/v1/auth", "", h.cookieSecure(c), true)
@@ -503,6 +511,21 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 		fragment.Set("refresh_token", result.Tokens.RefreshToken)
 	}
 	c.Redirect(http.StatusFound, "/oauth/callback#"+fragment.Encode())
+}
+
+// oauthFailReason turns the exchange failure into the code the login page reads,
+// so 「设置里没填」 and 「NodeLoc 拒绝了」 are not the same sentence on the storefront.
+func oauthFailReason(err error) string {
+	switch {
+	case errors.Is(err, domain.ErrOAuthNotConfigured):
+		return "not_configured"
+	case errors.Is(err, domain.ErrOAuthRejected):
+		return "rejected"
+	case errors.Is(err, domain.ErrOAuthUnreachable):
+		return "unreachable"
+	default:
+		return "provider"
+	}
 }
 
 // oauthFailure answers the callback: JSON for the SPA, otherwise a redirect so
@@ -669,6 +692,22 @@ func errorCopy(err error) (int, string, string) {
 		return http.StatusNotFound, "identity_not_found", "还没有绑定 NodeLoc 账号"
 	case errors.Is(err, domain.ErrNotBound):
 		return http.StatusConflict, "not_bound", "还没有绑定 NodeLoc 账号，请先完成绑定"
+	// The OAuth round trip has three answers the login page has to tell apart:
+	// the store is not configured (the owner fixes 设置), NodeLoc refused
+	// (credentials or a used code), NodeLoc was unreachable (egress). All three
+	// used to land on 「服务器开小差了」, which is why a broken login reads as bad
+	// luck rather than a setting.
+	case errors.Is(err, domain.ErrOAuthNotConfigured):
+		// This one names the store's own empty fields and no secret value, and the
+		// person who can fix it is usually the one testing the login.
+		return http.StatusServiceUnavailable, "oauth_not_configured", err.Error()
+	case errors.Is(err, domain.ErrOAuthRejected):
+		// NodeLoc's own words (error_description, an HTTP body) stay in the log:
+		// they name credentials, which a buyer cannot use and a storefront should
+		// not echo.
+		return http.StatusBadGateway, "oauth_rejected", "NodeLoc 拒绝了这次登录（授权码可能已经用过或过期，或后台凭据不对）。请回到登录页重新点一次；反复出现请把这句话发给店家。"
+	case errors.Is(err, domain.ErrOAuthUnreachable):
+		return http.StatusBadGateway, "oauth_unreachable", "现在联系不上 NodeLoc，请稍后再试；如果一直如此，请店家检查 OAuth 接口地址与服务器网络。"
 	case errors.Is(err, domain.ErrUsernameTaken):
 		return http.StatusConflict, "username_taken", "用户名已被占用，换一个试试"
 	case errors.Is(err, domain.ErrEmailTaken):

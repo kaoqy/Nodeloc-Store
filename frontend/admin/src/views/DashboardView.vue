@@ -682,7 +682,7 @@ onUnmounted(() => {
           <div v-for="i in 3" :key="i" class="skeleton h-10" />
         </div>
         <template v-else>
-          <div class="mb-4 grid grid-cols-3 gap-2 text-center">
+          <div class="mb-4 grid gap-2 text-center sm:grid-cols-3">
             <div class="panel">
               <p class="hint">用码次数</p>
               <p class="nums mt-1 text-base font-bold">{{ stats?.coupon_uses_period ?? 0 }}</p>

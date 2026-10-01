@@ -191,6 +191,15 @@ func classifyGrantError(err error) *GrantFailure {
 		return &GrantFailure{Code: "grant_failed", Status: 502, Message: err.Error()}
 	}
 	provider := strings.TrimSpace(err.Error())
+	// A duplicate order_id comes back as the typed 下单-already-exists refusal, so
+	// its text is our own sentinel, not NodeLoc's sentence. For a 转账 that means
+	// the reference was taken already — which is exactly the answer that must not
+	// be re-tried, and quoting our sentinel as 原文 would be a lie.
+	var already *domain.PaymentAlreadyRequested
+	if errors.As(err, &already) {
+		return &GrantFailure{Code: "grant_reference_exists", Status: 409,
+			Message: "这个转账单号 NodeLoc 已经收过，请到流水里确认这一笔是否已经到账，不要重复转出。"}
+	}
 	// The wrapped sentinel prefix is the transport's, not the provider's answer.
 	if index := strings.Index(provider, ": "); index >= 0 && strings.Contains(provider[:index], "provider") {
 		provider = strings.TrimSpace(provider[index+2:])

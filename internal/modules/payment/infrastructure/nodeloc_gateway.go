@@ -128,10 +128,25 @@ func (g *NodeLocGateway) Transfer(ctx context.Context, request contract.Transfer
 	}, nil
 }
 
-// VerifyCallback checks the redirect against the merchant secret key, which is
-// the credential the docs name for callbacks — the token is not involved here.
+// VerifyCallback checks the redirect the buyer's browser comes back with.
+//
+// NodeLoc's own pages disagree about the key: one section names the merchant
+// Secret Key, another says the redirect is HMAC'd with the SHA-256 of the tk_xxx
+// token. Both credentials belong to this store's payment application, so a
+// redirect that verifies under either one is genuinely NodeLoc's — and trying
+// only the first is what sent real, signed payments to the 「signature」 failure
+// page while the buyer had already paid.
 func (g *NodeLocGateway) VerifyCallback(params map[string]string) bool {
-	return shared.VerifyCallback(params, g.secretKey)
+	if g == nil {
+		return false
+	}
+	if key := strings.TrimSpace(g.secretKey); key != "" && shared.VerifyCallback(params, key) {
+		return true
+	}
+	if token := strings.TrimSpace(g.token); token != "" && shared.VerifyCallback(params, shared.HashedTokenKey(token)) {
+		return true
+	}
+	return false
 }
 
 // tokenKey is the HMAC key NodeLoc expects on 下单 and 转账: the SHA-256 hex
@@ -172,6 +187,12 @@ func (g *NodeLocGateway) post(ctx context.Context, path string, params map[strin
 			delete(params, name)
 		}
 	}
+	// The docs require a 10-digit second timestamp on every payment call and
+	// refuse one that is more than five minutes from their clock. It goes in
+	// before signing, so it is part of the sorted string like any other field;
+	// a store whose clock has drifted gets its own diagnosis rather than the
+	// generic 「凭据不匹配」.
+	params["timestamp"] = strconv.FormatInt(time.Now().Unix(), 10)
 
 	params["signature"] = shared.Sign(params, key)
 	values := url.Values{}
@@ -200,7 +221,7 @@ func (g *NodeLocGateway) post(ctx context.Context, path string, params map[strin
 		return nil, raw, fmt.Errorf("%w: NodeLoc returned HTTP %d: %s", domain.ErrProviderUnreachable, resp.StatusCode, summarize(raw))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, raw, fmt.Errorf("%w: NodeLoc returned HTTP %d: %s", domain.ErrProviderRejected, resp.StatusCode, summarize(raw))
+		return nil, raw, refusal(fmt.Sprintf("NodeLoc returned HTTP %d: %s", resp.StatusCode, summarize(raw)))
 	}
 
 	var envelope map[string]any
@@ -208,7 +229,7 @@ func (g *NodeLocGateway) post(ctx context.Context, path string, params map[strin
 		return nil, raw, fmt.Errorf("%w: decode NodeLoc response: %v", domain.ErrProviderUnreachable, err)
 	}
 	if success, ok := envelope["success"].(bool); ok && !success {
-		return nil, raw, fmt.Errorf("%w: %s", domain.ErrProviderRejected, firstNonEmpty(firstString(envelope, "message", "error", "detail"), "NodeLoc operation failed"))
+		return nil, raw, refusal(firstNonEmpty(firstString(envelope, "message", "error", "detail"), "NodeLoc operation failed"))
 	}
 	if data, ok := envelope["data"].(map[string]any); ok {
 		for key, value := range envelope {
@@ -219,6 +240,37 @@ func (g *NodeLocGateway) post(ctx context.Context, path string, params map[strin
 		return data, raw, nil
 	}
 	return envelope, raw, nil
+}
+
+// refusal reads a NodeLoc rejection. 「Order already exists with status …」 is the
+// one that is not a fault: the payment already sits on NodeLoc's side under our
+// order number, which is what happens every time a buyer returns to 立即购买 on an
+// order they started before. Refusing it as a generic rejection is how a store
+// ends up with orders nobody can ever pay.
+func refusal(message string) error {
+	if status, ok := alreadyRequestedStatus(message); ok {
+		return &domain.PaymentAlreadyRequested{Status: status}
+	}
+	return fmt.Errorf("%w: %s", domain.ErrProviderRejected, message)
+}
+
+// alreadyRequestedStatus pulls the status word out of NodeLoc's duplicate-order
+// refusal, in either language the provider may answer in. An empty word still
+// means the order exists; only the caller's judgement about what to do with it
+// changes.
+func alreadyRequestedStatus(message string) (string, bool) {
+	lower := strings.ToLower(message)
+	marker := "order already exists"
+	if !strings.Contains(lower, marker) {
+		if !strings.Contains(lower, "订单已存在") {
+			return "", false
+		}
+		marker = "订单已存在"
+	}
+	tail := lower[strings.Index(lower, marker)+len(marker):]
+	tail = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(tail), "with"), "，")
+	tail = strings.TrimPrefix(strings.TrimSpace(tail), "status")
+	return strings.Trim(tail, " ：:。.，,\"'"), true
 }
 
 // summarize keeps a provider body short enough to log and to show a shop owner,

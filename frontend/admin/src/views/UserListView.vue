@@ -4,6 +4,7 @@ import PaginationFooter from '../components/PaginationFooter.vue'
 import { grantTransfer, listTransfers, listUserTransfers, listUsers, toggleActive } from '../api/users'
 import { errorMessage, money, roleMeta, transferStatus, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
+import { closeOnEscape } from '../utils/dialog'
 import type { Transfer, User } from '../types'
 
 const PageSize = 20
@@ -36,6 +37,8 @@ const sending = ref(false)
 const transferError = ref('')
 const sent = ref<Transfer | null>(null)
 const ledgerOpen = ref(false)
+closeOnEscape(transferTarget, null)
+closeOnEscape(ledgerOpen, false)
 const ledger = ref<Transfer[]>([])
 const ledgerTotal = ref(0)
 const ledgerLoading = ref(false)

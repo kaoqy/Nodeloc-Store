@@ -22,6 +22,15 @@ var (
 	ErrAlreadyCheckedIn     = errors.New("already checked in today")
 	ErrCheckinDisabled      = errors.New("check-in is disabled")
 	ErrNotBound             = errors.New("no oauth account is bound")
+	// ErrOAuthNotConfigured is the store's own answer, not NodeLoc's: the 设置 page
+	// is missing a field the login round trip needs. It names them, so the shop
+	// owner fixes one setting instead of watching 登录 do nothing.
+	ErrOAuthNotConfigured = errors.New("NodeLoc 登录还没有配置完整")
+	// ErrOAuthRejected means NodeLoc answered and refused; ErrOAuthUnreachable
+	// means it never answered. They are two different fixes — wrong credentials
+	// versus no egress — and the login page has to say which.
+	ErrOAuthRejected    = errors.New("NodeLoc 拒绝了这次登录请求")
+	ErrOAuthUnreachable = errors.New("连不上 NodeLoc")
 )
 
 // User is the identity module's user aggregate.

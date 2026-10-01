@@ -618,8 +618,14 @@ func (s *Service) TestPayment(ctx context.Context) (bool, string) {
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 	switch {
-	case strings.Contains(msg, "payment is not configured"):
+	case strings.Contains(lower, "payment is not configured"):
 		return false, "支付参数未配置完整，缺少 " + describePaymentMissing(msg)
+	// Every payment call carries a 10-digit second timestamp and NodeLoc refuses
+	// one more than five minutes from its clock, so a store on a server whose
+	// time has drifted fails all of 下单/查单 at once. Nothing in the credentials
+	// is wrong in that case, and the owner has to be told to fix the clock.
+	case strings.Contains(lower, "timestamp"), strings.Contains(msg, "时间戳"), strings.Contains(lower, "request expired"):
+		return false, "NodeLoc 拒绝了商店的请求时间戳：这台服务器的系统时间与标准时间相差过大，请在宿主机上同步时钟（NTP），支付凭据本身没有问题"
 	case strings.Contains(lower, "signature") && (strings.Contains(lower, "invalid") || strings.Contains(lower, "mismatch")):
 		return false, "网关可达，但 NodeLoc 拒绝了商店的签名：Secret Key 与这个 Payment ID 不匹配，请到 NodeLoc 后台重新核对"
 	case strings.Contains(lower, "not found") && (strings.Contains(lower, "transaction") || strings.Contains(lower, "order")),

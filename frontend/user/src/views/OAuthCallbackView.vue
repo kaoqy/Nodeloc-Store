@@ -2,12 +2,18 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { oauthCallback } from '../api/auth'
+import { errorMessage } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { oauthErrorText } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const error = ref('')
+
+function query(key: string): string {
+  return typeof route.query[key] === 'string' ? String(route.query[key]) : ''
+}
 
 function target(): string {
   const stored = sessionStorage.getItem('oauth_redirect')
@@ -15,7 +21,26 @@ function target(): string {
   return stored && stored.startsWith('/') ? stored : '/'
 }
 
+function fail(reason: string) {
+  // A leftover redirect would only be read on the next attempt, where it would
+  // look like this one sent the buyer somewhere unexpected.
+  sessionStorage.removeItem('oauth_redirect')
+  error.value = reason
+}
+
 onMounted(async () => {
+  const serverReason = query('oauth_error')
+  if (serverReason) {
+    fail(oauthErrorText(serverReason))
+    return
+  }
+  // NodeLoc can bounce straight back with its own error= instead of a code.
+  const denied = query('error')
+  if (denied) {
+    fail(oauthErrorText(denied === 'access_denied' ? 'denied' : 'provider'))
+    return
+  }
+
   // Browser navigation flow: the server bounces back to /oauth/callback#access_token=…
   // Tokens travel in the fragment so they never reach logs or the Referer header.
   const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''))
@@ -29,25 +54,25 @@ onMounted(async () => {
       return
     } catch {
       auth.logout()
-      error.value = '登录状态校验失败，请重新尝试 NodeLoc 登录。'
+      fail('登录状态校验失败，请重新尝试 NodeLoc 登录。')
       return
     }
   }
 
-  const code = typeof route.query.code === 'string' ? route.query.code : ''
-  const state = typeof route.query.state === 'string' ? route.query.state : ''
+  const code = query('code')
+  const state = query('state')
   if (!code || !state) {
-    sessionStorage.removeItem('oauth_redirect')
-    error.value = '回调参数不完整，请重新发起 NodeLoc 登录。'
+    fail('回调参数不完整，请重新发起 NodeLoc 登录。')
     return
   }
   try {
     const response = await oauthCallback(code, state)
     auth.saveSession(response.tokens.access_token, response.user, response.tokens.refresh_token)
     await router.replace(target())
-  } catch {
-    sessionStorage.removeItem('oauth_redirect')
-    error.value = 'NodeLoc 授权未完成，请返回登录页重试。'
+  } catch (e) {
+    // The server already said which step failed, in Chinese; a bare 「授权未完成」
+    // is what left buyers and shop owners arguing about whose fault it was.
+    fail(errorMessage(e, 'NodeLoc 授权未完成，请返回登录页重试。'))
   }
 })
 </script>

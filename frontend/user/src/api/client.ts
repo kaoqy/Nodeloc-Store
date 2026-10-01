@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
+import type { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { beginRequest, endRequest } from '../utils/progress'
 
 const client = axios.create({ baseURL: '/api/v1' })
@@ -50,8 +50,7 @@ function refreshOnce(): Promise<boolean> {
 }
 
 function endSession(allowRetry = true) {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(REFRESH_KEY)
+  clearSession()
   if (!allowRetry) return
   if (window.location.pathname === '/login') return
   const current = window.location.pathname + window.location.search
@@ -91,11 +90,6 @@ client.interceptors.response.use(
   },
 )
 
-/** Whether the browser still holds a session at all, used on boot. */
-export function hasStoredSession(): boolean {
-  return Boolean(localStorage.getItem(TOKEN_KEY))
-}
-
 export function clearSession() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(REFRESH_KEY)
@@ -131,7 +125,5 @@ export function errorMessage(error: unknown, fallback = '操作失败，请稍�
   }
   return fallback
 }
-
-export type RequestConfig = AxiosRequestConfig
 
 export default client

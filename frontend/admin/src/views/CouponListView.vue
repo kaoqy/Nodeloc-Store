@@ -5,6 +5,7 @@ import { createCoupon, deleteCoupon, listCoupons, updateCoupon } from '../api/co
 import { listProducts } from '../api/products'
 import { errorMessage, money, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
+import { closeOnEscape } from '../utils/dialog'
 import type { Category, Coupon, Product } from '../types'
 
 const auth = useAuthStore()
@@ -17,6 +18,7 @@ const coupons = ref<Coupon[]>([])
 const categories = ref<Category[]>([])
 const products = ref<Product[]>([])
 const editing = ref<Partial<Coupon> | null>(null)
+closeOnEscape(editing, null)
 const toggling = ref<number | null>(null)
 
 const SCOPE_LABEL: Record<string, string> = {
@@ -296,7 +298,7 @@ onMounted(load)
             <label class="label" for="k-desc">说明（买家可见）</label>
             <input id="k-desc" v-model="editing.description" class="input" placeholder="新人首单立减 10 NL" />
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid gap-3 sm:grid-cols-2">
             <div>
               <label class="label" for="k-type">类型</label>
               <select id="k-type" v-model="editing.discount_type" class="input">
@@ -309,7 +311,7 @@ onMounted(load)
               <input id="k-value" v-model.number="editing.discount_value" type="number" min="1" class="input nums" />
             </div>
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid gap-3 sm:grid-cols-2">
             <div>
               <label class="label" for="k-min">最低消费</label>
               <input id="k-min" v-model.number="editing.min_order_amount" type="number" min="0" class="input nums" />
@@ -319,7 +321,7 @@ onMounted(load)
               <input id="k-max" v-model.number="editing.max_uses" type="number" min="0" class="input nums" />
             </div>
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid gap-3 sm:grid-cols-2">
             <div>
               <label class="label" for="k-per">每人可用次数（0=不限）</label>
               <input id="k-per" v-model.number="editing.per_user_limit" type="number" min="0" class="input nums" />
@@ -356,7 +358,7 @@ onMounted(load)
               </option>
             </select>
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid gap-3 sm:grid-cols-2">
             <div>
               <label class="label" for="k-from">生效日期</label>
               <input

@@ -136,6 +136,11 @@ const OAUTH_ERROR: Record<string, string> = {
   expired: '登录链接已失效：发起登录后超过 10 分钟没完成，或浏览器没有把校验凭证带回来。',
   state: '回调与你发起的登录不是同一次，已拒绝写入登录态。',
   provider: 'NodeLoc 没有受理这次授权（code 换取 token 失败），通常是 Client ID/Secret 或重定向白名单不匹配。',
+  not_configured:
+    '店家还没有把 NodeLoc 登录填完整，这一步在本店服务端就停住了，跟你的账号无关。把这句话发给店家，他会知道要补哪一项。',
+  rejected:
+    'NodeLoc 拒绝了这次登录请求：后台凭据不对、授权码已用过或已过期，或回调地址不在白名单里。',
+  unreachable: '本店此刻连不上 NodeLoc，可能是对方短暂不可用或服务器的出网设置。',
 }
 
 /**

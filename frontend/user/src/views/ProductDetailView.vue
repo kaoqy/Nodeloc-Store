@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProductCard from '../components/ProductCard.vue'
 import { couponQuoteMessage, getProduct, listProducts, listStoreCoupons, quoteCoupon } from '../api/products'
-import { checkoutAdvice, createOrder, createPayment } from '../api/payment'
+import { checkoutAdvice, createOrder, createPayment, paymentSettled } from '../api/payment'
 import { errorMessage, errorStatus } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useSiteStore } from '../stores/site'
@@ -137,6 +137,11 @@ async function openPayment(orderNo: string, goods: string) {
   payAdvice.value = ''
   try {
     const payment = await createPayment(orderNo, goods)
+    if (paymentSettled(payment)) {
+      unpaidOrderNo.value = ''
+      await router.replace({ name: 'order-detail', params: { orderNo }, query: { pay: 'ok' } })
+      return
+    }
     if (!payment.payment_url) throw new Error('支付通道未返回付款地址，请稍后在订单页重试')
     window.location.href = payment.payment_url
   } catch (e) {

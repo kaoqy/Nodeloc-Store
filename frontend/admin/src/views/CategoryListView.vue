@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { createCategory, deleteCategory, listCategories, updateCategory } from '../api/categories'
 import { errorMessage } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
+import { closeOnEscape } from '../utils/dialog'
 import type { Category } from '../types'
 
 const auth = useAuthStore()
@@ -13,6 +14,7 @@ const busy = ref(false)
 const error = ref('')
 const categories = ref<Category[]>([])
 const editing = ref<Partial<Category> | null>(null)
+closeOnEscape(editing, null)
 
 const sorted = computed(() => [...categories.value].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id))
 const canSave = computed(() => Boolean(editing.value?.name?.trim() && editing.value?.slug?.trim()))
@@ -166,7 +168,7 @@ onMounted(load)
             <label class="label" for="c-desc">描述</label>
             <input id="c-desc" v-model="editing.description" class="input" />
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid gap-3 sm:grid-cols-2">
             <div>
               <label class="label" for="c-icon">图标</label>
               <input id="c-icon" v-model="editing.icon" class="input" placeholder="可选" />

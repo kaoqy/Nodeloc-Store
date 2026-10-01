@@ -16,6 +16,7 @@ import {
 } from '../api/products'
 import { cardStatus, errorMessage, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
+import { closeOnEscape } from '../utils/dialog'
 import type { Card, Product } from '../types'
 
 const route = useRoute()
@@ -38,6 +39,8 @@ const showImport = ref(false)
 const importText = ref('')
 const importing = ref(false)
 const showGenerate = ref(false)
+closeOnEscape(showImport, false)
+closeOnEscape(showGenerate, false)
 const generateCount = ref(20)
 const generatePrefix = ref('')
 const generating = ref(false)

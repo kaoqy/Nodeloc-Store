@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { cancelOrder, deliverOrder, fulfillOrder, getOrder, reconcileOrder, refundOrder } from '../api/orders'
 import { errorMessage, fulfillmentStatus, money, orderStatus, providerStatus, reconcileMessage, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
+import { closeOnEscape } from '../utils/dialog'
 import type { Order } from '../types'
 
 const route = useRoute()
@@ -15,6 +16,7 @@ const error = ref('')
 const notice = ref('')
 const order = ref<Order | null>(null)
 const showDeliver = ref(false)
+closeOnEscape(showDeliver, false)
 const deliveryContent = ref('')
 const copied = ref(false)
 

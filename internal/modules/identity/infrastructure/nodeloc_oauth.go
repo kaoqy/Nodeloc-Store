@@ -37,30 +37,66 @@ type NodeLocOAuth struct {
 	redirectURI  string
 	scopes       string
 	httpClient   *http.Client
+	// missing names the settings that would make a login round trip impossible.
+	// It is computed once, because a store that cannot offer NodeLoc login still
+	// has to serve everything else.
+	missing []string
 }
 
-func NewNodeLocOAuth(config NodeLocOAuthConfig, client *http.Client) (*NodeLocOAuth, error) {
-	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
-	if baseURL == "" || strings.TrimSpace(config.ClientID) == "" || strings.TrimSpace(config.ClientSecret) == "" || strings.TrimSpace(config.RedirectURI) == "" {
-		return nil, errors.New("nodeloc oauth configuration is incomplete")
-	}
-	if _, err := url.ParseRequestURI(baseURL); err != nil {
-		return nil, fmt.Errorf("invalid nodeloc base URL: %w", err)
-	}
-	if _, err := url.ParseRequestURI(config.RedirectURI); err != nil {
-		return nil, fmt.Errorf("invalid nodeloc redirect URI: %w", err)
-	}
+// NewNodeLocOAuth builds the provider from the stored settings and never fails.
+//
+// This constructor runs inside the container rebuild that follows every settings
+// save, and it used to return an error there — which identity.Wire turned into a
+// panic, taking the whole storefront down over one empty field. An incomplete
+// OAuth configuration is a missing feature, not a broken process: it now surfaces
+// as an answer that names the field on 用 NodeLoc 登录.
+func NewNodeLocOAuth(config NodeLocOAuthConfig, client *http.Client) *NodeLocOAuth {
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
-	return &NodeLocOAuth{
-		baseURL:      baseURL,
+	oauth := &NodeLocOAuth{
+		baseURL:      strings.TrimRight(strings.TrimSpace(config.BaseURL), "/"),
 		clientID:     strings.TrimSpace(config.ClientID),
 		clientSecret: strings.TrimSpace(config.ClientSecret),
 		redirectURI:  strings.TrimSpace(config.RedirectURI),
 		scopes:       strings.TrimSpace(config.Scopes),
 		httpClient:   client,
-	}, nil
+	}
+	oauth.missing = oauth.incomplete()
+	return oauth
+}
+
+// incomplete lists the settings by the names the 设置 page uses for them, so the
+// shop owner reads the diagnosis and finds the field.
+func (n *NodeLocOAuth) incomplete() []string {
+	missing := make([]string, 0, 4)
+	if n.baseURL == "" {
+		missing = append(missing, "OAuth 接口地址")
+	} else if _, err := url.ParseRequestURI(n.baseURL); err != nil {
+		missing = append(missing, "OAuth 接口地址（不是合法的 URL）")
+	}
+	if n.clientID == "" {
+		missing = append(missing, "Client ID")
+	}
+	if n.clientSecret == "" {
+		missing = append(missing, "Client Secret")
+	}
+	if n.redirectURI == "" {
+		// The callback address is derived from 站点域名 when it is blank, so an
+		// empty one here means the store has no domain to name either.
+		missing = append(missing, "回调地址（请先在设置里填写站点域名）")
+	} else if _, err := url.ParseRequestURI(n.redirectURI); err != nil {
+		missing = append(missing, "回调地址（不是合法的 URL）")
+	}
+	return missing
+}
+
+// guard is the refusal every call to an unconfigured provider returns.
+func (n *NodeLocOAuth) guard() error {
+	if len(n.missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w：缺少 %s", domain.ErrOAuthNotConfigured, strings.Join(n.missing, "、"))
 }
 
 func (n *NodeLocOAuth) Name() string { return nodeLocProviderName }
@@ -68,6 +104,9 @@ func (n *NodeLocOAuth) Name() string { return nodeLocProviderName }
 // AuthorizationURL builds the standard authorization-code request:
 // GET {base}/oauth-provider/authorize
 func (n *NodeLocOAuth) AuthorizationURL(state string) (string, error) {
+	if err := n.guard(); err != nil {
+		return "", err
+	}
 	state = strings.TrimSpace(state)
 	if state == "" {
 		return "", errors.New("oauth state is required")
@@ -121,6 +160,9 @@ func (n *NodeLocOAuth) VerifyCallback(params map[string]string) bool {
 // ExchangeCode redeems the authorization code at /oauth-provider/token
 // (client_secret_post) and then loads the profile from /oauth-provider/userinfo.
 func (n *NodeLocOAuth) ExchangeCode(ctx context.Context, code string) (*domain.OAuthProfile, error) {
+	if err := n.guard(); err != nil {
+		return nil, err
+	}
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil, errors.New("authorization code is required")
@@ -134,18 +176,27 @@ func (n *NodeLocOAuth) ExchangeCode(ctx context.Context, code string) (*domain.O
 	form.Set("client_secret", n.clientSecret)
 
 	var tokenResponse struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		TokenType    string `json:"token_type"`
-		ExpiresIn    int    `json:"expires_in"`
-		Scope        string `json:"scope"`
+		AccessToken      string `json:"access_token"`
+		RefreshToken     string `json:"refresh_token"`
+		TokenType        string `json:"token_type"`
+		ExpiresIn        int    `json:"expires_in"`
+		Scope            string `json:"scope"`
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
 	}
 	if err := n.postForm(ctx, "/oauth-provider/token", form, &tokenResponse); err != nil {
 		return nil, fmt.Errorf("obtain nodeloc access token: %w", err)
 	}
 	accessToken := strings.TrimSpace(tokenResponse.AccessToken)
 	if accessToken == "" {
-		return nil, errors.New("nodeloc token response did not contain access_token")
+		// An authorization code is single-use and expires quickly, so a buyer who
+		// pressed 登录 twice gets this answer. Naming OAuth's own error word is the
+		// difference between "重新点一次" and an unexplainable failure.
+		reason := firstNonEmpty(tokenResponse.ErrorDescription, tokenResponse.Error)
+		if reason == "" {
+			reason = "响应里没有 access_token"
+		}
+		return nil, fmt.Errorf("%w：换取令牌失败（%s）", domain.ErrOAuthRejected, reason)
 	}
 
 	var userResponse nodeLocUserResponse
@@ -153,26 +204,13 @@ func (n *NodeLocOAuth) ExchangeCode(ctx context.Context, code string) (*domain.O
 		return nil, fmt.Errorf("retrieve nodeloc userinfo: %w", err)
 	}
 
-	uid := firstNonEmpty(userResponse.ID, userResponse.UID, userResponse.UserID)
+	uid := firstNonEmpty(userResponse.ID, userResponse.UID, userResponse.UserID, userResponse.Subject)
 	if uid == "" {
-		return nil, errors.New("nodeloc userinfo response did not contain a user ID")
+		return nil, fmt.Errorf("%w：NodeLoc 的用户资料里没有账号标识（id / uid / sub）", domain.ErrOAuthRejected)
 	}
-	email := optionalString(userResponse.Email)
-	trustLevel := parseOptionalInt(userResponse.TrustLevel)
 	scope := firstNonEmpty(tokenResponse.Scope, n.scopes)
 
-	return &domain.OAuthProfile{
-		Provider:     nodeLocProviderName,
-		ProviderUID:  uid,
-		Username:     firstNonEmpty(userResponse.Username, userResponse.Name, "nodeloc-"+uid),
-		DisplayName:  firstNonEmpty(userResponse.Name, userResponse.DisplayName, userResponse.Username),
-		Email:        email,
-		AvatarURL:    firstNonEmpty(userResponse.AvatarURL, userResponse.Avatar),
-		TrustLevel:   trustLevel,
-		Scope:        scope,
-		AccessToken:  accessToken,
-		RefreshToken: tokenResponse.RefreshToken,
-	}, nil
+	return n.profile(userResponse, uid, accessToken, tokenResponse.RefreshToken, scope), nil
 }
 
 // FetchProfile re-reads the account behind a stored access token. It is the
@@ -187,32 +225,47 @@ func (n *NodeLocOAuth) FetchProfile(ctx context.Context, accessToken string) (*d
 	if err := n.getBearing(ctx, "/oauth-provider/userinfo", accessToken, &userResponse); err != nil {
 		return nil, fmt.Errorf("retrieve nodeloc userinfo: %w", err)
 	}
-	uid := firstNonEmpty(userResponse.ID, userResponse.UID, userResponse.UserID)
+	uid := firstNonEmpty(userResponse.ID, userResponse.UID, userResponse.UserID, userResponse.Subject)
 	if uid == "" {
-		return nil, errors.New("nodeloc userinfo response did not contain a user ID")
+		return nil, fmt.Errorf("%w：NodeLoc 的用户资料里没有账号标识（id / uid / sub）", domain.ErrOAuthRejected)
 	}
+	return n.profile(userResponse, uid, accessToken, "", n.scopes), nil
+}
+
+// profile reads one NodeLoc userinfo payload into the store's profile. The
+// claim names differ between a forum-shaped answer and an OIDC one (id/uid/sub,
+// username/preferred_username, avatar/avatar_url/picture), so all of them are
+// consulted; the login worked for accounts whose reply happened to use the first
+// spelling and failed for the rest.
+func (n *NodeLocOAuth) profile(userResponse nodeLocUserResponse, uid, accessToken, refreshToken, scope string) *domain.OAuthProfile {
 	return &domain.OAuthProfile{
-		Provider:    nodeLocProviderName,
-		ProviderUID: uid,
-		Username:    firstNonEmpty(userResponse.Username, userResponse.Name, "nodeloc-"+uid),
-		DisplayName: firstNonEmpty(userResponse.Name, userResponse.DisplayName, userResponse.Username),
-		Email:       optionalString(userResponse.Email),
-		AvatarURL:   firstNonEmpty(userResponse.AvatarURL, userResponse.Avatar),
-		TrustLevel:  parseOptionalInt(userResponse.TrustLevel),
-		Scope:       n.scopes,
-	}, nil
+		Provider:     nodeLocProviderName,
+		ProviderUID:  uid,
+		Username:     firstNonEmpty(userResponse.Username, userResponse.Preferred, userResponse.Name, "nodeloc-"+uid),
+		DisplayName:  firstNonEmpty(userResponse.Name, userResponse.DisplayName, userResponse.Nickname, userResponse.Username),
+		Email:        optionalString(userResponse.Email),
+		AvatarURL:    firstNonEmpty(userResponse.AvatarURL, userResponse.Avatar, userResponse.Picture),
+		TrustLevel:   parseOptionalInt(userResponse.TrustLevel),
+		Scope:        scope,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}
 }
 
 type nodeLocUserResponse struct {
 	ID          string          `json:"id"`
 	UID         string          `json:"uid"`
 	UserID      string          `json:"user_id"`
+	Subject     string          `json:"sub"`
 	Username    string          `json:"username"`
+	Preferred   string          `json:"preferred_username"`
 	Name        string          `json:"name"`
+	Nickname    string          `json:"nickname"`
 	DisplayName string          `json:"display_name"`
 	Email       string          `json:"email"`
 	Avatar      string          `json:"avatar"`
 	AvatarURL   string          `json:"avatar_url"`
+	Picture     string          `json:"picture"`
 	TrustLevel  json.RawMessage `json:"trust_level"`
 }
 
@@ -239,20 +292,66 @@ func (n *NodeLocOAuth) getBearing(ctx context.Context, path, accessToken string,
 func (n *NodeLocOAuth) execute(req *http.Request, target any) error {
 	response, err := n.httpClient.Do(req)
 	if err != nil {
-		return err
+		// The buyer cannot act on a dial failure, but the shop owner can: this is
+		// egress, DNS, TLS or the host setting.
+		return fmt.Errorf("%w：%v", domain.ErrOAuthUnreachable, err)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
-		return err
+		return fmt.Errorf("%w：读取 NodeLoc 响应失败: %v", domain.ErrOAuthUnreachable, err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("nodeloc returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("%w（HTTP %d）：%s", domain.ErrOAuthRejected, response.StatusCode, summarizeBody(body))
 	}
-	if err := json.Unmarshal(body, target); err != nil {
-		return fmt.Errorf("decode nodeloc response: %w", err)
+
+	// NodeLoc answers some endpoints with the payload under `data` and some with
+	// the claims at the top level; the payment gateway has long accepted both. The
+	// envelope may also carry {"success": false, "message": …} with a 200, which
+	// used to read as an empty profile and fail as "资料里没有账号标识".
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return fmt.Errorf("%w：NodeLoc 的返回不是可解析的 JSON：%s", domain.ErrOAuthRejected, summarizeBody(body))
+	}
+	if success, ok := envelope["success"]; ok && string(success) == "false" {
+		var message struct {
+			Message string `json:"message"`
+			Error   string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &message)
+		return fmt.Errorf("%w：%s", domain.ErrOAuthRejected, firstNonEmpty(message.Message, message.Error, "NodeLoc 拒绝了请求"))
+	}
+	payload := body
+	if inner, ok := envelope["data"]; ok {
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(inner, &nested) == nil {
+			for key, value := range envelope {
+				if _, exists := nested[key]; !exists && key != "data" {
+					nested[key] = value
+				}
+			}
+			if rewritten, err := json.Marshal(nested); err == nil {
+				payload = rewritten
+			}
+		}
+	}
+	if err := json.Unmarshal(payload, target); err != nil {
+		return fmt.Errorf("%w：decode nodeloc response: %v", domain.ErrOAuthRejected, err)
 	}
 	return nil
+}
+
+// summarizeBody keeps a provider body short enough to show a shop owner.
+func summarizeBody(body []byte) string {
+	text := strings.Join(strings.Fields(string(body)), " ")
+	const limit = 180
+	if len(text) > limit {
+		return text[:limit] + "…"
+	}
+	if text == "" {
+		return "空响应"
+	}
+	return text
 }
 
 func cloneParams(params map[string]string) map[string]string {

@@ -10,14 +10,9 @@ import type { Order } from '../types'
 const PageSize = 20
 
 /** Statuses the buyer can narrow the list to; must match the server's allow-list. */
-const FILTERS: { key: string; label: string }[] = [
-  { key: '', label: '全部' },
-  { key: 'pending', label: '待支付' },
-  { key: 'paid', label: '已支付' },
-  { key: 'completed', label: '已完成' },
-  { key: 'cancelled', label: '已取消' },
-  { key: 'refunded', label: '已退款' },
-]
+const FILTERS: { key: string; label: string }[] = ['', 'pending', 'paid', 'completed', 'cancelled', 'refunded'].map(
+  (key) => ({ key, label: key ? orderStatus(key).label : '全部' }),
+)
 
 const route = useRoute()
 const router = useRouter()

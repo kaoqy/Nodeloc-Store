@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { checkoutAdvice, createPayment, getOrder, reconcileMessage, reconcileOrder, reconcileRetryable } from '../api/payment'
+import {
+  checkoutAdvice,
+  createPayment,
+  getOrder,
+  paymentSettled,
+  reconcileMessage,
+  reconcileOrder,
+  reconcileRetryable,
+} from '../api/payment'
 import { errorMessage } from '../api/client'
 import { useInboxStore } from '../stores/inbox'
 import { setPageTitle } from '../utils/identity'
@@ -113,6 +121,11 @@ async function pay() {
   payAdvice.value = ''
   try {
     const payment = await createPayment(current.order_no, current.product?.name)
+    if (paymentSettled(payment)) {
+      paying.value = false
+      await confirmPayment()
+      return
+    }
     if (!payment.payment_url) throw new Error('支付通道未返回付款地址，请稍后重试')
     window.location.href = payment.payment_url
   } catch (e) {

@@ -258,6 +258,12 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 		Amount: order.TotalAmount, Description: description, OrderID: order.OrderNo,
 	})
 	if err != nil {
+		// NodeLoc already has a payment for this order number, which is the answer
+		// to every 立即购买 a buyer presses a second time. Hand them the payment
+		// that exists instead of a refusal they can only clear by paying twice.
+		if resumed, resumeErr := s.resumeExistingPayment(ctx, order, input.UserID, err); resumed != nil || resumeErr != nil {
+			return resumed, resumeErr
+		}
 		// A refused 下单 has to leave a trace the shop owner can read. Until it
 		// does, "买家说付不了款" is unanswerable: the buyer only ever sees the
 		// generic sentence, and the provider's reason disappears with the request.
@@ -341,6 +347,59 @@ func (s *Service) savePaymentOrder(ctx context.Context, paymentOrder *domain.Pay
 	return s.orders.SavePaymentOrder(ctx, paymentOrder)
 }
 
+// resumeExistingPayment answers NodeLoc's 「Order already exists with status …」
+// refusal, which is what every second 下单 for one order number gets — a buyer who
+// came back to the order page and pressed the button again. The payment is on
+// NodeLoc's side, so the store hands that payment back instead of refusing the
+// retry, which is the one answer that pushes people to pay twice.
+//
+// When the provider's own words say the money already moved, 查单 settles it here
+// and now: that is the lost-callback case, and the buyer should be shown the
+// goods rather than a checkout page.
+//
+// (nil, nil) means "not this problem" and the caller reports the original error.
+func (s *Service) resumeExistingPayment(ctx context.Context, order *models.Order, userID uint, cause error) (*CreatePaymentOutput, error) {
+	var refusal *domain.PaymentAlreadyRequested
+	if !errors.As(cause, &refusal) {
+		return nil, nil
+	}
+	paymentOrder, err := s.orders.GetPaymentOrderByOrderNo(ctx, order.OrderNo)
+	if err != nil || paymentOrder == nil {
+		return nil, nil
+	}
+
+	if callbackCompleted(refusal.Status) {
+		result, reconcileErr := s.reconcile(ctx, order.OrderNo, derefString(paymentOrder.ProviderTransactionID), userID)
+		if reconcileErr == nil && result != nil && result.Settled {
+			log.Printf("payment checkout %s: NodeLoc already had this order paid, 查单 settled it", order.OrderNo)
+			fresh, loadErr := s.orders.GetPaymentOrderByOrderNo(ctx, order.OrderNo)
+			if loadErr != nil || fresh == nil {
+				fresh = paymentOrder
+			}
+			return &CreatePaymentOutput{PaymentOrder: fresh, Order: result.Order}, nil
+		}
+		// NodeLoc says paid and its query cannot say so yet. Sending the buyer back
+		// to the checkout page would invite a second charge, so this reads as the
+		// unsettled answer it is and the storefront keeps confirming — except when
+		// the store never got a transaction id to ask about, where the only thing
+		// left is the payment page NodeLoc already has.
+		log.Printf("payment checkout %s: NodeLoc reported %s for this order but 查单 did not settle it: %v", order.OrderNo, refusal.Status, reconcileErr)
+		if errors.Is(reconcileErr, ErrNoProviderTransaction) && strings.TrimSpace(derefString(paymentOrder.PaymentURL)) != "" {
+			return &CreatePaymentOutput{PaymentOrder: paymentOrder, Order: order}, nil
+		}
+		if reconcileErr != nil {
+			return nil, reconcileErr
+		}
+		return nil, fmt.Errorf("%w: provider reported %s", ErrPaymentUnsettled, refusal.Status)
+	}
+
+	if strings.TrimSpace(derefString(paymentOrder.PaymentURL)) == "" {
+		return nil, nil
+	}
+	log.Printf("payment checkout %s: NodeLoc already has this order (%s), reissuing the payment it took", order.OrderNo, refusal.Status)
+	return &CreatePaymentOutput{PaymentOrder: paymentOrder, Order: order}, nil
+}
+
 // recordCheckoutFailure leaves a refused 下单 on the order's payment transaction.
 // Before this, a buyer's "付不了款" was unanswerable: the storefront only ever saw
 // the generic sentence and NodeLoc's reason died with the request.
@@ -406,11 +465,11 @@ func (s *Service) HandleCallback(ctx context.Context, params map[string]string) 
 	if err != nil {
 		return nil, err
 	}
-	if transactionID == "" {
-		if paymentOrder.ProviderTransactionID == nil || *paymentOrder.ProviderTransactionID == "" {
-			return nil, ErrInvalidInput
-		}
-		transactionID = *paymentOrder.ProviderTransactionID
+	if transactionID == "" && paymentOrder.ProviderTransactionID != nil {
+		// NodeLoc's redirect example carries transaction_id, but a release that
+		// leaves it out of the browser redirect must not strand money the
+		// signature already accounts for.
+		transactionID = strings.TrimSpace(*paymentOrder.ProviderTransactionID)
 	}
 
 	reported := first(params, "status", "state")
@@ -422,7 +481,13 @@ func (s *Service) HandleCallback(ctx context.Context, params map[string]string) 
 	}
 	platformFee, merchantPoints := intPtrParam(params, "platform_fee", "fee"), intPtrParam(params, "merchant_points", "merchant_amount")
 
-	if query, queryErr := s.gateway.QueryPayment(ctx, transactionID); queryErr != nil {
+	if transactionID == "" {
+		// Nothing to cross-check against: the redirect is signed with this
+		// store's own credential and names this order at this amount, which is
+		// the authority this handler already treats as enough. Settling it beats
+		// the alternative — telling a buyer who paid to pay again.
+		log.Printf("payment callback %s: signed redirect carries no transaction id, settling from the signature", orderNo)
+	} else if query, queryErr := s.gateway.QueryPayment(ctx, transactionID); queryErr != nil {
 		log.Printf("payment callback %s: provider query unavailable, settling from signed redirect: %v", orderNo, queryErr)
 	} else if query != nil {
 		if query.OrderID != "" && query.OrderID != orderNo {
@@ -488,7 +553,12 @@ func (s *Service) HandleCallbackSets(ctx context.Context, sets []map[string]stri
 func (s *Service) settle(ctx context.Context, orderNo string, paymentOrder *domain.PaymentOrder, transactionID string, platformFee, merchantPoints *int) (*models.Order, error) {
 	now := time.Now().UTC()
 	paymentOrder.Status = domain.StatusPaid
-	paymentOrder.ProviderTransactionID = stringPointer(transactionID)
+	// A signed redirect can settle an order without naming a transaction id, and
+	// writing an empty one over the row would erase the id a later callback
+	// brings and leave 交易号 blank on a paid order.
+	if transactionID != "" {
+		paymentOrder.ProviderTransactionID = stringPointer(transactionID)
+	}
 	paymentOrder.PaidAt = &now
 	if err := s.orders.SavePaymentOrder(ctx, paymentOrder); err != nil {
 		return nil, err
@@ -502,7 +572,9 @@ func (s *Service) settle(ctx context.Context, orderNo string, paymentOrder *doma
 	if paymentTransaction != nil {
 		paymentTransaction.Status = domain.StatusPaid
 		paymentTransaction.FailureReason = nil
-		paymentTransaction.ProviderTransactionID = stringPointer(transactionID)
+		if transactionID != "" {
+			paymentTransaction.ProviderTransactionID = stringPointer(transactionID)
+		}
 		paymentTransaction.CompletedAt = &now
 		if err := s.orders.SaveTransaction(ctx, paymentTransaction); err != nil {
 			return nil, fmt.Errorf("settle payment transaction: %w", err)

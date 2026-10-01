@@ -111,6 +111,24 @@ func TestClassifyGrantErrorWordsEachDocumentedRefusal(t *testing.T) {
 	}
 }
 
+// The gateway reads 「Order already exists with status …」 into the typed duplicate
+// refusal before anyone sees the provider's sentence, so the 转账 path has to
+// classify that type — matching on the English text only works when the gateway
+// did not translate it first, which is how a duplicate 转账 ended up reported as
+// an unexplained provider rejection.
+func TestClassifyGrantErrorReadsTheTypedDuplicateRefusal(t *testing.T) {
+	failure := classifyGrantError(&domain.PaymentAlreadyRequested{Status: "completed"})
+	if failure.Code != "grant_reference_exists" || failure.Status != 409 {
+		t.Fatalf("got %q/%d, want grant_reference_exists/409", failure.Code, failure.Status)
+	}
+	if !strings.Contains(failure.Message, "已经收过") || !strings.Contains(failure.Message, "不要重复转出") {
+		t.Errorf("message %q", failure.Message)
+	}
+	if strings.Contains(failure.Message, "already has a payment") {
+		t.Errorf("our own sentinel leaked to the shop owner: %q", failure.Message)
+	}
+}
+
 func TestClassifyGrantErrorLiftsBalancesOutOfEnglish(t *testing.T) {
 	failure := classifyGrantError(rejected("Insufficient balance (need 5000, have 12)"))
 	if failure.Code != "grant_insufficient_balance" {

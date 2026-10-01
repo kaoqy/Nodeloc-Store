@@ -195,19 +195,6 @@ html[data-theme='light'] {
     border-radius: var(--radius-md);
     padding: 16px;
   }
-  .card-hover {
-    background: var(--surface);
-    border: 1px solid var(--stroke);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-xs);
-    padding: 20px;
-    transition: border-color var(--normal), box-shadow var(--normal), transform 260ms var(--spring);
-  }
-  .card-hover:hover {
-    border-color: var(--stroke-hi);
-    box-shadow: var(--shadow-md);
-    transform: translateY(-2px);
-  }
   .panel {
     background: var(--surface);
     border: 1px solid var(--stroke);
@@ -260,9 +247,8 @@ html[data-theme='light'] {
   .btn-ghost:hover:not(:disabled) { color: var(--text); background: var(--surface-hi); }
   .btn-danger { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
   .btn-danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
-  .btn-sm { padding: 5px 11px; font-size: 12.5px; border-radius: var(--radius-xs); min-height: 32px; }
+  .btn-sm { padding: 5px 11px; font-size: 12.5px; border-radius: var(--radius-xs); min-height: 36px; }
   .scrim { background: var(--scrim); }
-  .btn-lg { padding: 12px 24px; font-size: 15px; }
 
   /* ── Inputs ── */
   .input, .field {
@@ -361,7 +347,6 @@ html[data-theme='light'] {
   .muted { color: var(--text-dim); }
   .quiet { color: var(--text-quiet); }
   .accent-text { color: var(--accent); }
-  .gradient-text { color: var(--accent); }
 
   /* ── Code / card-key surface ── */
   .codebox {
@@ -485,7 +470,6 @@ html[data-theme='light'] {
     100% { background-position: -60% 0; }
   }
 
-  .fade-in { animation: fadeIn 280ms var(--ease) both; }
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: none; }
@@ -529,7 +513,6 @@ html[data-theme='light'] {
   }
   .timeline-item:last-child::after { display: none; }
   .timeline-done::before { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
-  .timeline-active::before { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -20,16 +20,15 @@ type Module struct {
 func Wire(db *gorm.DB, cfg *config.Config) *Module {
 	repo := infrastructure.NewGormUserRepo(db)
 
-	oauth, err := infrastructure.NewNodeLocOAuth(infrastructure.NodeLocOAuthConfig{
+	// An incomplete OAuth setting is a missing feature, not a reason to bring the
+	// process down: this runs during every settings rebuild.
+	oauth := infrastructure.NewNodeLocOAuth(infrastructure.NodeLocOAuthConfig{
 		BaseURL:      cfg.NodeLoc.BaseURL,
 		ClientID:     cfg.NodeLoc.ClientID,
 		ClientSecret: cfg.NodeLoc.ClientSecret,
 		RedirectURI:  cfg.NodeLoc.RedirectURI,
 		Scopes:       cfg.NodeLoc.Scopes,
 	}, nil)
-	if err != nil {
-		panic("identity: failed to create OAuth client: " + err.Error())
-	}
 
 	tokens, err := infrastructure.NewJWTService(infrastructure.JWTConfig{
 		Secret:     cfg.JWT.Secret,

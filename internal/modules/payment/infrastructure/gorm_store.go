@@ -210,9 +210,14 @@ func (s *GormStore) MarkOrderPaid(ctx context.Context, orderNo, transactionID st
 		if order.Status != "paid" && order.Status != "completed" {
 			now := time.Now().UTC()
 			updates := map[string]any{
-				"status":         "paid",
-				"transaction_id": transactionID,
-				"paid_at":        now,
+				"status":  "paid",
+				"paid_at": now,
+			}
+			// A signed redirect can settle a payment without naming a transaction
+			// id; blanking the one the order already carries would erase the
+			// receipt.
+			if strings.TrimSpace(transactionID) != "" {
+				updates["transaction_id"] = transactionID
 			}
 			if platformFee != nil {
 				updates["platform_fee"] = *platformFee

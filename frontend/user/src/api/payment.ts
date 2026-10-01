@@ -61,6 +61,15 @@ export function reconcileRetryable(error: unknown): boolean {
 }
 
 /**
+ * NodeLoc can answer a second 下单 with 「this order is already paid」 instead of a
+ * fresh cashier page. Sending the buyer to a cashier for money already taken is
+ * how a double payment happens, so a settled payment is routed to the order.
+ */
+export function paymentSettled(payment: PaymentOrder): boolean {
+  return payment.status === 'paid' || payment.status === 'succeeded' || payment.status === 'completed'
+}
+
+/**
  * What the buyer can actually do about a refused 下单. The server already wrote
  * the reason in Chinese against its machine-readable code; this only adds the
  * next step, because a 付款配置 problem looks identical to a transient one from
