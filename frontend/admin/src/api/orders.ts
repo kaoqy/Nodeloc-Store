@@ -33,6 +33,10 @@ export interface ReconcileResult {
   provider_status?: string
   retryable: boolean
   checked_at: string
+  // 「query」是 NodeLoc 的查单接口，「reprocess」是商店改用下单核实这一单。
+  provider_via?: string
+  // 查单没能用上时 NodeLoc 的原话，只发给后台。
+  provider_note?: string
 }
 
 export const reconcileOrder = (orderNo: string) =>
@@ -44,6 +48,8 @@ export interface ReconcileItem {
   order_no: string
   settled: boolean
   provider_status?: string
+  provider_via?: string
+  provider_note?: string
   code?: string
   message?: string
   detail?: string

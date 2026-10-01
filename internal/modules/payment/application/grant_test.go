@@ -362,3 +362,82 @@ func TestClassifyCarriesGrantFailuresToTheTransport(t *testing.T) {
 		t.Errorf("a refused transfer lost its own wording: %+v", failure)
 	}
 }
+
+// 转账's refusals arrive numbered, with a sentence written in the forum's own language.
+// A 「每日积分转账达到上限」 used to fall through to a bare 502 saying only that NodeLoc
+// rejected the transfer, because no English marker in this file matched it — and the
+// limit lives on NodeLoc's payment application, so there was nothing the owner could
+// read off the sentence and act on. The number says the same thing in either locale.
+func TestClassifyGrantErrorReadsTheNumberedTransferRefusals(t *testing.T) {
+	cases := []struct {
+		code       int
+		detail     string
+		wantCode   string
+		wantStatus int
+		wantPhrase string
+	}{
+		{domain.CodeDailyLimitReached, "每日积分转账达到上限", "grant_daily_limit", 429, "每日上限"},
+		{domain.CodeInsufficientBalance, "余额不足", "grant_insufficient_balance", 409, "余额不够"},
+		{domain.CodeBelowMinimum, "转账金额低于最小值", "grant_below_minimum", 400, "最小转账额"},
+		{domain.CodeTransferToYourself, "不能转账给自己", "grant_self", 409, "自己给自己转"},
+		{domain.CodeSignatureFailed, "验签失败", "grant_signature", 502, "Payment Token"},
+		{domain.CodeParameterMissing, "缺少参数 points", "grant_parameter", 400, "缺了参数"},
+	}
+	for _, tc := range cases {
+		failure := classifyGrantError(&domain.ProviderRefusal{Message: tc.detail, Code: tc.code})
+		if failure.Code != tc.wantCode {
+			t.Errorf("%d %q: got code %q, want %q", tc.code, tc.detail, failure.Code, tc.wantCode)
+		}
+		if failure.Status != tc.wantStatus {
+			t.Errorf("%d: got status %d, want %d", tc.code, failure.Status, tc.wantStatus)
+		}
+		if !strings.Contains(failure.Message, tc.wantPhrase) {
+			t.Errorf("%d: message %q does not say %q", tc.code, failure.Message, tc.wantPhrase)
+		}
+		if !strings.Contains(failure.Message, tc.detail) {
+			t.Errorf("%d: NodeLoc's own words were dropped from %q", tc.code, failure.Message)
+		}
+	}
+}
+
+// A recipient field is the parameter this store cannot make up, and the same number covers
+// it: 1004 for a missing amount is 「check the amount」, 1004 for a missing to_username is
+// 「this buyer only ever gave this shop a uid」. Sending the operator to the amount box for
+// the second one is how a refund for a uid-only buyer stays broken forever.
+func TestClassifyGrantSeparatesAMissingRecipientFromAMissingAmount(t *testing.T) {
+	for _, refusal := range []*domain.ProviderRefusal{
+		{Message: "Missing required parameter: to_username", Code: domain.CodeParameterMissing},
+		{Message: "缺少参数：to_user_id", Code: domain.CodeParameterInvalid},
+		{Message: "Missing required parameter: to_username"},
+	} {
+		failure := classifyGrantError(refusal)
+		if failure.Code != "grant_recipient_unbound" {
+			t.Errorf("%q => %q, want the buyer asked to log in with NodeLoc once more", refusal.Message, failure.Code)
+		}
+		if !strings.Contains(failure.Message, "用户名会自动补齐") {
+			t.Errorf("%q: message %q does not say what fixes it", refusal.Message, failure.Message)
+		}
+	}
+	// The amount half of the same number keeps its own answer.
+	other := classifyGrantError(&domain.ProviderRefusal{Message: "Missing required parameter: points", Code: domain.CodeParameterMissing})
+	if other.Code != "grant_parameter" {
+		t.Fatalf("points refusal => %q, want grant_parameter", other.Code)
+	}
+}
+
+// The IP whitelist answer is the one a shop owner cannot see coming: the keys are right,
+// the address is right, and every payment call still refuses because the payment
+// application only takes calls from listed addresses. It has to arrive as its own advice,
+// not as 「凭据不匹配」 — retyping keys is exactly what an owner does next.
+func TestClassifyGrantErrorSaysTheIPWhitelistNotTheKey(t *testing.T) {
+	failure := classifyGrantError(fmt.Errorf("payment: %w: IP 不在白名单内", domain.ErrProviderIPNotAllowed))
+	if failure.Code != "provider_ip_blocked" {
+		t.Fatalf("got code %q, want provider_ip_blocked", failure.Code)
+	}
+	if !strings.Contains(failure.Message, "白名单") || strings.Contains(failure.Message, "Payment Token") {
+		t.Fatalf("message %q, want the whitelist named and no advice to retype the token", failure.Message)
+	}
+	if shared := Classify(fmt.Errorf("payment: %w", domain.ErrProviderIPNotAllowed)); shared.Code != failure.Code {
+		t.Fatalf("the 转账 path and the payment path disagree: %q vs %q", failure.Code, shared.Code)
+	}
+}

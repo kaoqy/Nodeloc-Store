@@ -78,7 +78,16 @@ export function paymentSettled(payment: PaymentOrder): boolean {
 export function checkoutAdvice(error: unknown): string {
   if (errorRetryable(error)) return '稍等片刻再点一次通常就好了，商店也会持续向 NodeLoc 核实。'
   const code = errorCode(error)
-  if (code === 'not_configured' || code === 'provider_rejected' || code === 'amount_mismatch' || code === 'foreign_transaction')
+  // 商店侧的问题（凭据、Payment ID、服务器时钟、金额归属）都跟买家的操作无关，
+  // 再点一次只会重复同一句拒绝。
+  if (
+    code === 'not_configured' ||
+    code === 'provider_rejected' ||
+    code === 'provider_clock' ||
+    code === 'payment_id_unknown' ||
+    code === 'amount_mismatch' ||
+    code === 'foreign_transaction'
+  )
     return '这是商店与 NodeLoc 之间的问题，重复点击不会有不同结果，请把订单号发给店家处理。'
   return ''
 }

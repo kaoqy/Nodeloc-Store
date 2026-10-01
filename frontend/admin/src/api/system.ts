@@ -92,6 +92,9 @@ export interface SettingsDocument {
   settings: RuntimeSettings
   payment_ready?: boolean
   payment_missing?: string[]
+  // Credentials that are filled but cannot work: Token and Secret Key swapped, an
+  // OAuth Client ID in the Payment ID box. Wording is the server's, in Chinese.
+  payment_warnings?: string[]
 }
 
 export const getRuntimeSettings = () =>

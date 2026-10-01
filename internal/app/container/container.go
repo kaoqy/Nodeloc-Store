@@ -147,13 +147,32 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 
 	if sys != nil {
 		sys.Attach(db,
-			func() (string, error) {
-				url, _, err := identityMod.Service.InitiateOAuth("settings-test")
-				return url, err
+			// The OAuth probe redeems a code that cannot exist at NodeLoc's token
+			// endpoint. The authorize page is no evidence — the live forum answers it
+			// with its own login redirect even for a client_id it has never heard of,
+			// so building a URL used to hand out 「配置正确」 while every buyer fell off
+			// after logging in. The token endpoint checks the client pair first, which
+			// is the one thing 设置 needs to know, and it costs nobody a login.
+			func(ctx context.Context) system.OAuthProbe {
+				outcome := identityMod.Service.ProbeOAuth(ctx)
+				link, _, _ := identityMod.Service.InitiateOAuth("settings-test")
+				return system.OAuthProbe{Code: outcome.Code, Detail: outcome.Detail, AuthorizeURL: link}
 			},
-			func(ctx context.Context) error {
-				_, err := paymentMod.Gateway.QueryPayment(ctx, "nodeloc-store-connectivity-probe")
-				return err
+			// The probe replays 下单 for one of this shop's own settled orders, which
+			// NodeLoc answers 「order already exists」 — the only server-side payment
+			// call that proves the signing credentials without putting a charge on
+			// anybody (查单 is a browser-session route on the real forum). The payment
+			// module classifies its own answer, so 设置 reads a code instead of
+			// re-reading the money module's error strings.
+			func(ctx context.Context) system.PaymentProbe {
+				outcome := paymentMod.Service.Probe(ctx)
+				return system.PaymentProbe{
+					Code:      outcome.Code,
+					Message:   outcome.Message,
+					Detail:    outcome.Detail,
+					Retryable: outcome.Retryable,
+					Style:     outcome.Style,
+				}
 			},
 		)
 	}

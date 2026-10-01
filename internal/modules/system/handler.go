@@ -177,28 +177,12 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 }
 
 func (h *Handler) TestOAuth(c *gin.Context) {
-	url, err := h.service.TestOAuth()
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"ok": false, "msg": probeCopy(err)})
-		return
+	ok, authorizeURL, msg := h.service.TestOAuth(c.Request.Context())
+	answer := gin.H{"ok": ok, "msg": msg}
+	if authorizeURL != "" {
+		answer["authorize_url"] = authorizeURL
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "authorize_url": url})
-}
-
-// probeCopy words the OAuth probe's failure for the settings page, which shows
-// this sentence as the result. The infrastructure errors it can carry are written
-// in English for the log, so the two the shop can actually reach are named here;
-// anything else keeps the raw cause attached, the same way the payment probe below
-// quotes the provider, because a probe the owner cannot diagnose is useless.
-func probeCopy(err error) string {
-	switch text := err.Error(); {
-	case strings.Contains(text, "configuration is incomplete"):
-		return "NodeLoc 登录还没配置完整：请填好「NodeLoc 站点地址」「Client ID」「Client Secret」后再试一次。"
-	case strings.Contains(text, "state is required"):
-		return "商店没能准备好登录状态参数（state），请再点一次测试；仍然失败请查看商店日志。"
-	default:
-		return "测试未能完成：" + text
-	}
+	c.JSON(http.StatusOK, answer)
 }
 
 func (h *Handler) TestPayment(c *gin.Context) {

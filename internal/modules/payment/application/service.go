@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -98,6 +99,15 @@ type ReconcileResult struct {
 	ProviderStatus string        `json:"provider_status,omitempty"`
 	Retryable      bool          `json:"retryable"`
 	CheckedAt      time.Time     `json:"checked_at"`
+	// ProviderVia names which NodeLoc route answered, "query" or "reprocess". A
+	// shop whose money settles through the second one is not broken, but the
+	// owner has to be able to see that 查单 is not what is answering.
+	ProviderVia string `json:"provider_via,omitempty"`
+	// ProviderNote is NodeLoc's own sentence about the 查单 this store could not
+	// use. Back office only: ReconcileOrder clears it, because the buyer's next
+	// step is unchanged by the provider's English and it is not their credential
+	// to fix.
+	ProviderNote string `json:"provider_note,omitempty"`
 }
 
 type OrderList struct {
@@ -476,10 +486,15 @@ func (s *Service) HandleCallback(ctx context.Context, params map[string]string) 
 	if !callbackCompleted(reported) {
 		return nil, fmt.Errorf("%w: provider reported %q", ErrPaymentNotComplete, reported)
 	}
-	if amount := intParam(params, "amount"); amount != 0 && amount != paymentOrder.Amount {
+	if amount := intParam(params, "amount", "paid_amount", "total_amount"); amount != 0 && amount != paymentOrder.Amount {
 		return nil, ErrAmountMismatch
 	}
-	platformFee, merchantPoints := intPtrParam(params, "platform_fee", "fee"), intPtrParam(params, "merchant_points", "merchant_amount")
+	// The fee and the net are what the ledger records, and the provider names them
+	// differently on 回调 and on 查单: platform_fee/fee_amount here, merchant_points there.
+	// A decimal 「9.5」 is a real settlement, so these read as points-rounded numbers instead
+	// of failing to parse and leaving the order's fee at zero.
+	platformFee := intPtrParam(params, "platform_fee", "fee_amount", "fee")
+	merchantPoints := intPtrParam(params, "merchant_points", "merchant_amount", "net_amount")
 
 	if transactionID == "" {
 		// Nothing to cross-check against: the redirect is signed with this
@@ -487,7 +502,12 @@ func (s *Service) HandleCallback(ctx context.Context, params map[string]string) 
 		// the authority this handler already treats as enough. Settling it beats
 		// the alternative — telling a buyer who paid to pay again.
 		log.Printf("payment callback %s: signed redirect carries no transaction id, settling from the signature", orderNo)
-	} else if query, queryErr := s.gateway.QueryPayment(ctx, transactionID); queryErr != nil {
+	} else if query, queryErr := s.gateway.QueryPayment(ctx, contract.QueryPaymentRequest{
+		TransactionID: transactionID,
+		OrderID:       orderNo,
+		Amount:        paymentOrder.Amount,
+		Description:   paymentOrder.Description,
+	}); queryErr != nil {
 		log.Printf("payment callback %s: provider query unavailable, settling from signed redirect: %v", orderNo, queryErr)
 	} else if query != nil {
 		if query.OrderID != "" && query.OrderID != orderNo {
@@ -666,7 +686,17 @@ func (s *Service) reconcile(ctx context.Context, orderNo, hintedTransactionID st
 		if candidate.transaction == "" {
 			continue
 		}
-		query, queryErr := s.gateway.QueryPayment(ctx, candidate.transaction)
+		// Only this order's own row may take the 下单 fallback: an id that merely
+		// arrived with the request has no order behind it here, and letting it be
+		// confirmed by re-submitting this order would settle the order on a
+		// transaction id that was never ours.
+		request := contract.QueryPaymentRequest{TransactionID: candidate.transaction}
+		if candidate.owned {
+			request.OrderID = orderNo
+			request.Amount = paymentOrder.Amount
+			request.Description = paymentOrder.Description
+		}
+		query, queryErr := s.gateway.QueryPayment(ctx, request)
 		if queryErr != nil {
 			if candidate.owned {
 				// Whether NodeLoc is unreachable or refusing the shop's
@@ -686,6 +716,7 @@ func (s *Service) reconcile(ctx context.Context, orderNo, hintedTransactionID st
 			continue
 		}
 		checkedAt := time.Now().UTC()
+		via, note := providerRoute(query, userID)
 		if !providerCompleted(query.Status) {
 			return &ReconcileResult{
 				Order: order,
@@ -694,12 +725,14 @@ func (s *Service) reconcile(ctx context.Context, orderNo, hintedTransactionID st
 				ProviderStatus: query.Status,
 				Retryable:      !providerFailed(query.Status),
 				CheckedAt:      checkedAt,
+				ProviderVia:    via,
+				ProviderNote:   note,
 			}, nil
 		}
 		if query.Amount != 0 && query.Amount != paymentOrder.Amount {
 			return nil, ErrAmountMismatch
 		}
-		log.Printf("payment reconcile %s: provider confirmed %s as paid", orderNo, candidate.transaction)
+		log.Printf("payment reconcile %s: provider confirmed %s as paid（经由 %s）", orderNo, candidate.transaction, query.Via)
 		settled, err := s.settle(ctx, orderNo, paymentOrder, candidate.transaction, query.PlatformFee, query.MerchantPoints)
 		if err != nil {
 			return nil, err
@@ -709,6 +742,8 @@ func (s *Service) reconcile(ctx context.Context, orderNo, hintedTransactionID st
 			Settled:        settled.Status != "pending",
 			ProviderStatus: query.Status,
 			CheckedAt:      checkedAt,
+			ProviderVia:    via,
+			ProviderNote:   note,
 		}, nil
 	}
 
@@ -720,6 +755,20 @@ func (s *Service) reconcile(ctx context.Context, orderNo, hintedTransactionID st
 type queryCandidate struct {
 	transaction string
 	owned       bool
+}
+
+// providerRoute says which NodeLoc route answered a reconcile, and hands the
+// reason the 查单 route was skipped to the operator only. The buyer's money state
+// is already in the response; the provider's sentence about this store's settings
+// would just be English text on a storefront.
+func providerRoute(query *contract.QueryPaymentResult, userID uint) (string, string) {
+	if query == nil {
+		return "", ""
+	}
+	if userID != 0 {
+		return query.Via, ""
+	}
+	return query.Via, query.Fallback
 }
 
 // providerCompleted reads back the gateway's normalised query status.
@@ -777,27 +826,45 @@ func callbackCompleted(status string) bool {
 	return false
 }
 
+// intParam reads an amount the provider reported in this callback. NodeLoc writes money
+// both ways — 100 and "100.00" — and a value that is present but unreadable must never be
+// reported as absent: this is the check that decides whether a signed callback is for the
+// order it names, and a silent 0 skips it.
 func intParam(params map[string]string, keys ...string) int {
-	if value := first(params, keys...); value != "" {
-		parsed, err := strconv.Atoi(strings.TrimSpace(value))
-		if err == nil {
-			return parsed
+	for _, key := range keys {
+		if points, ok := pointsOfValue(params[key]); ok {
+			return points
 		}
 	}
 	return 0
 }
 
+// intPtrParam keeps 「服务商没有报这个字段」 apart from 「报了 0」: the first leaves the
+// store's own ledger alone, the second corrects it.
 func intPtrParam(params map[string]string, keys ...string) *int {
 	for _, key := range keys {
-		if value, ok := params[key]; ok {
-			parsed, err := strconv.Atoi(strings.TrimSpace(value))
-			if err != nil {
-				return nil
-			}
-			return &parsed
+		if points, ok := pointsOfValue(params[key]); ok {
+			return &points
 		}
 	}
 	return nil
+}
+
+// pointsOfValue converts one provider money field, decimal included: 平台费 9.5 积分 is a
+// different settlement than 9, so the fraction is rounded rather than dropped.
+func pointsOfValue(text string) (int, bool) {
+	trimmed := strings.TrimSpace(strings.ReplaceAll(text, ",", ""))
+	if trimmed == "" {
+		return 0, false
+	}
+	if whole, err := strconv.Atoi(trimmed); err == nil {
+		return whole, true
+	}
+	decimal, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil {
+		return 0, false
+	}
+	return int(math.Round(decimal)), true
 }
 
 func (s *Service) FulfillOrder(ctx context.Context, orderNo string) (*models.Order, error) {
@@ -892,6 +959,8 @@ type ReconcileItem struct {
 	OrderNo        string `json:"order_no"`
 	Settled        bool   `json:"settled"`
 	ProviderStatus string `json:"provider_status,omitempty"`
+	ProviderVia    string `json:"provider_via,omitempty"`
+	ProviderNote   string `json:"provider_note,omitempty"`
 	Code           string `json:"code,omitempty"`
 	Message        string `json:"message,omitempty"`
 	Detail         string `json:"detail,omitempty"`
@@ -940,9 +1009,13 @@ func (s *Service) reconcilePending(ctx context.Context, limit int, minAge time.D
 		case result.Settled:
 			item.Settled = true
 			item.ProviderStatus = result.ProviderStatus
+			item.ProviderVia = result.ProviderVia
+			item.ProviderNote = result.ProviderNote
 			report.Settled++
 		default:
 			item.ProviderStatus = result.ProviderStatus
+			item.ProviderVia = result.ProviderVia
+			item.ProviderNote = result.ProviderNote
 		}
 		report.Items = append(report.Items, item)
 	}
@@ -956,6 +1029,110 @@ func (s *Service) reconcilePending(ctx context.Context, limit int, minAge time.D
 		}
 	}
 	return report, nil
+}
+
+// probeTransactionID is what 「测试支付网关」 asks 查单 about. It is
+// deliberately an id no order can have: a button on a settings page must never
+// find, let alone move, somebody's money.
+const probeTransactionID = "nodeloc-store-connectivity-probe"
+
+// probeDescription labels the replayed 下单 in the merchant's own NodeLoc records,
+// so a self-test is readable as one instead of looking like an order nobody paid.
+const probeDescription = "nodeloc-store 支付网关自检"
+
+// probeOrderLookback is how many of the shop's orders the settings probe reads
+// before it admits there is nothing safe to ask NodeLoc about.
+const probeOrderLookback = 20
+
+// Probe is the settings page's question: can this store reach NodeLoc Payments at
+// all?
+//
+// The credential half of that answer can only come from 下单. On the live forum 查单
+// is Discourse's own browser-session route and answers 「["BAD CSRF"]」 to a
+// server-side call however correctly it is signed, so reading the guard as the whole
+// verdict told a shop with a mistyped Payment Token that 「收款与发货不受影响」 while no
+// buyer could pay — which is the opposite of what a button named 测试支付网关 is for.
+//
+// 下单 opens a payment, so the probe does not invent an order: it re-submits one of
+// this shop's own orders that NodeLoc already holds a transaction for. The provider
+// answers 「Order already exists with status …」 for an order id it knows, and that
+// refusal is the proof the store wants — NodeLoc read the signature and recognised
+// the request as its own, without a second charge being put on anybody.
+func (s *Service) Probe(ctx context.Context) contract.ProbeOutcome {
+	if s.gateway == nil {
+		return contract.ProbeOutcome{Code: "not_configured", Message: "商店还没有接入 NodeLoc 支付网关。"}
+	}
+	proved, refusal := s.probeSignature(ctx)
+	outcome := contract.ProbeOutcome{Style: s.gateway.SigningStyle()}
+	if !proved {
+		if refusal == nil {
+			// A store that has never taken money through NodeLoc has no order id the
+			// provider can remember, so nothing short of opening a fresh payment can
+			// prove its credentials. Say that instead of guessing green.
+			outcome.Code = "not_verified"
+			outcome.Message = "商店还没有任何一单在 NodeLoc 留下交易号，本按钮无法在不打开新支付的前提下验证下单凭据。"
+			return outcome
+		}
+		failure := Classify(refusal)
+		outcome.Code, outcome.Message, outcome.Detail, outcome.Retryable = failure.Code, failure.Message, failure.Detail, failure.Retryable
+		return outcome
+	}
+	if _, err := s.gateway.QueryPayment(ctx, contract.QueryPaymentRequest{TransactionID: probeTransactionID}); err != nil {
+		failure := Classify(err)
+		outcome.Code, outcome.Message, outcome.Detail, outcome.Retryable = failure.Code, failure.Message, failure.Detail, failure.Retryable
+	}
+	outcome.Style = s.gateway.SigningStyle()
+	return outcome
+}
+
+// probeSignature replays 下单 for an order NodeLoc already holds. It reports whether
+// the provider's answer says anything about this store's signature, and the refusal
+// to show the owner when it says the signature is not accepted.
+func (s *Service) probeSignature(ctx context.Context) (bool, error) {
+	order, ok := s.probeOrder(ctx)
+	if !ok {
+		return false, nil
+	}
+	_, err := s.gateway.CreatePayment(ctx, contract.CreatePaymentRequest{
+		Amount:      order.TotalAmount,
+		Description: probeDescription,
+		OrderID:     order.OrderNo,
+	})
+	var already *domain.PaymentAlreadyRequested
+	if errors.As(err, &already) {
+		// 「Already exists」 is an answer about this shop's own order, which NodeLoc
+		// could only give after it accepted the signature on the request.
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// The provider did not recognise an order id it had handed a transaction for —
+	// its records aged out, most likely. The signature is proven all the same.
+	return true, nil
+}
+
+// probeOrder picks a settled order whose payment NodeLoc took, so the replay is read
+// out of the provider's records rather than turning into a new charge.
+func (s *Service) probeOrder(ctx context.Context) (models.Order, bool) {
+	orders, _, err := s.orders.ListAllOrders(ctx, probeOrderLookback, 0, "", "", 0, "")
+	if err != nil {
+		return models.Order{}, false
+	}
+	for i := range orders {
+		order := orders[i]
+		if order.Status != "paid" && order.Status != "completed" {
+			continue
+		}
+		paymentOrder, err := s.orders.GetPaymentOrderByOrderNo(ctx, order.OrderNo)
+		if err != nil || paymentOrder == nil {
+			continue
+		}
+		if strings.TrimSpace(derefString(paymentOrder.ProviderTransactionID)) != "" {
+			return order, true
+		}
+	}
+	return models.Order{}, false
 }
 
 func (s *Service) Refund(ctx context.Context, input RefundInput) (*contract.TransferResult, error) {

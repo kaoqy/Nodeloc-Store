@@ -46,6 +46,18 @@ type OAuthProvider interface {
 	// FetchProfile re-reads the account behind an access token, so a buyer can
 	// pull a fresh 头像/邮箱 from NodeLoc without signing out and back in.
 	FetchProfile(ctx context.Context, accessToken string) (*domain.OAuthProfile, error)
+	// Probe asks the token endpoint one question that costs nobody a login: are
+	// these Client ID / Client Secret a pair this application knows?
+	Probe(ctx context.Context) OAuthProbe
+}
+
+// OAuthProbe is one 「测试 NodeLoc 登录」 answer, classified by the module that
+// spoke to NodeLoc instead of by the settings page re-reading English error
+// strings. Code is empty when NodeLoc accepted the credentials.
+type OAuthProbe struct {
+	Code    string
+	Message string
+	Detail  string
 }
 
 // TokenService creates and validates application access and refresh tokens.

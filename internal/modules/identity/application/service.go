@@ -137,6 +137,14 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*OAuthResult, er
 	return &OAuthResult{User: user, Tokens: tokens}, nil
 }
 
+// ProbeOAuth asks NodeLoc's token endpoint whether the stored credentials are a pair
+// it knows. The 设置 page reads the code, so it never has to re-interpret an English
+// error string — and never has to pretend that a well-formed authorization URL means
+// the login will work.
+func (s *Service) ProbeOAuth(ctx context.Context) contract.OAuthProbe {
+	return s.oauth.Probe(ctx)
+}
+
 func (s *Service) InitiateOAuth(state string) (string, string, error) {
 	state = strings.TrimSpace(state)
 	if state == "" {

@@ -122,6 +122,11 @@ const needAttention = ref(false)
 const reconcileIssues = computed(() =>
   (reconcileReport.value?.items ?? []).filter((item) => !item.settled),
 )
+// 只要有一笔是用「下单」核实的，就说明 NodeLoc 的查单这条路当前走不通。店家需要
+// 知道这一点，否则设置的开关看着正常，钱却从另一条路进来。
+const reconcileViaCheckout = computed(() =>
+  (reconcileReport.value?.items ?? []).some((item) => item.provider_via === 'reprocess'),
+)
 
 /**
  * 批量查单对账：买家关掉付款页、回调没回来时，这些单子会一直挂着「待支付」。
@@ -280,12 +285,16 @@ onMounted(() => {
           查看已收款未交付 →
         </RouterLink>
       </p>
+      <p v-if="reconcileViaCheckout" class="hint">
+        本轮有几笔是用「下单」核实的：NodeLoc 的查单接口不接受服务器端调用，商店自己换了这条路，到账不受影响。
+      </p>
       <ul class="space-y-1.5">
         <li v-for="item in reconcileIssues" :key="item.order_no" class="flex flex-wrap items-center gap-2 text-sm">
           <RouterLink :to="`/orders/${item.order_no}`" class="mono accent-text underline-offset-2 hover:underline">
             {{ item.order_no }}
           </RouterLink>
           <span v-if="item.provider_status" class="badge badge-neutral">{{ providerStatus(item.provider_status) }}</span>
+          <span v-if="item.provider_via === 'reprocess'" class="badge badge-neutral">经由下单核实</span>
           <span v-if="item.detail || item.message" class="quiet text-xs">{{ item.detail || item.message }}</span>
         </li>
       </ul>

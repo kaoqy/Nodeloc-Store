@@ -96,6 +96,11 @@ async function reconcile() {
     notice.value = result.settled
       ? `已查单：NodeLoc 确认到账${result.order.delivery_content ? '，交付内容已写入本单' : '，交付已进入队列'}。`
       : `已向 NodeLoc 查询：这笔付款记为「${providerStatus(result.provider_status)}」，商店未入账。${result.retryable ? '可在买家确认后再次查询。' : '这单不会自动到账，请人工处理。'}`
+    if (result.provider_via === 'reprocess') {
+      // The money answer is the same either way, but the shop owner has to be able
+      // to see that NodeLoc's 查单 route is not what gave it.
+      notice.value += `（本单经由「下单」核实：${result.provider_note || 'NodeLoc 的查单接口不接受服务器端调用'}）`
+    }
   } catch (err) {
     error.value = reconcileMessage(err)
   } finally {

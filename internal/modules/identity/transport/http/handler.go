@@ -504,9 +504,10 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	}
 	fragment := url.Values{}
 	fragment.Set("access_token", result.Tokens.AccessToken)
-	// The refresh token travels with it for the same reason the access token does:
-	// a fragment is neither logged nor sent to a server. Without it a NodeLoc
-	// login would expire every access TTL with no way to renew.
+	// This pair is the shop's own JWTs, not NodeLoc's: the forum's token endpoint
+	// answers a refresh_token grant with 「Refresh tokens are not supported」, so the
+	// buyer's session can only outlive the access TTL through the store's own
+	// /auth/refresh. A fragment is neither logged nor sent to any server.
 	if result.Tokens.RefreshToken != "" {
 		fragment.Set("refresh_token", result.Tokens.RefreshToken)
 	}

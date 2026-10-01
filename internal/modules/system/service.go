@@ -16,6 +16,7 @@ import (
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/platform/database/gormdb"
+	"github.com/kaoqy/Nodeloc-Store/internal/shared"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -36,11 +37,46 @@ type Service struct {
 	installing   bool
 	bootPath     string
 	defaultPort  int
-	oauthProbe   func() (string, error)
-	paymentProbe func(context.Context) error
+	oauthProbe   OAuthProbeFunc
+	paymentProbe PaymentProbeFunc
 	rebuild      func() error
 	handler      *Handler
 }
+
+// OAuthProbe is the identity module's reading of one call to NodeLoc's token
+// endpoint. Code is empty when NodeLoc recognised the Client ID / Client Secret
+// pair; AuthorizeURL carries the link the settings page can offer either way.
+//
+// The code, not a sentence, is what 设置 switches on: an English OAuth error name
+// is the only part of that answer that does not follow the forum's locale, and a
+// settings page re-reading error strings is how a wrong Secret used to be reported
+// as 「配置正确」.
+type OAuthProbe struct {
+	Code         string
+	Detail       string
+	AuthorizeURL string
+}
+
+// OAuthProbeFunc asks the live OAuth provider whether this store's credentials are
+// a pair NodeLoc knows.
+type OAuthProbeFunc func(context.Context) OAuthProbe
+
+// PaymentProbe is what the payment module reports back from one test call to
+// NodeLoc. Code is empty when the provider accepted the call; otherwise it is the
+// payment module's own machine-readable reading of the refusal — 设置 switches on
+// it instead of re-reading English error strings, so the two modules stay apart
+// and can never disagree about what the same refusal means.
+type PaymentProbe struct {
+	Code      string
+	Message   string
+	Detail    string
+	Retryable bool
+	Style     string
+}
+
+// PaymentProbeFunc asks the live payment gateway whether this store can reach
+// NodeLoc, without touching an order.
+type PaymentProbeFunc func(context.Context) PaymentProbe
 
 func NewService(bootPath string, defaultPort int) *Service {
 	if defaultPort <= 0 {
@@ -57,7 +93,11 @@ func (s *Service) Handler() *Handler {
 }
 
 // Attach binds the live container to the service (called on every rebuild).
-func (s *Service) Attach(db *gorm.DB, oauthProbe func() (string, error), paymentProbe func(context.Context) error) {
+// Both probes answer with the module's own reading of one NodeLoc call: the payment
+// probe also carries the signing convention the forum accepted, and the OAuth probe
+// carries whether the client pair is known, so 「测试」 buttons can name the failure
+// and the field to fix instead of quoting an English error back to the shop owner.
+func (s *Service) Attach(db *gorm.DB, oauthProbe OAuthProbeFunc, paymentProbe PaymentProbeFunc) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.db = db
@@ -276,7 +316,11 @@ func (s *Service) runInstall(req InstallRequest) (*gorm.DB, error) {
 		Theme:    req.Theme,
 	}
 	rt.OAuth.Enabled = true
-	rt.Payment.Enabled = req.Payment.PaymentID != "" && req.Payment.Token != "" && req.Payment.SecretKey != ""
+	// The wizard's payment block is complete when the application is named and the
+	// owner has pasted its secret — whichever of the two boxes NodeLoc handed them.
+	// Requiring both made a shop that could take money switch itself off at install.
+	rt.Payment.Enabled = strings.TrimSpace(req.Payment.PaymentID) != "" &&
+		(strings.TrimSpace(req.Payment.Token) != "" || strings.TrimSpace(req.Payment.SecretKey) != "")
 	rt.MergeDefaults()
 	// The wizard's fields are as user-typed as the settings page's, so they go
 	// through the same bounds and colour checks before they are stored.
@@ -500,9 +544,10 @@ func (s *Service) GetSettings() (map[string]any, error) {
 	// 「支付已启用」 while every buyer is refused at 下单.
 	missing := rt.Payment.MissingCredentials()
 	return map[string]any{
-		"settings":        view,
-		"payment_ready":   rt.Payment.Enabled && len(missing) == 0,
-		"payment_missing": missing,
+		"settings":         view,
+		"payment_ready":    rt.Payment.Enabled && len(missing) == 0,
+		"payment_missing":  missing,
+		"payment_warnings": rt.PaymentWarnings(),
 	}, nil
 }
 
@@ -529,13 +574,17 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	next.App.Name = strings.TrimSpace(next.App.Name)
 	next.App.Domain = normalizeDomain(next.App.Domain)
 	next.App.Scheme = strings.TrimSpace(next.App.Scheme)
-	next.OAuth.ClientID = strings.TrimSpace(next.OAuth.ClientID)
 	next.OAuth.BaseURL = strings.TrimSpace(next.OAuth.BaseURL)
 	next.OAuth.RedirectURI = strings.TrimSpace(next.OAuth.RedirectURI)
 	next.OAuth.Scopes = strings.TrimSpace(next.OAuth.Scopes)
-	next.Payment.PaymentID = strings.TrimSpace(next.Payment.PaymentID)
-	next.Payment.Token = strings.TrimSpace(next.Payment.Token)
-	next.Payment.SecretKey = strings.TrimSpace(next.Payment.SecretKey)
+	// Credentials are trimmed of the paste artefacts before anything compares
+	// them, so a quoted `"tk_xxx"` and a bare tk_xxx are the same setting here —
+	// and the mask placeholder is still recognised as the mask placeholder.
+	next.OAuth.ClientID = shared.TrimCredential(next.OAuth.ClientID)
+	next.OAuth.ClientSecret = shared.TrimCredential(next.OAuth.ClientSecret)
+	next.Payment.PaymentID = shared.TrimCredential(next.Payment.PaymentID)
+	next.Payment.Token = shared.TrimCredential(next.Payment.Token)
+	next.Payment.SecretKey = shared.TrimCredential(next.Payment.SecretKey)
 
 	// The SPA echoes the mask placeholder for a secret it did not touch; only that
 	// placeholder preserves the stored value. An emptied field is a real clearing.
@@ -548,10 +597,12 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	if next.Payment.SecretKey == Redacted {
 		next.Payment.SecretKey = existing.Payment.SecretKey
 	}
-	// The token is not part of this gate: a payment that cannot sign 下单 must
-	// surface the gateway's actionable error instead of quietly flipping the
-	// admin's own switch off.
-	next.Payment.Enabled = next.Payment.Enabled && next.Payment.PaymentID != "" && next.Payment.SecretKey != ""
+	// The owner's switch stays off only when there is no application named or no
+	// secret at all to sign with. Either box counts: which one NodeLoc hands out
+	// depends on the payment application's release, and a store that can sign 下单
+	// must not be switched off because the other box is empty.
+	hasSecret := next.Payment.Token != "" || next.Payment.SecretKey != ""
+	next.Payment.Enabled = next.Payment.Enabled && next.Payment.PaymentID != "" && hasSecret
 	// A settings document that does not mention a switch at all is an older one,
 	// not an instruction to turn it on, so the stored value carries over first.
 	if next.Features.Checkin == nil {
@@ -586,24 +637,104 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	return nil
 }
 
-// TestOAuth builds an authorization URL from the current settings.
-func (s *Service) TestOAuth() (string, error) {
+// TestOAuth answers the one question the settings page cannot answer by looking at
+// its own fields: does NodeLoc recognise this Client ID / Client Secret pair?
+//
+// Building the authorization URL used to be the whole test, and it proved nothing —
+// the live forum redirects /oauth-provider/authorize to its own login page even for a
+// client_id that has never existed, so a shop whose Secret was reset or mistyped got a
+// green light there and every buyer then fell off after logging into NodeLoc. The
+// probe therefore speaks to the token endpoint (with a code that cannot exist, which
+// touches nobody) and reads OAuth's own error name off it.
+func (s *Service) TestOAuth(ctx context.Context) (bool, string, string) {
 	s.mu.Lock()
 	probe := s.oauthProbe
 	s.mu.Unlock()
 	if probe == nil {
-		return "", ErrNotInstalled
+		return false, "", ErrNotInstalled.Error()
 	}
-	return probe()
+	outcome := probe(ctx)
+	link := ""
+	if outcome.AuthorizeURL != "" {
+		link = "（授权链接已生成，可直接在浏览器里打开试一次登录）"
+	}
+	ok := false
+	reason := ""
+	switch outcome.Code {
+	case "":
+		ok = true
+		reason = "NodeLoc 认这组 Client ID 与 Client Secret，买家点「NodeLoc 登录」后商店能换到令牌"
+	case "not_configured":
+		reason = "NodeLoc 登录还没配置完整：" + describeOAuthMissing(outcome.Detail)
+	case "unreachable":
+		reason = "连不上 NodeLoc 的 OAuth 接口：" + describeOAuthUnreachable(outcome.Detail) +
+			"。请检查「NodeLoc 站点地址」拼写，以及这台商店服务器能不能出网"
+	case "route_missing":
+		reason = "这个地址上没有 NodeLoc 的 OAuth 接口：" + describeOAuthUnreachable(outcome.Detail) +
+			"。NodeLoc 的 OAuth 挂在论坛域名下的 /oauth-provider 上，请把「NodeLoc 站点地址」填成论坛本体（不是 API 网关、也不是登录镜像域）"
+	case "client_rejected":
+		reason = "NodeLoc 不认这组凭据：Client ID 与 Client Secret 对不上这个 OAuth 应用。" +
+			"请到论坛的 OAuth 应用页重新复制这两串（应用被重建、Secret 被重置、或把支付应用的 Payment ID 填进 Client ID 都会这样）：" +
+			describeOAuthUnreachable(outcome.Detail)
+	case "redirect_mismatch":
+		reason = "凭据是对的，但 NodeLoc 不接受商店报的回调地址：" + describeOAuthUnreachable(outcome.Detail) +
+			"。回调必须是后台「站点域名」推出来的那一条 /api/v1/auth/oauth/callback，并且要和 OAuth 应用里登记的回调一字不差（协议、域名、结尾斜杠都算）"
+	case "grant_unsupported":
+		reason = "这个 OAuth 应用不允许商店走的授权方式（授权码模式）：" + describeOAuthUnreachable(outcome.Detail) +
+			"。请确认应用勾选的是 authorization code flow"
+	case "scope_rejected":
+		reason = "这个 OAuth 应用没有通过商店申请的 scope（至少要有 openid，取邮箱还要 email）：" +
+			describeOAuthUnreachable(outcome.Detail)
+	default:
+		reason = "测试未能完成：" + describeOAuthUnreachable(outcome.Detail) + "（code=" + outcome.Code + "）"
+	}
+	return ok, outcome.AuthorizeURL, reason + link
 }
 
-// TestPayment probes the NodeLoc payment gateway with the current settings.
+// describeOAuthMissing turns the provider's 「缺少 X」 into the 设置 page's own field
+// names, because the shop owner reads this sentence with the page in front of them.
+func describeOAuthMissing(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return "请填好「NodeLoc 站点地址」「Client ID」「Client Secret」"
+	}
+	for _, marker := range []string{"缺少 ", "missing "} {
+		if index := strings.Index(strings.ToLower(detail), marker); index >= 0 {
+			return "请补齐后台设置里的 " + strings.TrimSpace(detail[index+len(marker):])
+		}
+	}
+	return detail
+}
+
+// describeOAuthUnreachable keeps NodeLoc's own words after the Chinese lead: which of
+// DNS, TLS, a 500 or a 404 web page it was decides whether the owner fixes the address
+// box or the host's network.
+func describeOAuthUnreachable(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return "NodeLoc 没有给出原因"
+	}
+	if runes := []rune(detail); len(runes) > 200 {
+		return string(runes[:200]) + "…"
+	}
+	return detail
+}
+
+// TestPayment answers the settings page's 「测试支付网关」 from the payment module's
+// own reading of one probe call.
 //
-// The probe asks about a transaction id that does not exist, so a healthy gateway
-// answers with a refusal — and the admin needs to know *which* refusal. An
-// unreachable host, an empty field, a rejected signature and an unknown
-// transaction are four different fixes, and reporting them all as 「支付网关可达」
-// is how a wrong Secret Key survives a settings page.
+// The probe replays 下单 for one of this shop's settled orders — the only server-side
+// payment call that proves the signing credentials without putting a charge on anybody —
+// and then asks 查单 about a transaction id that does not exist. An unreachable host, an
+// empty field, a rejected signature, an unknown Payment ID, a calling IP the application
+// does not allow, a drifted clock, a route NodeLoc only lets a browser call and a store
+// with no order to replay are eight different fixes, and reporting them all as 「支付网关
+// 可达」 is how a wrong Payment Token survived a settings page.
+//
+// The payment module already sorts those apart and hands back a code; this reads the
+// code. Matching on the English wording of a sentinel was how the two modules used to
+// disagree about the same failure — a reworded payment error silently turned 「凭据不对」
+// into 「网关可达」 here.
 func (s *Service) TestPayment(ctx context.Context) (bool, string) {
 	s.mu.Lock()
 	probe := s.paymentProbe
@@ -611,33 +742,62 @@ func (s *Service) TestPayment(ctx context.Context) (bool, string) {
 	if probe == nil {
 		return false, "系统尚未初始化"
 	}
-	err := probe(ctx)
-	if err == nil {
-		return true, "支付网关连通正常"
+	outcome := probe(ctx)
+	note := ""
+	if outcome.Style != "" {
+		note = "（本次实测：" + outcome.Style + "）"
 	}
-	msg := err.Error()
-	lower := strings.ToLower(msg)
-	switch {
-	case strings.Contains(lower, "payment is not configured"):
-		return false, "支付参数未配置完整，缺少 " + describePaymentMissing(msg)
+	if outcome.Code == "" {
+		return true, "支付网关连通正常，NodeLoc 已接受商店的签名" + note
+	}
+	switch outcome.Code {
+	case "not_configured":
+		// Every branch ends with the style note: a store that once reached NodeLoc
+		// and then lost a credential still needs to see what the last accepted call
+		// was signed with.
+		return false, "支付参数未配置完整，缺少 " + describePaymentMissing(outcome.Detail) + note
+	// The payment application answered and does not know this Payment ID. Nothing
+	// a signing key fixes: it is one field on this page.
+	case "payment_id_unknown":
+		return false, "支付网关可达，但 NodeLoc 在这个地址上找不到后台填写的 Payment ID。请到 NodeLoc 的支付应用页复制 pay_ 开头的那串 ID（OAuth 登录用的是另一个 Client ID，两者不能混填），并确认「支付 API 地址」指向挂着这个支付应用的域名" + note
+	// 查单 is Discourse's own browser route: it answers 「["BAD CSRF"]」 to every
+	// server-side call, so it proves the store cannot use it — and proves nothing
+	// about whether the shop can take money. Saying 「不可达」 here would send the
+	// owner off to fix a working payment setup.
+	case "provider_guarded":
+		return true, "支付网关可达，但 NodeLoc 的查单接口只接受论坛后台的浏览器会话，服务器端调不动它。商店改用下单回执与支付回调核实到账，收款与发货不受影响" + note
+	// Nothing in the shop's own history could be replayed at 下单 without opening a
+	// fresh payment, so the button has no evidence either way. Reporting the guarded
+	// 查单 as an all-clear here is what let a wrong Payment Token look configured.
+	case "not_verified":
+		return false, "还没有测出下单凭据是否可用：" + outcome.Message + "请完成并支付一笔真实订单，再按这个按钮——商店会复用那一单去核实签名，不会重复收款" + note
 	// Every payment call carries a 10-digit second timestamp and NodeLoc refuses
-	// one more than five minutes from its clock, so a store on a server whose
-	// time has drifted fails all of 下单/查单 at once. Nothing in the credentials
-	// is wrong in that case, and the owner has to be told to fix the clock.
-	case strings.Contains(lower, "timestamp"), strings.Contains(msg, "时间戳"), strings.Contains(lower, "request expired"):
-		return false, "NodeLoc 拒绝了商店的请求时间戳：这台服务器的系统时间与标准时间相差过大，请在宿主机上同步时钟（NTP），支付凭据本身没有问题"
-	case strings.Contains(lower, "signature") && (strings.Contains(lower, "invalid") || strings.Contains(lower, "mismatch")):
-		return false, "网关可达，但 NodeLoc 拒绝了商店的签名：Secret Key 与这个 Payment ID 不匹配，请到 NodeLoc 后台重新核对"
-	case strings.Contains(lower, "not found") && (strings.Contains(lower, "transaction") || strings.Contains(lower, "order")),
-		strings.Contains(msg, "交易不存在"), strings.Contains(msg, "订单不存在"):
-		return true, "支付网关连通正常，签名已被 NodeLoc 接受（探测用的交易号本就不存在）"
-	case strings.Contains(msg, "NodeLoc returned HTTP"):
-		return true, "支付网关可达（NodeLoc 返回: " + msg + "）"
-	case strings.Contains(msg, "no such host"), strings.Contains(msg, "connection refused"), strings.Contains(msg, "timeout"), strings.Contains(msg, "TLS"):
-		return false, "无法连接支付网关: " + msg
+	// one outside its window, so a server whose clock has drifted fails 下单/查单/
+	// 转账 at once. Nothing in the credentials is wrong in that case.
+	case "provider_clock":
+		return false, "NodeLoc 拒绝了商店的请求时间戳：这台服务器的系统时间与标准时间相差过大，请在宿主机上同步时钟（NTP），支付凭据本身没有问题" + note
+	case "provider_rejected":
+		return false, "网关可达，但 NodeLoc 拒绝了商店的签名：Payment Token 与 Secret Key 都和这个 Payment ID 配不上（商店已依次试过文档写的几种签名方式），请到 NodeLoc 后台重新核对后复制粘贴" + note
+	// The probe's transaction id does not exist by design, so 「not found」 is the
+	// sound of NodeLoc reading the request and answering it.
+	case "not_found":
+		return true, "支付网关连通正常，签名已被 NodeLoc 接受（探测用的交易号本就不存在）" + note
+	case "provider_unreachable":
+		return false, "无法连接支付网关: " + describePaymentUnreachable(outcome.Detail) + note
 	default:
-		return false, msg
+		return false, outcome.Message + "（code=" + outcome.Code + "）" + note
 	}
+}
+
+// describePaymentUnreachable keeps NodeLoc's or the transport's own reason
+// (dial tcp: no such host, TLS handshake, HTTP 500) after the Chinese lead,
+// because which of those it is decides whether the owner fixes DNS or the host.
+func describePaymentUnreachable(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return "NodeLoc 没有应答"
+	}
+	return detail
 }
 
 // paymentFieldLabels name the payment settings the way the 设置 page labels them,
@@ -650,6 +810,11 @@ var paymentFieldLabels = map[string]string{
 }
 
 func describePaymentMissing(msg string) string {
+	// Both boxes empty is one instruction, not two: NodeLoc hands some payment
+	// applications a single secret, and either field is enough to sign with.
+	if strings.Contains(msg, "token") && strings.Contains(msg, "secret_key") {
+		return "Payment Token 与 Secret Key（NodeLoc 的支付应用只给一串时，填进任意一个即可）"
+	}
 	tail := msg
 	if idx := strings.Index(msg, "缺少 "); idx >= 0 {
 		tail = msg[idx+len("缺少 "):]

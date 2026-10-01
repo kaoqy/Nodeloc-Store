@@ -77,9 +77,18 @@ type UserInfo struct {
 // HTTP client and signing details belong to infrastructure.
 type PaymentGateway interface {
 	CreatePayment(ctx context.Context, request CreatePaymentRequest) (*CreatePaymentResult, error)
-	QueryPayment(ctx context.Context, transactionID string) (*QueryPaymentResult, error)
+	// QueryPayment asks what NodeLoc recorded for a payment. The request carries
+	// the shop's own order number, amount and description as well as the
+	// transaction id, because on the real provider 查单 is a browser-session
+	// route and the answer then has to come from re-submitting 下单 instead.
+	QueryPayment(ctx context.Context, request QueryPaymentRequest) (*QueryPaymentResult, error)
 	Transfer(ctx context.Context, request TransferRequest) (*TransferResult, error)
 	VerifyCallback(params map[string]string) bool
+	// SigningStyle names the credential convention NodeLoc accepted for this
+	// process, empty while none has been tried or nothing has worked. The 设置
+	// page reports it so a shop owner can see which key the store is actually
+	// signing with instead of guessing from the docs.
+	SigningStyle() string
 }
 
 type CreatePaymentRequest struct {
@@ -95,6 +104,16 @@ type CreatePaymentResult struct {
 	Raw           []byte
 }
 
+type QueryPaymentRequest struct {
+	TransactionID string
+	// OrderID, Amount and Description are only used by the fallback 核实 route
+	// (re-submitting 下单 for this order and reading the status NodeLoc reports
+	// back). Left empty, the gateway asks 查单 and reports whatever it answers.
+	OrderID     string
+	Amount      int
+	Description string
+}
+
 type QueryPaymentResult struct {
 	TransactionID  string
 	OrderID        string
@@ -102,7 +121,15 @@ type QueryPaymentResult struct {
 	Status         string
 	PlatformFee    *int
 	MerchantPoints *int
-	Raw            []byte
+	// Via names the route the answer came from: "query" for NodeLoc's 查单 and
+	// "reprocess" for the 下单 oracle. A shop needs to know which one it is
+	// relying on, because the second one is only reachable when 查单 is not.
+	Via string
+	// Fallback is why 查单 was not used, in NodeLoc's own words where it had any.
+	// It is back-office material: the money answer is already in Status, and a
+	// buyer has no use for the provider's English about this store's settings.
+	Fallback string
+	Raw      []byte
 }
 
 type TransferRequest struct {
@@ -116,6 +143,19 @@ type TransferResult struct {
 	TransactionID string
 	Status        string
 	Raw           []byte
+}
+
+// ProbeOutcome is one answer to 「can this store talk to NodeLoc Payments?」, for
+// the 设置 page. Code is empty when NodeLoc accepted the probe; otherwise it is
+// the same machine-readable code a refused 下单 or 查单 carries, so the shop owner
+// and the buyer are told the same thing about the same failure. Style names the
+// signing convention the provider actually took.
+type ProbeOutcome struct {
+	Code      string
+	Message   string
+	Detail    string
+	Retryable bool
+	Style     string
 }
 
 // FulfillmentService delivers a paid order. Implementations must support

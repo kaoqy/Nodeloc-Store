@@ -130,6 +130,12 @@ const RECONCILE_HINT: Record<string, string> = {
   provider_rejected: 'NodeLoc 拒绝了这次请求，通常是 Payment ID / Token / Secret Key 与后台填写的不一致，请到 设置 用「测试支付网关」复核。',
   provider_unreachable: '暂时联系不上 NodeLoc，可能是服务商或出口网络问题，稍后重查。',
   not_configured: '商店的支付还没配置完整（Payment ID / Token / Secret Key 三项），请先到 设置 补齐。',
+  payment_id_unknown:
+    'NodeLoc 在这个地址上没有后台填的 Payment ID：请到 设置 复核「Payment ID」（pay_ 开头，不是 OAuth 的 Client ID）与「支付 API 地址」是否指向挂着该支付应用的域名。',
+  provider_guarded:
+    'NodeLoc 的查单接口只接受论坛后台的浏览器会话，商店的服务器调不动它。这一单改用下单回执与支付回调核实，收款与发货本身不受影响。',
+  provider_clock:
+    '商店服务器的时间与 NodeLoc 相差过大，下单/查单都会被拒。请在宿主机同步时钟（NTP），支付凭据没有问题。',
   not_found: '订单或支付记录已不存在，无法查询。',
 }
 

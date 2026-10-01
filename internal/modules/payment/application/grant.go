@@ -182,11 +182,22 @@ func classifyGrantError(err error) *GrantFailure {
 		return nil
 	}
 	switch {
-	case errors.Is(err, domain.ErrPaymentNotConfigured), errors.Is(err, domain.ErrProviderUnreachable):
-		// "The shop is misconfigured" and "the provider is down" already have
-		// wording in Classify, and it is better than a re-translation here.
+	case errors.Is(err, domain.ErrPaymentNotConfigured):
+		// Classify words this for a buyer; the operator needs the same sentence
+		// plus the field names the gateway named, which live in its error text.
 		shared := Classify(err)
-		return &GrantFailure{Code: shared.Code, Status: shared.Status, Message: shared.Detail, Retryable: shared.Retryable}
+		return &GrantFailure{Code: shared.Code, Status: shared.Status,
+			Message: shared.Message + missingFieldNote(shared.Detail)}
+	case errors.Is(err, domain.ErrProviderUnreachable):
+		shared := Classify(err)
+		return &GrantFailure{Code: shared.Code, Status: shared.Status, Message: shared.Message, Retryable: shared.Retryable}
+	case errors.Is(err, domain.ErrPaymentAppNotFound), errors.Is(err, domain.ErrProviderGuarded),
+		errors.Is(err, domain.ErrProviderClockSkew), errors.Is(err, domain.ErrProviderIPNotAllowed):
+		// Each of these names something about the shop rather than this transfer,
+		// and Classify words them in Chinese; quoting their English sentinel at the
+		// operator would read as 「NodeLoc 原文」 and be untrue.
+		shared := Classify(err)
+		return &GrantFailure{Code: shared.Code, Status: shared.Status, Message: shared.Message, Retryable: shared.Retryable}
 	case !errors.Is(err, domain.ErrProviderRejected):
 		return &GrantFailure{Code: "grant_failed", Status: 502, Message: err.Error()}
 	}
@@ -200,12 +211,58 @@ func classifyGrantError(err error) *GrantFailure {
 		return &GrantFailure{Code: "grant_reference_exists", Status: 409,
 			Message: "这个转账单号 NodeLoc 已经收过，请到流水里确认这一笔是否已经到账，不要重复转出。"}
 	}
+	// NodeLoc's own sentence, without this store's sentinel in front of it. The
+	// 原文 quoted to the operator has to be the provider's words and not
+	// 「nodeloc payment service rejected the request: …」, which is a diagnosis
+	// this program wrote.
+	var refused *domain.ProviderRefusal
+	if errors.As(err, &refused) {
+		provider = strings.TrimSpace(refused.Message)
+	}
 	// The wrapped sentinel prefix is the transport's, not the provider's answer.
 	if index := strings.Index(provider, ": "); index >= 0 && strings.Contains(provider[:index], "provider") {
 		provider = strings.TrimSpace(provider[index+2:])
 	}
 	lowered := strings.ToLower(provider)
 	quoted := func(tail string) string { return tail + "（NodeLoc 原文：" + provider + "）" }
+	// A numbered refusal needs no translation read. NodeLoc documents 转账's answers
+	// (1001 验签失败、1010 余额不足、1011 金额低于最小值、1012 不能转给自己、1013 达到每日
+	// 上限) and the sentence beside them arrives in the forum's own locale, so an operator
+	// told 「每日积分转账达到上限」 in Chinese used to fall through to a bare 502 with no
+	// advice at all — the limit is on NodeLoc's side and only raising it there helps.
+	if refused != nil && refused.Code != 0 {
+		switch refused.Code {
+		case domain.CodeSignatureFailed:
+			return &GrantFailure{Code: "grant_signature", Status: 502,
+				Message: quoted("签名未通过：支付凭据与 NodeLoc 记录的不一致，请到 设置 核对 Payment Token。")}
+		case domain.CodeInsufficientBalance:
+			return &GrantFailure{Code: "grant_insufficient_balance", Status: 409,
+				Message: quoted("商店的 NodeLoc 余额不够这次转账。" + balanceHint(provider))}
+		case domain.CodeBelowMinimum:
+			return &GrantFailure{Code: "grant_below_minimum", Status: 400,
+				Message: quoted("金额低于商店支付应用设定的最小转账额。" + limitHint(provider, "minimum"))}
+		case domain.CodeTransferToYourself:
+			return &GrantFailure{Code: "grant_self", Status: 409,
+				Message: quoted("这笔转账的收款方就是商店自己的支付应用，NodeLoc 不允许自己给自己转。")}
+		case domain.CodeDailyLimitReached:
+			return &GrantFailure{Code: "grant_daily_limit", Status: 429,
+				Message: quoted("今天转出的积分已经到达商店支付应用设定的每日上限。明天会自动恢复，或在 NodeLoc 商户后台调高这个上限；这不是凭据或金额的问题。")}
+		case domain.CodeOrderAlreadyExists:
+			return &GrantFailure{Code: "grant_reference_exists", Status: 409,
+				Message: "这个转账单号 NodeLoc 已经收过，请到流水里确认这一笔是否已经到账，不要重复转出。"}
+		case domain.CodeParameterMissing, domain.CodeParameterInvalid:
+			if recipientFieldNamed(provider) {
+				// The docs ask for uid and username together, and a buyer who ever signed
+				// in with NodeLoc but whose username this store never recorded can only
+				// send one of them. 「参数不对」 would send the operator to the amount box;
+				// the fix is the buyer logging in once more.
+				return &GrantFailure{Code: "grant_recipient_unbound", Status: 409,
+					Message: quoted("NodeLoc 要求这笔转账同时带上收款方的 uid 与用户名，而这个账号在商店里只绑定了 uid。请让对方在本店用 NodeLoc 登录一次，用户名会自动补齐。")}
+			}
+			return &GrantFailure{Code: "grant_parameter", Status: 400,
+				Message: quoted("NodeLoc 认为这个转账请求缺了参数或参数不对，通常是转账金额或收款方标识为空。")}
+		}
+	}
 	switch {
 	case strings.Contains(lowered, "receiver id and username do not match"):
 		return &GrantFailure{Code: "grant_recipient_mismatch", Status: 409,
@@ -234,9 +291,44 @@ func classifyGrantError(err error) *GrantFailure {
 	case strings.Contains(lowered, "order already exists"):
 		return &GrantFailure{Code: "grant_reference_exists", Status: 409,
 			Message: quoted("这个转账单号 NodeLoc 已经收过，请到流水里确认这一笔是否已经到账，不要重复转出。")}
+	// A release that numbers nothing still names the field it missed, and the recipient
+	// fields are the ones this store cannot invent: only the buyer's own NodeLoc login
+	// fills them in.
+	case (strings.Contains(lowered, "missing") || strings.Contains(lowered, "required parameter")) && recipientFieldNamed(lowered):
+		return &GrantFailure{Code: "grant_recipient_unbound", Status: 409,
+			Message: quoted("NodeLoc 要求这笔转账同时带上收款方的 uid 与用户名，而这个账号在商店里只绑定了 uid。请让对方在本店用 NodeLoc 登录一次，用户名会自动补齐。")}
 	default:
 		return &GrantFailure{Code: "grant_rejected", Status: 502, Message: "NodeLoc 拒绝了这次转账：" + provider}
 	}
+}
+
+// recipientFieldNamed spots the recipient fields in NodeLoc's own words, in either
+// language. They are the parameters this store cannot make up, which is what separates
+// 「go log in with NodeLoc once more」 from 「check the amount you typed」.
+func recipientFieldNamed(text string) bool {
+	lowered := strings.ToLower(text)
+	for _, name := range []string{"to_username", "to_user_id", "username", "user_id", "收款", "用户名"} {
+		if strings.Contains(lowered, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// missingFieldNote keeps the gateway's own field names in front of the operator:
+// 「…：缺少 token」 is read out of Classify's detail and appended to the Chinese
+// sentence, so a half-configured store says which box to fill instead of just
+// saying it cannot take money.
+func missingFieldNote(detail string) string {
+	index := strings.Index(detail, "缺少")
+	if index < 0 {
+		return ""
+	}
+	named := strings.TrimSpace(detail[index:])
+	if named == "" || named == "缺少" {
+		return ""
+	}
+	return "（" + named + "，请到 设置 补齐）"
 }
 
 // grantUnanswered words the case where NodeLoc replied without saying it worked.

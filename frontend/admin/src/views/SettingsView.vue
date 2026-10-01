@@ -55,11 +55,12 @@ const redirectPreview = computed(() => {
   if (!settings.app.domain.trim()) return '填写域名后自动生成'
   return `${settings.app.scheme}://${settings.app.domain.trim()}/api/v1/auth/oauth/callback`
 })
+// NodeLoc's payment application may hand out one secret or two, and either box is
+// enough to sign with, so the form is incomplete only when neither is filled.
 const paymentIncomplete = computed(
   () =>
     !settings.payment.payment_id.trim() ||
-    settings.payment.token.trim() === '' ||
-    settings.payment.secret_key.trim() === '',
+    (settings.payment.token.trim() === '' && settings.payment.secret_key.trim() === ''),
 )
 
 // What the server says is missing, as opposed to what this half-typed form looks
@@ -73,6 +74,10 @@ const MISSING_LABELS: Record<string, string> = {
 }
 const serverMissing = ref<string[]>([])
 const missingLabels = computed(() => serverMissing.value.map((name) => MISSING_LABELS[name] || name))
+// Credentials that are filled in but cannot work — Token and Secret Key swapped,
+// an OAuth Client ID typed into the Payment ID box. The store checks the shape on
+// save; guessing it here would only drift from what the server actually reads.
+const serverWarnings = ref<string[]>([])
 const paymentBlocked = computed(
   () => settings.payment.enabled && (paymentIncomplete.value || serverMissing.value.length > 0),
 )
@@ -83,13 +88,65 @@ const paymentBasePreview = computed(
     '未设置：请先填 NodeLoc 域名或这里的支付地址',
 )
 
+// The payment gateway note is what 「测试支付网关」 learned the last time somebody
+// pressed it, including the signing convention NodeLoc turned out to accept. The
+// probe is not free — it is one POST at the provider — so it is remembered here
+// instead of re-run every time the page opens. It is remembered *with* the
+// credentials it was about: an answer about a Token the owner has since retyped
+// would read 「签名已被接受」 about a setting nobody has tested.
+const probeKey = 'nodeloc-store.payment-probe'
+
+type StoredProbe = { at: string; ok: boolean; msg: string; stamp: string }
+
+const lastProbe = ref<StoredProbe | null>(null)
+
+function credentialStamp(): string {
+  return [
+    settings.payment.payment_id,
+    settings.payment.token,
+    settings.payment.secret_key,
+    settings.payment.base_url,
+    settings.oauth.base_url,
+  ]
+    .map((value) => (value || '').trim())
+    .join('|')
+}
+
+function readStoredProbe(): StoredProbe | null {
+  try {
+    const raw = localStorage.getItem(probeKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as StoredProbe
+    return parsed && typeof parsed.msg === 'string' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function probeTime(value: string): string {
+  const at = new Date(value)
+  if (Number.isNaN(at.getTime())) return ''
+  return at.toLocaleString('zh-CN', { hour12: false })
+}
+
+// The still-valid note: the one just pressed, or the stored one as long as none of
+// the five fields it was measured against has moved.
+const paymentProbeNote = computed(() => {
+  if (payment.value) return { ok: payment.value.ok, text: payment.value.text, at: '' }
+  const stored = lastProbe.value
+  if (!stored || stored.stamp !== credentialStamp()) return null
+  return { ok: stored.ok, text: stored.msg, at: probeTime(stored.at) }
+})
+
 async function refreshReadiness() {
   try {
     const doc = await getRuntimeSettings()
     serverMissing.value = doc.payment_missing ?? []
+    serverWarnings.value = doc.payment_warnings ?? []
   } catch {
     // A failed diagnostic read must not block the page that fixes the problem.
     serverMissing.value = []
+    serverWarnings.value = []
   }
 }
 
@@ -153,6 +210,8 @@ async function load() {
     stockThreshold.value = String(settings.features.stock_alert_threshold ?? 5)
     snapshot.value = JSON.stringify(settings)
     serverMissing.value = document.payment_missing ?? []
+    serverWarnings.value = document.payment_warnings ?? []
+    lastProbe.value = readStoredProbe()
     // Remembered as the colour on file, so a save that fails can put it back.
     savedBrand.value = settings.theme.theme_primary
   } catch (err) {
@@ -205,7 +264,14 @@ async function runOAuthTest() {
   oauth.value = null
   try {
     const result = await testOAuth()
-    oauth.value = { ok: result.ok, text: result.ok ? result.authorize_url || '配置有效，可跳转授权页' : result.msg || '请检查 OAuth 参数' }
+    // The server's sentence is the diagnosis (「Client ID 与 Client Secret 对不上」 and
+    // not a bare 通过/未通过), so it shows on both outcomes; the authorize link is what
+    // the owner can click next.
+    const note = result.msg || (result.ok ? 'NodeLoc 认这组凭据' : '请检查 OAuth 参数')
+    oauth.value = {
+      ok: result.ok,
+      text: result.authorize_url ? `${note} 授权链接：${result.authorize_url}` : note,
+    }
   } catch (err) {
     oauth.value = { ok: false, text: `失败：${errorMessage(err, '无法读取 OAuth 配置')}` }
   } finally {
@@ -219,6 +285,18 @@ async function runPaymentTest() {
   try {
     const result = await testPayment()
     payment.value = { ok: result.ok, text: result.msg || (result.ok ? '支付网关连通正常' : '支付网关不可用') }
+    lastProbe.value = {
+      at: new Date().toISOString(),
+      ok: result.ok,
+      msg: payment.value.text,
+      stamp: credentialStamp(),
+    }
+    try {
+      localStorage.setItem(probeKey, JSON.stringify(lastProbe.value))
+    } catch {
+      // A private-mode storage failure only loses the remembered note, not the
+      // result on screen.
+    }
   } catch (err) {
     payment.value = { ok: false, text: `失败：${errorMessage(err, '无法连接支付网关')}` }
   } finally {
@@ -392,6 +470,7 @@ onMounted(load)
             <div class="flex items-center gap-2">
               <span class="hint">{{ settings.payment.enabled ? '已启用' : '已禁用' }}</span>
               <span v-if="paymentBlocked" class="badge badge-danger" title="开关是开的，但凭据不完整，买家下单仍会失败">还收不了款</span>
+              <span v-else-if="serverWarnings.length" class="badge badge-warning" title="三项都填了，但商店怀疑其中某两串拿错了；展开下面这张卡片看是哪一项">凭据可疑</span>
               <button
                 class="switch"
                 :class="{ 'switch-on': settings.payment.enabled }"
@@ -413,12 +492,12 @@ onMounted(load)
               <div>
                 <label class="label" for="payment-token">Payment Token（tk_xxx）</label>
                 <input id="payment-token" v-model="settings.payment.token" type="password" class="input mono" placeholder="tk_xxx；保持 ******** 则不修改" autocomplete="off" />
-                <p class="hint mt-1">买家下单时用它签名（SHA-256 后再作 HMAC 密钥），缺失就无法创建支付。</p>
+                <p class="hint mt-1">文档用它签名下单与转账（SHA-256 后再作 HMAC 密钥）。与下面两项任选其一填写即可。</p>
               </div>
               <div class="sm:col-span-2">
                 <label class="label" for="payment-secret">Secret Key（商户密钥）</label>
                 <input id="payment-secret" v-model="settings.payment.secret_key" type="password" class="input mono" placeholder="保持 ******** 则不修改" autocomplete="off" />
-                <p class="hint mt-1">原样用于查单签名与回调验签，不要填成 Token。</p>
+                <p class="hint mt-1">原样用于查单签名与回调验签。NodeLoc 的支付应用只给你一串密钥时，把它填在这里或上面任意一格都可以。</p>
               </div>
               <div class="sm:col-span-2">
                 <label class="label" for="payment-base">支付 API 地址（可选）</label>
@@ -436,20 +515,29 @@ onMounted(load)
               </div>
             </div>
             <p v-if="paymentIncomplete" class="alert alert-warning" role="alert">
-              三项都要填写：Payment ID 决定收款应用，Payment Token 用于下单，Secret Key 用于查单和回调验签。缺任何一项，买家下单都会失败。
+              Payment ID 必填，签名密钥填 Payment Token 或 Secret Key 其中一格即可（NodeLoc 给两串就都填）。缺任何一项，买家下单都会失败。
             </p>
             <p v-else-if="serverMissing.length" class="alert alert-warning" role="alert">
               开关是开着的，但商店还收不了钱：服务端认为缺少
               <strong>{{ missingLabels.join('、') }}</strong>。
               填好后点「保存配置」，再用下面的「测试支付网关」复核。
             </p>
+            <div v-if="serverWarnings.length" class="alert alert-warning" role="alert">
+              <p class="font-medium">这几项填了，但商店认为它们用不了：</p>
+              <ul class="mt-1.5 list-disc space-y-1.5 pl-5 text-xs leading-relaxed">
+                <li v-for="(warning, index) in serverWarnings" :key="index">{{ warning }}</li>
+              </ul>
+            </div>
             <div class="flex flex-wrap items-center gap-3">
               <button class="btn btn-secondary btn-sm" type="button" :disabled="testingPayment" @click="runPaymentTest">
                 {{ testingPayment ? '测试中…' : '测试支付网关' }}
               </button>
-              <span v-if="payment" :class="['badge', payment.ok ? 'badge-success' : 'badge-danger']">{{ payment.ok ? '通过' : '未通过' }}</span>
+              <span v-if="paymentProbeNote" :class="['badge', paymentProbeNote.ok ? 'badge-success' : 'badge-danger']">
+                {{ paymentProbeNote.ok ? '通过' : '未通过' }}
+              </span>
+              <span v-if="paymentProbeNote?.at" class="hint">上次实测 {{ paymentProbeNote.at }}</span>
             </div>
-            <p v-if="payment" class="codebox text-xs">{{ payment.text }}</p>
+            <p v-if="paymentProbeNote" class="codebox text-xs">{{ paymentProbeNote.text }}</p>
           </div>
         </div>
 

@@ -96,8 +96,33 @@ func Sign(params map[string]string, secret string) string {
 // 转账 requests: the lowercase hex SHA-256 digest of the tk_xxx token. The docs
 // warn explicitly against using the token itself as the key.
 func HashedTokenKey(token string) string {
-	tokenHash := sha256.Sum256([]byte(strings.TrimSpace(token)))
-	return hex.EncodeToString(tokenHash[:])
+	return HexSHA256(strings.TrimSpace(token))
+}
+
+// HexSHA256 is the lowercase hex digest NodeLoc turns a credential into before
+// using it as an HMAC key. 下单/转账 are documented over the digest of the
+// tk_xxx token, while this repository's own upstream client signed every
+// payment call with the digest of the Secret Key, so both need the same step.
+func HexSHA256(value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(digest[:])
+}
+
+// TrimCredential cleans a value pasted out of NodeLoc's console: the whitespace a
+// clipboard adds and the quotes or backticks a documentation snippet brings along.
+// Signatures are computed over the exact bytes that were issued, so one stray
+// quote makes every payment call fail with an error that looks like a wrong key.
+func TrimCredential(value string) string {
+	value = strings.TrimSpace(value)
+	for len(value) >= 2 {
+		first, last := value[0], value[len(value)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') || (first == '`' && last == '`') {
+			value = strings.TrimSpace(value[1 : len(value)-1])
+			continue
+		}
+		break
+	}
+	return value
 }
 
 // VerifyCallback verifies a NodeLoc payment callback signature.

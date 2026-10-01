@@ -74,6 +74,28 @@ func Classify(err error) *Failure {
 		return &Failure{Code: "coupon_unavailable", Status: http.StatusUnprocessableEntity, Message: "优惠码已经用不了了（可能过期、额度用满或不适用于本单），请重新确认后再下单。"}
 	case errors.Is(err, domain.ErrPaymentNotConfigured):
 		return &Failure{Code: "not_configured", Status: http.StatusServiceUnavailable, Message: "商店的 NodeLoc 支付还没有配置好，请稍后再试或联系店家。", Detail: err.Error()}
+	case errors.Is(err, domain.ErrProviderClockSkew):
+		// NodeLoc took the store's credentials and refused the request's timestamp,
+		// which only happens when the shop's server clock has drifted. The buyer can
+		// do nothing about that, and retrying changes nothing until the owner fixes
+		// NTP — so this is not filed under 「稍后再试」.
+		return &Failure{Code: "provider_clock", Status: http.StatusServiceUnavailable, Message: "商店服务器的时间与 NodeLoc 对不上，下单被拒绝。这不是你的操作问题，请把订单号发给店家同步时钟后再试。", Detail: err.Error()}
+	case errors.Is(err, domain.ErrPaymentAppNotFound):
+		// The host answered and did not recognise this Payment ID. Nothing the
+		// buyer can do, and nothing a second click fixes: it is one field in 设置.
+		return &Failure{Code: "payment_id_unknown", Status: http.StatusServiceUnavailable, Message: "商店填写的 Payment ID 在这个支付地址上找不到，已停止下单。请把订单号发给店家，让店家核对后台的「Payment ID」与「支付 API 地址」。", Detail: err.Error()}
+	case errors.Is(err, domain.ErrProviderIPNotAllowed):
+		// NodeLoc's code 1003: the payment application only answers the IP addresses
+		// its owner listed on the forum. The shop's credentials can be exactly right
+		// and every payment call still refuse, which is why this must not be worded
+		// as a credential problem — the owner would retype keys forever. Deploying on
+		// a new server, or a container that got a new address, is what triggers it.
+		return &Failure{Code: "provider_ip_blocked", Status: http.StatusForbidden, Message: "NodeLoc 的支付应用限制了可调用的服务器 IP，本机地址不在白名单里。请把商店服务器的公网 IP 加到 NodeLoc 支付应用的白名单后再试，重新填写密钥不会有任何帮助。", Detail: err.Error()}
+	case errors.Is(err, domain.ErrProviderGuarded):
+		// NodeLoc keeps 查单 behind the forum's own browser session, so the store
+		// confirms payments from 下单 receipts and the signed callback instead. The
+		// order is not lost and the shop is not broken — say neither of those.
+		return &Failure{Code: "provider_guarded", Status: http.StatusBadGateway, Message: "NodeLoc 没有把这笔查询开放给商店的服务器，商店改用下单记录核实这一单。请稍候再查一次，或把订单号发给店家。", Retryable: true, Detail: err.Error()}
 	case errors.Is(err, domain.ErrProviderUnreachable):
 		return &Failure{Code: "provider_unreachable", Status: http.StatusBadGateway, Message: "暂时联系不上 NodeLoc 的支付服务，稍后可以再查一次。", Retryable: true, Detail: err.Error()}
 	case errors.Is(err, domain.ErrProviderRejected):

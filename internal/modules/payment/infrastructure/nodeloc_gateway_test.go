@@ -170,3 +170,34 @@ func TestCallbackAcceptsEitherDocumentedKey(t *testing.T) {
 		}
 	}
 }
+
+// A payment application that issues one secret may have had it pasted into the
+// Token box. NodeLoc then mirrors the redirect with that same value, and a callback
+// the store cannot verify is a paid order left showing 待支付 — so the raw token is
+// the last spelling tried here.
+func TestCallbackFromASingleSecretInEitherBox(t *testing.T) {
+	params := map[string]string{"order_id": "NL1", "transaction_id": "tx_1", "amount": "100", "paid_at": "1730000000"}
+	for name, gateway := range map[string]*NodeLocGateway{
+		"secret box": NewNodeLocGateway("https://pay.invalid", "pay_test", "", "only-secret", nil),
+		"token box":  NewNodeLocGateway("https://pay.invalid", "pay_test", "only-secret", "", nil),
+	} {
+		for _, key := range []string{"only-secret", shared.HashedTokenKey("only-secret"), digestOf("only-secret")} {
+			signed := map[string]string{}
+			for k, v := range params {
+				signed[k] = v
+			}
+			signed["signature"] = shared.Sign(signed, key)
+			if !gateway.VerifyCallback(signed) {
+				t.Fatalf("%s: a redirect signed with %q was refused", name, key)
+			}
+		}
+		foreign := map[string]string{}
+		for k, v := range params {
+			foreign[k] = v
+		}
+		foreign["signature"] = shared.Sign(foreign, "not-our-credential")
+		if gateway.VerifyCallback(foreign) {
+			t.Fatalf("%s: a redirect signed with someone else's key was accepted", name)
+		}
+	}
+}

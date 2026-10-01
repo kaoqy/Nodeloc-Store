@@ -38,9 +38,10 @@ type restockGateway struct{}
 func (restockGateway) CreatePayment(context.Context, contract.CreatePaymentRequest) (*contract.CreatePaymentResult, error) {
 	return nil, nil
 }
-func (restockGateway) QueryPayment(context.Context, string) (*contract.QueryPaymentResult, error) {
+func (restockGateway) QueryPayment(context.Context, contract.QueryPaymentRequest) (*contract.QueryPaymentResult, error) {
 	return nil, nil
 }
+func (restockGateway) SigningStyle() string { return "" }
 func (restockGateway) Transfer(context.Context, contract.TransferRequest) (*contract.TransferResult, error) {
 	return nil, nil
 }

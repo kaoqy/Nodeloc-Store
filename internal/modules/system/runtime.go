@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
+	"github.com/kaoqy/Nodeloc-Store/internal/shared"
 )
 
 // RuntimeConfig is the full user-facing configuration, editable later from
@@ -74,18 +75,66 @@ type PaymentConfig struct {
 // buyer can pay, in the order the shop owner reads them on the settings page.
 // A half-configured gateway is the single most common reason a storefront
 // refuses money, and "not configured" on its own says nothing about which field.
+//
+// Token and Secret Key are one credential the owner may only have one copy of.
+// NodeLoc's own payment application has released both spellings over time, and the
+// client that demonstrably took money on this forum signed with a single secret,
+// so the store asks for either: two empty boxes are 配置 incomplete, one is not.
 func (p PaymentConfig) MissingCredentials() []string {
 	missing := make([]string, 0, 3)
 	if strings.TrimSpace(p.PaymentID) == "" {
 		missing = append(missing, "payment_id")
 	}
-	if strings.TrimSpace(p.Token) == "" {
-		missing = append(missing, "token")
-	}
-	if strings.TrimSpace(p.SecretKey) == "" {
-		missing = append(missing, "secret_key")
+	token := strings.TrimSpace(p.Token)
+	secret := strings.TrimSpace(p.SecretKey)
+	if token == "" && secret == "" {
+		missing = append(missing, "token", "secret_key")
 	}
 	return missing
+}
+
+// PaymentWarnings names the settings shapes that make NodeLoc Payments fail in a
+// way nobody can guess from 「无法支付」: two credentials swapped, an OAuth Client
+// ID typed into the Payment ID box, a key that is still the mask placeholder. Each
+// is a sentence to show on 设置, not a reason to refuse a save — a shop whose
+// payment application really does use another format has to be able to keep it.
+func (r *RuntimeConfig) PaymentWarnings() []string {
+	warnings := make([]string, 0, 4)
+	paymentID := r.Payment.PaymentID
+	token := r.Payment.Token
+	secret := r.Payment.SecretKey
+
+	for _, item := range []struct {
+		name  string
+		value string
+	}{{"Payment ID", paymentID}, {"Payment Token", token}, {"Secret Key", secret}} {
+		if item.value == Redacted {
+			warnings = append(warnings, item.name+" 里存的还是占位符 "+Redacted+"，这一项从未真正保存过密钥。请重新粘贴并保存，再点「测试支付网关」。")
+		}
+	}
+	if token != "" && secret != "" && token == secret {
+		warnings = append(warnings, "Payment Token 与 Secret Key 现在是同一串。NodeLoc 的支付应用只发一串密钥时这样填没问题，商店会依次按文档写的几种签名方式试；若只发两串而这里填成了同一串，回调验签会失败。")
+	}
+	if paymentID != "" && r.OAuth.ClientID != "" && paymentID == r.OAuth.ClientID {
+		warnings = append(warnings, "Payment ID 与 OAuth 的 Client ID 填了同一串。登录用 Client ID，收款用支付应用编号（pay_xxx），两者混填会让每个买家都在下单时被 NodeLoc 拒绝。")
+	}
+	if paymentID != "" && paymentID != Redacted && !strings.HasPrefix(strings.ToLower(paymentID), "pay_") {
+		warnings = append(warnings, "Payment ID 通常以 pay_ 开头（当前是 "+shortValue(paymentID)+"）。若你的支付应用编号确实不是这个格式可以忽略本条，否则请确认没有把 Token、Client ID 或应用数字 ID 填到这里。")
+	}
+	if token != "" && token != Redacted && !strings.HasPrefix(strings.ToLower(token), "tk_") {
+		warnings = append(warnings, "Payment Token 通常以 tk_ 开头（当前是 "+shortValue(token)+"）。若 NodeLoc 只给了你一串商户密钥，把它填在 Secret Key 那一格更稳妥，商店同样能用它签名。")
+	}
+	return warnings
+}
+
+// shortValue shows enough of a credential to recognise which field it is without
+// putting the whole key in a page a shop owner might screenshot.
+func shortValue(value string) string {
+	runes := []rune(value)
+	if len(runes) <= 12 {
+		return string(runes)
+	}
+	return string(runes[:6]) + "…" + string(runes[len(runes)-3:])
 }
 
 type FeaturesConfig struct {
@@ -228,6 +277,17 @@ func (r *RuntimeConfig) Normalize() {
 	if oauth := strings.TrimSpace(r.OAuth.BaseURL); oauth != "" && isProviderOrigin(oauth) {
 		r.OAuth.BaseURL = strings.TrimRight(oauth, "/")
 	}
+
+	// Credentials are signed over exactly the bytes NodeLoc issued, so the quote a
+	// documentation snippet brings along with a paste — "tk_xxx" or `tk_xxx` —
+	// breaks every payment call with an error that reads like a wrong key. The
+	// paired wrappers come off here, on load and on save alike, so a hand-edited
+	// settings row cannot smuggle one in either.
+	r.Payment.PaymentID = shared.TrimCredential(r.Payment.PaymentID)
+	r.Payment.Token = shared.TrimCredential(r.Payment.Token)
+	r.Payment.SecretKey = shared.TrimCredential(r.Payment.SecretKey)
+	r.OAuth.ClientID = shared.TrimCredential(r.OAuth.ClientID)
+	r.OAuth.ClientSecret = shared.TrimCredential(r.OAuth.ClientSecret)
 
 	locale := strings.TrimSpace(r.Theme.Locale)
 	if !localeTag.MatchString(locale) {
