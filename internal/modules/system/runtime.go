@@ -63,7 +63,7 @@ type OAuthConfig struct {
 func (o OAuthConfig) On() bool { return o.Enabled == nil || *o.Enabled }
 
 type PaymentConfig struct {
-	Enabled *bool `json:"enabled"`
+	Enabled   *bool  `json:"enabled"`
 	PaymentID string `json:"payment_id"`
 	// BaseURL is where 下单/查单/转账 go. Left empty they follow the OAuth host,
 	// which is right for a shop with one NodeLoc domain and wrong for one that
@@ -135,6 +135,59 @@ func (r *RuntimeConfig) PaymentWarnings() []string {
 	return warnings
 }
 
+// OAuthMissing names the 登录 settings that have to be filled before a buyer can use
+// 「用 NodeLoc 登录」, in the order the 设置 page shows them. A masked placeholder
+// counts as empty: it is what the store hands back for a secret nobody ever saved.
+func (r *RuntimeConfig) OAuthMissing() []string {
+	missing := make([]string, 0, 3)
+	if value := strings.TrimSpace(r.OAuth.ClientID); value == "" || value == Redacted {
+		missing = append(missing, "client_id")
+	}
+	if value := strings.TrimSpace(r.OAuth.ClientSecret); value == "" || value == Redacted {
+		missing = append(missing, "client_secret")
+	}
+	if r.RedirectURI() == "" {
+		// The callback is derived from 站点域名, so an empty one is that box's
+		// problem. 「重定向 URI 没填」 would send the owner to a field that is meant to
+		// stay empty.
+		missing = append(missing, "domain")
+	}
+	return missing
+}
+
+// OAuthWarnings names 登录 settings that are filled but cannot work. NodeLoc checks the
+// redirect address against its own registry before the shop ever sees a code, so a
+// host or a path that does not match the OAuth application refuses every buyer at
+// 「用 NodeLoc 登录」 with copy that reads like a dead forum.
+func (r *RuntimeConfig) OAuthWarnings() []string {
+	warnings := make([]string, 0, 3)
+	if id := strings.TrimSpace(r.OAuth.ClientID); id != "" && id != Redacted {
+		if strings.HasPrefix(strings.ToLower(id), "pay_") {
+			warnings = append(warnings, "Client ID 以 pay_ 开头，那通常是收款用的 Payment ID。登录要用 NodeLoc OAuth 应用给出的 Client ID，填错时每个买家都会在授权这一步被拒。")
+		}
+		if strings.ContainsAny(id, " \t\"'`") {
+			warnings = append(warnings, "Client ID 里还带着空格或引号（当前是 "+shortValue(id)+"）。NodeLoc 按原文比对，多一个字符就认不出这组凭据。")
+		}
+	}
+	redirect := r.RedirectURI()
+	if redirect == "" {
+		return warnings
+	}
+	parsed, err := url.Parse(redirect)
+	if err != nil {
+		return warnings
+	}
+	host := normalizeDomain(parsed.Host)
+	domain := normalizeDomain(r.App.Domain)
+	if host != "" && domain != "" && host != domain {
+		warnings = append(warnings, "重定向 URI 的域名（"+host+"）与站点域名（"+domain+"）不是同一个。NodeLoc 只把买家送回 OAuth 应用里登记过的那个地址：请把两边改成一致，或让重定向 URI 留空，由商店按站点域名生成。")
+	}
+	if host == domain && parsed.Path != oauthCallbackPath {
+		warnings = append(warnings, "重定向 URI 的路径是 "+parsed.Path+"，而本店的登录回调写在 "+oauthCallbackPath+"。地址对不上时 NodeLoc 会把买家送回一个接不住这个参数的页面，登录永远完不成。")
+	}
+	return warnings
+}
+
 // shortValue shows enough of a credential to recognise which field it is without
 // putting the whole key in a page a shop owner might screenshot.
 func shortValue(value string) string {
@@ -195,6 +248,11 @@ var localeTag = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})*$`)
 // Redacted is returned in place of secret values; sending it back keeps the
 // stored value untouched.
 const Redacted = "********"
+
+// oauthCallbackPath is where the store finishes a NodeLoc 登录 round trip. It is
+// one constant because the derived callback, the route and 设置's warning about a
+// hand-typed address all have to name the same path.
+const oauthCallbackPath = "/api/v1/auth/oauth/callback"
 
 func Default() *RuntimeConfig {
 	yes := true
@@ -286,6 +344,14 @@ func (r *RuntimeConfig) Normalize() {
 		r.OAuth.BaseURL = strings.TrimRight(oauth, "/")
 	}
 
+	// The host the store's own URLs are built from. A 站点域名 pasted with its
+	// scheme and a trailing slash would otherwise reach NodeLoc as
+	// https://https://shop.example.com//api/v1/auth/oauth/callback, which the
+	// forum must refuse — and only a real provider checks a redirect_uri against
+	// a registry, so every local test would still call that configuration fine.
+	r.App.Domain = normalizeDomain(r.App.Domain)
+	r.OAuth.RedirectURI = normalizeCallbackURL(r.App.Scheme, r.OAuth.RedirectURI)
+
 	// Credentials are signed over exactly the bytes NodeLoc issued, so the quote a
 	// documentation snippet brings along with a paste — "tk_xxx" or `tk_xxx` —
 	// breaks every payment call with an error that reads like a wrong key. The
@@ -372,6 +438,56 @@ func trimRunes(value string, limit int) string {
 	return value
 }
 
+// normalizeDomain turns whatever the shop owner typed into the authority the
+// store's own URLs are built on: 「https://Shop.Example.com/」, 「shop.example.com/store」
+// and 「shop.example.com:8080」 all become the lower-cased host, port included. A
+// path is dropped because the store only ever serves from the root, so a
+// sub-path could not be its own callback address anyway.
+func normalizeDomain(in string) string {
+	value := strings.ToLower(strings.TrimSpace(in))
+	if value == "" {
+		return ""
+	}
+	// url.Parse reads 「example.com:8080」 as a scheme unless it is given an
+	// authority to work on.
+	if !strings.Contains(value, "://") {
+		value = "//" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		if index := strings.IndexByte(value, '/'); index >= 0 {
+			value = value[:index]
+		}
+		if index := strings.Index(value, "://"); index >= 0 {
+			value = value[index+3:]
+		}
+		return strings.Trim(value, "/")
+	}
+	return parsed.Host
+}
+
+// normalizeCallbackURL makes a hand-typed OAuth 回调地址 absolute. The store
+// derives this URL from its own domain when the field is blank, so the only
+// reason to fill it is a mirror or a proxy in front of the shop — and a value
+// missing its scheme is refused by every real provider.
+func normalizeCallbackURL(scheme string, in string) string {
+	value := strings.TrimSpace(in)
+	if value == "" {
+		return ""
+	}
+	if !strings.Contains(value, "://") {
+		if scheme != "http" {
+			scheme = "https"
+		}
+		value = scheme + "://" + strings.TrimLeft(value, "/")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return ""
+	}
+	return strings.TrimRight(parsed.String(), "/")
+}
+
 // RedirectURI resolves the OAuth callback URL, deriving it from the site
 // domain when it was not set explicitly.
 func (r *RuntimeConfig) RedirectURI() string {
@@ -385,7 +501,7 @@ func (r *RuntimeConfig) RedirectURI() string {
 	if r.App.Domain == "" {
 		return ""
 	}
-	return scheme + "://" + r.App.Domain + "/api/v1/auth/oauth/callback"
+	return scheme + "://" + r.App.Domain + oauthCallbackPath
 }
 
 // ApplyTo overlays the runtime settings onto the process config so every

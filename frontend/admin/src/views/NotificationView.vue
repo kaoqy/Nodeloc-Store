@@ -131,7 +131,9 @@ onMounted(load)
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex items-center gap-2">
           <h2 class="text-base font-semibold">我的通知</h2>
-          <span v-if="unread" class="badge badge-accent">{{ unread }} 未读</span>
+          <!-- The count is the inbox's, not this page's: a 「3 未读」 next to a
+               sidebar dot saying 45 reads as two different mailboxes. -->
+          <span v-if="inbox.unread" class="badge badge-accent">{{ inbox.unread }} 未读</span>
           <button
             v-if="inbox.unread || unread"
             class="btn btn-quiet btn-sm"
@@ -208,9 +210,9 @@ onMounted(load)
         <div>
           <label class="label" for="n-type">类型</label>
           <select id="n-type" v-model="form.type" class="input">
-            <option value="system">system</option>
-            <option value="order">order</option>
-            <option value="promo">promo</option>
+            <option value="system">系统</option>
+            <option value="order">订单</option>
+            <option value="promo">促销</option>
           </select>
         </div>
         <div>

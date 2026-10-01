@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -143,6 +145,60 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*OAuthResult, er
 // the login will work.
 func (s *Service) ProbeOAuth(ctx context.Context) contract.OAuthProbe {
 	return s.oauth.Probe(ctx)
+}
+
+// OAuthAttemptLog is one NodeLoc 登录 round trip as the transport layer watched
+// it happen. The owner of a Docker container cannot read the process log from
+// the shop, and 「登录不了」 without a step attached is not something they can act
+// on, so the round trip is written down instead.
+type OAuthAttemptLog struct {
+	// Step is initiate or callback; Outcome is started, success or failed.
+	Step     string
+	Outcome  string
+	Reason   string
+	Detail   string
+	Redirect string
+	Username string
+	Binding  bool
+}
+
+// credentialInText catches anything a login round trip could carry that is worth
+// stealing, so the diagnostic table can hold the provider's own sentence without
+// holding its keys.
+var credentialInText = regexp.MustCompile(`(?i)(access_token|refresh_token|client_secret|secret|code|state)[=:]\S+`)
+
+// LogOAuthAttempt is best-effort on purpose: a diagnostic the shop could not
+// write must not be the reason a buyer cannot sign in.
+func (s *Service) LogOAuthAttempt(ctx context.Context, entry OAuthAttemptLog) {
+	attempt := &domain.OAuthAttempt{
+		Step:        clipRunes(entry.Step, 16),
+		Outcome:     clipRunes(entry.Outcome, 16),
+		Reason:      clipRunes(entry.Reason, 32),
+		Detail:      clipRunes(credentialInText.ReplaceAllString(entry.Detail, "$1=[已隐藏]"), 500),
+		RedirectURI: clipRunes(credentialInText.ReplaceAllString(entry.Redirect, "$1=[已隐藏]"), 500),
+		Username:    clipRunes(entry.Username, 64),
+		Binding:     entry.Binding,
+	}
+	if err := s.repo.RecordOAuthAttempt(ctx, attempt); err != nil {
+		log.Printf("identity: the oauth attempt could not be recorded: %v", err)
+	}
+}
+
+// OAuthAttempts reads the shop's recent 登录记录 back, newest first, for 设置.
+func (s *Service) OAuthAttempts(ctx context.Context, limit int) ([]domain.OAuthAttempt, error) {
+	return s.repo.ListOAuthAttempts(ctx, limit)
+}
+
+func clipRunes(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
 }
 
 func (s *Service) InitiateOAuth(state string) (string, string, error) {

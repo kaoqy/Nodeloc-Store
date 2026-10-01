@@ -81,6 +81,25 @@ func parseUint(s string) (uint, error) {
 	return result, nil
 }
 
+// OptionalJWTMiddleware identifies a caller when the request carries a session
+// and lets the request through as a guest when it does not. It exists for the
+// routes whose answer is public but whose rules are not: a buyer browsing
+// without an account may still want to know what a promo code would take off,
+// while the 每人限用 that code carries can only be checked against an account.
+//
+// A token that is present but broken is still refused: silently treating an
+// expired session as a guest would show the buyer a discount they cannot get.
+func OptionalJWTMiddleware(cfg *config.JWTConfig) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
+		if authHeader == "" {
+			c.Next()
+			return
+		}
+		JWTMiddleware(cfg)(c)
+	}
+}
+
 // RequirePermission is the back office's gate. It replaces the old
 // admin-or-nothing check: the account behind the token is re-read (a JWT only
 // carries the role it was signed with), and Casbin then decides whether that

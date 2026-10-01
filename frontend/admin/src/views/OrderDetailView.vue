@@ -74,6 +74,21 @@ async function run(
   }
 }
 
+// 退款 and 取消订单 are the two buttons here that cannot be un-pressed: the first
+// moves real NL back through NodeLoc, the second releases the order and its cards
+// from under a buyer who may still be at the cashier. A single click should not
+// be enough to do either.
+function askRefund() {
+  if (!confirm(`给订单 ${orderNo.value} 退款？商店会向 NodeLoc 发起转账，这一步撤不回来。`)) return
+  void run(() => refundOrder(orderNo.value), '订单已退款')
+}
+
+function askCancel() {
+  if (!order.value) return
+  if (!confirm(`取消订单 ${orderNo.value}？买家可能还在付款路上，取消后这一单不再发货。`)) return
+  void run(() => cancelOrder(orderNo.value), '订单已取消')
+}
+
 async function submitDelivery() {
   const content = deliveryContent.value.trim()
   if (!content) return
@@ -163,7 +178,7 @@ onMounted(load)
           v-if="canManage && order.status === 'pending'"
           class="btn btn-secondary btn-sm"
           :disabled="busy"
-          @click="run(() => cancelOrder(orderNo), '订单已取消')"
+          @click="askCancel"
         >
           取消订单
         </button>
@@ -182,7 +197,7 @@ onMounted(load)
           v-if="canManage && isPaid && order.status !== 'refunded'"
           class="btn btn-danger btn-sm"
           :disabled="busy"
-          @click="run(() => refundOrder(orderNo), '订单已退款')"
+          @click="askRefund"
         >
           退款
         </button>

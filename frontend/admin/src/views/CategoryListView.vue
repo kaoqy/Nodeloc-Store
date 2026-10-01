@@ -66,13 +66,18 @@ async function save() {
 }
 
 async function remove(category: Category) {
+  // 上一条删除还在路上时，第二个确认框不该再被答应一次。
+  if (busy.value) return
   if (!confirm(`删除分类「${category.name}」？该分类下的商品会变成未分类。`)) return
   error.value = ''
+  busy.value = true
   try {
     await deleteCategory(category.id)
     await load()
   } catch (err) {
     error.value = errorMessage(err, '删除分类失败')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -135,7 +140,14 @@ onMounted(load)
             </td>
             <td class="whitespace-nowrap text-right">
               <button v-if="canManage" class="btn btn-ghost btn-sm" @click="editing = { ...category }">编辑</button>
-              <button v-if="canManage" class="btn btn-ghost btn-sm text-[var(--danger)]" @click="remove(category)">删除</button>
+              <button
+                v-if="canManage"
+                class="btn btn-ghost btn-sm text-[var(--danger)]"
+                :disabled="busy"
+                @click="remove(category)"
+              >
+                删除
+              </button>
               <span v-if="!canManage" class="quiet text-xs">只读</span>
             </td>
           </tr>

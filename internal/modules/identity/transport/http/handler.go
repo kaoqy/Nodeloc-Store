@@ -22,6 +22,13 @@ const (
 	claimsKey        = "identity_claims"
 	oauthStateCookie = "nodeloc_oauth_state"
 	oauthBindCookie  = "nodeloc_oauth_bind"
+	// oauthCookiePath is scoped to the auth routes: the round trip only ever
+	// lands back on /api/v1/auth/oauth/callback, and a path this narrow is what
+	// clearing the cookie has to name for the browser to actually drop it.
+	oauthCookiePath = "/api/v1/auth"
+
+	oauthStepInitiate = "initiate"
+	oauthStepCallback = "callback"
 )
 
 type Handler struct {
@@ -80,6 +87,11 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	admin.POST("/:id/toggle-admin", guard("roles", "manage"), h.AdminToggleAdmin)
 	admin.POST("/:id/toggle-active", guard("users", "manage"), h.AdminToggleActive)
 	admin.POST("/:id/points", guard("users", "manage"), h.AdminAdjustPoints)
+
+	// 设置 页读这份登录记录：买家只会说「登录不了」，而真正的原因——回调地址对不上、
+	// 浏览器没带回 state、NodeLoc 拒绝了授权——只出现在容器日志里。
+	settings := router.Group("/api/v1/admin", h.AuthMiddleware())
+	settings.GET("/oauth-attempts", guard("settings", "view"), h.AdminOAuthAttempts)
 }
 
 // AccountReader lets the admin guard re-check the role behind the current
@@ -188,6 +200,31 @@ func (h *Handler) AdminAdjustPoints(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+// AdminOAuthAttempts is the 设置 page's 「最近 NodeLoc 登录记录」: the last round
+// trips, newest first, with the step each one stopped at. A shop owner cannot
+// read a container log from the storefront, and 「登录不了」 without a step attached
+// is not something they can fix.
+func (h *Handler) AdminOAuthAttempts(c *gin.Context) {
+	limit := 0
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "limit 要是一个数字。", "code": "invalid_query"})
+			return
+		}
+		limit = parsed
+	}
+	attempts, err := h.service.OAuthAttempts(c.Request.Context(), limit)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	if attempts == nil {
+		attempts = []domain.OAuthAttempt{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": attempts})
 }
 
 // RefreshToken trades a refresh token for a new access token, so a session
@@ -415,32 +452,44 @@ func (h *Handler) Login(c *gin.Context) {
 }
 
 func (h *Handler) Logout(c *gin.Context) {
-	c.SetCookie(oauthStateCookie, "", -1, "/", "", h.cookieSecure(c), true)
+	// A cookie is only dropped when the clearing names the same Path it was set
+	// with; the round trip's pair lives under /api/v1/auth, so clearing at "/"
+	// left a half-finished 登录 able to be picked up by the next buyer's browser.
+	for _, name := range []string{oauthStateCookie, oauthBindCookie} {
+		c.SetCookie(name, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }
 
 func (h *Handler) InitiateOAuth(c *gin.Context) {
+	binding := c.Query("bind") == "true"
 	redirectURL, state, err := h.service.InitiateOAuth("")
 	if err != nil {
+		if c.Query("redirect") != "true" {
+			h.recordOAuthInitiateFailure(c, err)
+			writeError(c, err)
+			return
+		}
 		// This route is where a browser navigation starts, so a buyer who pressed
 		// 用 NodeLoc 登录 on an unconfigured store must land back on the login page
 		// with the reason, not on a wall of JSON.
-		if c.Query("redirect") == "true" {
-			log.Printf("nodeloc oauth: the login could not start: %v", err)
-			h.oauthFailure(c, oauthFailReason(err), err, c.Query("bind") == "true")
-			return
-		}
-		writeError(c, err)
+		h.oauthFailure(c, oauthStepInitiate, oauthFailReason(err), err, err.Error(), binding)
 		return
 	}
+	h.service.LogOAuthAttempt(c.Request.Context(), application.OAuthAttemptLog{
+		Step:     oauthStepInitiate,
+		Outcome:  "started",
+		Redirect: callbackFromAuthorizeURL(redirectURL),
+		Binding:  binding,
+	})
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(oauthStateCookie, state, int((10 * time.Minute).Seconds()), "/api/v1/auth", "", h.cookieSecure(c), true)
+	c.SetCookie(oauthStateCookie, state, int((10 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
 	// A bind intent tells the callback to hand the code back to the signed-in
 	// SPA instead of logging the NodeLoc identity in.
-	if c.Query("bind") == "true" {
-		c.SetCookie(oauthBindCookie, "1", int((10 * time.Minute).Seconds()), "/api/v1/auth", "", h.cookieSecure(c), true)
+	if binding {
+		c.SetCookie(oauthBindCookie, "1", int((10 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
 	} else {
-		c.SetCookie(oauthBindCookie, "", -1, "/api/v1/auth", "", h.cookieSecure(c), true)
+		c.SetCookie(oauthBindCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
 	}
 	if c.Query("redirect") == "true" {
 		c.Redirect(http.StatusFound, redirectURL)
@@ -454,15 +503,17 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	if value, err := c.Cookie(oauthBindCookie); err == nil && value != "" {
 		binding = true
 	}
-	c.SetCookie(oauthBindCookie, "", -1, "/api/v1/auth", "", h.cookieSecure(c), true)
+	c.SetCookie(oauthBindCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
 
 	// NodeLoc answers a rejected authorization with error + error_description +
 	// state and no code. Without this branch that reason only showed up as a
 	// generic "链接过期" on the login page.
 	if providerError := strings.TrimSpace(c.Query("error")); providerError != "" {
+		description := strings.TrimSpace(c.Query("error_description"))
 		log.Printf("nodeloc oauth: the provider refused the authorization: error=%s description=%q",
-			providerError, strings.TrimSpace(c.Query("error_description")))
-		h.oauthFailure(c, "denied", domain.ErrInvalidCredentials, binding)
+			providerError, description)
+		h.oauthFailure(c, oauthStepCallback, "denied", domain.ErrInvalidCredentials,
+			strings.Join([]string{providerError, description}, " "), binding)
 		return
 	}
 
@@ -471,17 +522,22 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	case cookieErr != nil || stateCookie == "":
 		log.Printf("nodeloc oauth: no state cookie on the callback, so the round trip was interrupted (state_in_redirect=%v)",
 			c.Query("state") != "")
-		h.oauthFailure(c, "expired", domain.ErrInvalidCredentials, binding)
+		h.oauthFailure(c, oauthStepCallback, "expired", domain.ErrInvalidCredentials,
+			"回调没有带回 state cookie；浏览器没存住、跨了域名回来、或登录超过 10 分钟都会这样。", binding)
 		return
 	case c.Query("state") == "" || stateCookie != c.Query("state"):
 		log.Printf("nodeloc oauth: state mismatch between cookie and callback query")
-		h.oauthFailure(c, "state", domain.ErrInvalidCredentials, binding)
+		h.oauthFailure(c, oauthStepCallback, "state", domain.ErrInvalidCredentials,
+			"回调带回的 state 与本店发出的不是同一个。", binding)
 		return
 	}
 	if binding {
 		// The SPA redeems the code against POST /auth/bind-oauth with its own
 		// bearer token; fragments never reach a server or log.
-		c.SetCookie(oauthStateCookie, "", -1, "/api/v1/auth", "", h.cookieSecure(c), true)
+		c.SetCookie(oauthStateCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
+		h.service.LogOAuthAttempt(c.Request.Context(), application.OAuthAttemptLog{
+			Step: oauthStepCallback, Outcome: "started", Reason: "bind", Binding: true,
+		})
 		fragment := url.Values{}
 		fragment.Set("bind_code", c.Query("code"))
 		fragment.Set("state", c.Query("state"))
@@ -492,10 +548,15 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	result, err := h.service.OAuthLogin(c.Request.Context(), c.Query("code"), params)
 	if err != nil {
 		log.Printf("nodeloc oauth: the code exchange failed: %v", err)
-		h.oauthFailure(c, oauthFailReason(err), err, false)
+		h.oauthFailure(c, oauthStepCallback, oauthFailReason(err), err, err.Error(), false)
 		return
 	}
-	c.SetCookie(oauthStateCookie, "", -1, "/api/v1/auth", "", h.cookieSecure(c), true)
+	c.SetCookie(oauthStateCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
+	h.service.LogOAuthAttempt(c.Request.Context(), application.OAuthAttemptLog{
+		Step:     oauthStepCallback,
+		Outcome:  "success",
+		Username: oauthAccountName(result),
+	})
 	// XHR clients (SPA) get JSON; browser navigations are bounced back to the
 	// SPA callback page with the token in the URL fragment (never logged).
 	if acceptsJSON(c) {
@@ -534,7 +595,18 @@ func oauthFailReason(err error) string {
 // oauthFailure answers the callback: JSON for the SPA, otherwise a redirect so
 // a browser that NodeLoc bounced back here never sees a bare error document.
 // The reason code travels to the SPA so the copy can name the actual cause.
-func (h *Handler) oauthFailure(c *gin.Context, reason string, err error, binding bool) {
+//
+// It is also the shop's record of the attempt. A buyer sees one sentence and is
+// gone; the owner is left with 「登录不了」 and no way to tell a wrong setting from a
+// dead network, because the answer only ever sat in the container log.
+func (h *Handler) oauthFailure(c *gin.Context, step, reason string, err error, detail string, binding bool) {
+	h.service.LogOAuthAttempt(c.Request.Context(), application.OAuthAttemptLog{
+		Step:    step,
+		Outcome: "failed",
+		Reason:  reason,
+		Detail:  detail,
+		Binding: binding,
+	})
 	if acceptsJSON(c) {
 		writeError(c, err)
 		return
@@ -544,6 +616,38 @@ func (h *Handler) oauthFailure(c *gin.Context, reason string, err error, binding
 		return
 	}
 	c.Redirect(http.StatusFound, "/login?oauth_error="+reason)
+}
+
+// oauthAccountName is who came through the door, for the shop's own record. The
+// tokens in the same result are never written down.
+func oauthAccountName(result *application.OAuthResult) string {
+	if result == nil || result.User == nil {
+		return ""
+	}
+	return result.User.Username
+}
+
+// recordOAuthInitiateFailure is the same note for a login that never left the
+// shop: the SPA asked for the authorization URL and was refused.
+func (h *Handler) recordOAuthInitiateFailure(c *gin.Context, err error) {
+	h.service.LogOAuthAttempt(c.Request.Context(), application.OAuthAttemptLog{
+		Step:    oauthStepInitiate,
+		Outcome: "failed",
+		Reason:  oauthFailReason(err),
+		Detail:  err.Error(),
+		Binding: c.Query("bind") == "true",
+	})
+}
+
+// callbackFromAuthorizeURL keeps just the callback address out of the
+// authorization URL. The rest of that URL is client_id and state — good for one
+// round trip, and noise the shop's records should not carry.
+func callbackFromAuthorizeURL(authorizeURL string) string {
+	parsed, err := url.Parse(authorizeURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Query().Get("redirect_uri")
 }
 
 func acceptsJSON(c *gin.Context) bool {

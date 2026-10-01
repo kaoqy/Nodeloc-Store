@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/kaoqy/Nodeloc-Store/internal/models"
 )
 
 var (
@@ -120,6 +122,12 @@ type OAuthIdentity struct {
 }
 
 func (OAuthIdentity) TableName() string { return "oauth_identities" }
+
+// OAuthAttempt is one NodeLoc 登录 round trip as the shop recorded it — the
+// step it reached, the reason it stopped, and the provider's own words. It is
+// the shared table because the store migrates it with the rest; the identity
+// module decides what goes in and keeps credentials out of it.
+type OAuthAttempt = models.OAuthAttempt
 
 // OAuthProfile is the normalized identity returned by an OAuth provider.
 type OAuthProfile struct {

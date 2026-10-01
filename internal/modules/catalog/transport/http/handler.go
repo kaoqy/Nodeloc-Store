@@ -56,11 +56,14 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	// buyers to find it before they reach checkout.
 	store.GET("/coupons", h.listStoreCoupons)
 
-	// A code is quoted, not guessed: only an account the store already knows
-	// may ask what a coupon would take off, and the answer never reveals
-	// another buyer's usage.
-	shop := router.Group("/api/v1/store", middleware.JWTMiddleware(jwtConfig))
-	shop.POST("/coupons/quote", h.quoteCoupon)
+	// A code is quoted, not guessed. The preview itself is public — a shop that
+	// advertises a code wants the buyer to see the price before we ask them to
+	// sign in, and the OAuth round trip that fails is exactly the buyer who has
+	// no account yet. What stays private is the code the shop never advertised:
+	// a guest can only preview codes already on the promo shelf, so the route
+	// gives away nothing GET /store/coupons does not, and no one can walk a
+	// wordlist through the shop's privately-sent codes.
+	store.POST("/coupons/quote", middleware.OptionalJWTMiddleware(jwtConfig), h.quoteCoupon)
 
 	guard := func(resource, action string) gin.HandlerFunc {
 		return middleware.RequirePermission(accounts, resource, action)

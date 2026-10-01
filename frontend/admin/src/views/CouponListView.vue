@@ -165,13 +165,19 @@ async function save() {
 }
 
 async function remove(coupon: Coupon) {
+  // confirm() 挡得住「手滑」，挡不住「手快」：第一次删除还没落地时弹出的第二个
+  // 确认框照样会说「确定」，第二条 DELETE 打到一个已经不存在的码上。
+  if (busy.value) return
   if (!confirm(`删除优惠码「${coupon.code}」？`)) return
   error.value = ''
+  busy.value = true
   try {
     await deleteCoupon(coupon.id)
     await load()
   } catch (err) {
     error.value = errorMessage(err, '删除优惠券失败')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -320,8 +326,11 @@ onMounted(load)
             <td colspan="9">
               <div class="empty-state">
                 <p class="empty-glyph" aria-hidden="true">◌</p>
-                <p class="empty-title">还没有优惠码</p>
-                <p v-if="canManage" class="empty-hint">新建一个码，买家在商品详情页就能用它试算折扣。</p>
+                <!-- 读失败时列表当然是空的，但这一句会说成「店里还没有码」，
+                     店家接着再造一个，就多了两个。 -->
+                <p class="empty-title">{{ error ? '优惠码没有读出来' : '还没有优惠码' }}</p>
+                <p v-if="error" class="empty-hint">原因写在上面的红色提示里，重新载入这一页再试。</p>
+                <p v-else-if="canManage" class="empty-hint">新建一个码，买家在商品详情页就能用它试算折扣。</p>
               </div>
             </td>
           </tr>
@@ -379,7 +388,7 @@ onMounted(load)
             </td>
             <td v-if="canManage" class="whitespace-nowrap text-right">
               <button class="btn btn-ghost btn-sm" @click="editing = { ...coupon }">编辑</button>
-              <button class="btn btn-ghost btn-sm text-[var(--danger)]" @click="remove(coupon)">删除</button>
+              <button class="btn btn-ghost btn-sm text-[var(--danger)]" :disabled="busy" @click="remove(coupon)">删除</button>
             </td>
             <td v-else class="text-right"><span class="quiet text-xs">只读</span></td>
           </tr>

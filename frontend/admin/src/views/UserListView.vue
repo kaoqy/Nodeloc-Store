@@ -27,6 +27,10 @@ const page = computed(() => Math.floor(offset.value / PageSize) + 1)
 const pages = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
 const from = computed(() => (users.value.length ? offset.value + 1 : 0))
 const to = computed(() => offset.value + users.value.length)
+// 一行都没有时不报「第 0–0 条」那种范围，只说总数。
+const summary = computed(() =>
+  users.value.length ? `第 ${from.value}–${to.value} 条 · 共 ${total.value} 条` : `共 ${total.value} 条`,
+)
 
 const transferTarget = ref<User | null>(null)
 const transferHistory = ref<Transfer[]>([])
@@ -262,7 +266,7 @@ onMounted(load)
       :page="page"
       :pages="pages"
       :loading="loading"
-      :summary="`第 ${from}–${to} 条 · 共 ${total} 条`"
+      :summary="summary"
       @change="goTo"
     />
 

@@ -25,6 +25,13 @@ type UserRepo interface {
 	DeleteOAuthIdentity(ctx context.Context, userID uint, provider string) error
 	CountOAuthIdentities(ctx context.Context, userID uint) (int64, error)
 
+	// RecordOAuthAttempt keeps one NodeLoc 登录 round trip readable after the
+	// fact. The shop's own log is out of reach for the owner of a Docker
+	// container, and 「登录不了」 with no step attached is not a bug report.
+	RecordOAuthAttempt(ctx context.Context, attempt *domain.OAuthAttempt) error
+	// ListOAuthAttempts reads the most recent round trips back, newest first.
+	ListOAuthAttempts(ctx context.Context, limit int) ([]domain.OAuthAttempt, error)
+
 	// RecordCheckin writes the day's check-in, its ledger row and the user's
 	// counters in one transaction. The ledger's unique reference is what stops a
 	// double-tapped 签到 from paying twice.

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { roleMeta } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -57,7 +58,7 @@ function back() {
       </p>
 
       <div class="mt-5">
-        <p class="label">当前角色（{{ auth.user?.role || '—' }}）可以访问</p>
+        <p class="label">当前角色（{{ auth.user ? roleMeta(auth.user.role).label : '—' }}）可以访问</p>
         <div v-if="reachable.length" class="mt-2 flex flex-wrap gap-2">
           <span v-for="screen in reachable" :key="screen" class="badge badge-neutral">{{ screen }}</span>
         </div>

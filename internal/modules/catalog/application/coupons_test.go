@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,6 +16,9 @@ import (
 type shelfRepo struct {
 	advertised []domain.Coupon
 	used       map[uint]int64
+	// byCode is what a buyer types and the repo finds, advertised or not, so a
+	// test can hand the storefront a private code and see what it says.
+	byCode map[string]*domain.Coupon
 }
 
 func (r *shelfRepo) List(context.Context) ([]domain.Coupon, error) { return nil, nil }
@@ -22,7 +26,10 @@ func (r *shelfRepo) ListAdvertised(context.Context) ([]domain.Coupon, error) {
 	return r.advertised, nil
 }
 func (r *shelfRepo) GetByID(context.Context, uint) (*domain.Coupon, error) { return nil, nil }
-func (r *shelfRepo) GetByCode(context.Context, string) (*domain.Coupon, error) {
+func (r *shelfRepo) GetByCode(_ context.Context, code string) (*domain.Coupon, error) {
+	if coupon, found := r.byCode[code]; found {
+		return coupon, nil
+	}
 	return nil, nil
 }
 func (r *shelfRepo) Create(context.Context, *domain.Coupon) error { return nil }
@@ -117,5 +124,44 @@ func TestStorefrontCouponsListsDeadlinesFirst(t *testing.T) {
 	got := []string{list[0].Code, list[1].Code, list[2].Code}
 	if got[0] != "ENDINGFIRST" || got[1] != "ENDINGLATER" || got[2] != "STANDING" {
 		t.Errorf("shelf order = %v, want the codes about to end first", got)
+	}
+}
+
+// TestGuestQuoteSeesOnlyAdvertisedCodes is the whole reason the preview route can
+// be public: a guest may price a code the shop already advertised, and a code it
+// did not is answered exactly like a typo, so the route leaks no code list.
+func TestGuestQuoteSeesOnlyAdvertisedCodes(t *testing.T) {
+	shelf := &domain.Coupon{
+		Base: models.Base{ID: 1}, Code: "SHELF", DiscountType: "percent", DiscountValue: 10,
+		IsActive: true, Advertised: true, Scope: "all", PerUserLimit: 1,
+	}
+	private := &domain.Coupon{
+		Base: models.Base{ID: 2}, Code: "PRIVATE", DiscountType: "fixed", DiscountValue: 5,
+		IsActive: true, Scope: "all", PerUserLimit: 1,
+	}
+	repo := &shelfRepo{byCode: map[string]*domain.Coupon{"SHELF": shelf, "PRIVATE": private}}
+	service := NewService(&restockProducts{product: cardProduct()}, nil, nil, repo, config.FeaturesConfig{})
+
+	guest, err := service.QuoteCoupon(context.Background(), 0, 7, 2, 30, "shelf")
+	if err != nil {
+		t.Fatalf("a guest previewing an advertised code: %v", err)
+	}
+	if guest.Discount != 6 || guest.Payable != 54 {
+		t.Errorf("guest quote = %d off / %d payable, want 6 off 60", guest.Discount, guest.Payable)
+	}
+	if guest.Note == "" {
+		t.Errorf("guest quote note is empty, want the 每人限用 the preview could not check")
+	}
+
+	if _, err := service.QuoteCoupon(context.Background(), 0, 7, 1, 30, "private"); !errors.Is(err, ErrCouponNotFound) {
+		t.Errorf("a guest on a private code = %v, want the same answer as a typo", err)
+	}
+
+	buyer, err := service.QuoteCoupon(context.Background(), 5, 7, 1, 30, "PRIVATE")
+	if err != nil {
+		t.Fatalf("the account the code was sent to: %v", err)
+	}
+	if !buyer.Accepted || buyer.Note != "" {
+		t.Errorf("signed-in quote = accepted %v note %q, want it priced with no guest small print", buyer.Accepted, buyer.Note)
 	}
 }

@@ -322,7 +322,7 @@ onMounted(load)
             <template v-if="canManageUsers">
               通过 NodeLoc 把积分转到这位买家的论坛账户，单次 1–{{ GrantMax }} NL 的整数。这不是商店积分，转出后商店无法自行撤回。
             </template>
-            <template v-else>这名账号的转账流水。当前角色只能查看，转出需要 users:manage。</template>
+            <template v-else>这名账号的转账流水。当前角色只能查看，转出需要「用户管理」权限。</template>
           </p>
           <p v-if="canManageUsers && !nodeLocBound" class="alert alert-warning mb-4">
             这个账号还没有绑定 NodeLoc，积分没有可转入的账户。请让对方先在个人中心用 NodeLoc 登录一次。

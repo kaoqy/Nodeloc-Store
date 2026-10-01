@@ -110,6 +110,9 @@ export interface CouponQuote {
   payable: number
   original_total: number
   description?: string
+  // note is the rule the preview could not decide on its own — a guest's
+  // 每人限用, which the checkout that follows still enforces.
+  note?: string
 }
 
 /**

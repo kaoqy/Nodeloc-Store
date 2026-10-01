@@ -546,11 +546,17 @@ func (s *Service) GetSettings() (map[string]any, error) {
 	// on it. Without it a storefront with an empty Payment Token advertises
 	// 「支付已启用」 while every buyer is refused at 下单.
 	missing := rt.Payment.MissingCredentials()
+	oauthMissing := rt.OAuthMissing()
 	return map[string]any{
 		"settings":         view,
 		"payment_ready":    rt.Payment.On() && len(missing) == 0,
 		"payment_missing":  missing,
 		"payment_warnings": rt.PaymentWarnings(),
+		// 登录 gets the same reading as 收款: the switch says what the owner wants,
+		// this says whether a buyer can actually come through the door.
+		"oauth_ready":    rt.OAuth.On() && len(oauthMissing) == 0,
+		"oauth_missing":  oauthMissing,
+		"oauth_warnings": rt.OAuthWarnings(),
 	}, nil
 }
 
@@ -624,9 +630,11 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	if next.App.Domain == "" {
 		next.App.Domain = existing.App.Domain
 	}
-	if next.OAuth.RedirectURI == "" {
-		next.OAuth.RedirectURI = existing.OAuth.RedirectURI
-	}
+	// An emptied 重定向 URI is the owner asking for the derived address back, which
+	// is what the settings page's 「留空则自动生成」 promises. Carrying the stored
+	// value over here used to pin a hand-typed callback in place forever: fix the
+	// 站点域名 and NodeLoc still sent every buyer to the old host or to a page that
+	// cannot finish a login, with nothing on the page to explain why.
 	if next.OAuth.ClientID == "" || next.OAuth.ClientSecret == "" {
 		return validationError("NodeLoc OAuth Client ID / Secret 不能为空")
 	}
@@ -842,13 +850,4 @@ func maskSecret(v string) string {
 		return ""
 	}
 	return Redacted
-}
-
-// normalizeDomain strips scheme and trailing slash from a host setting.
-func normalizeDomain(in string) string {
-	in = strings.TrimSpace(in)
-	in = strings.TrimPrefix(in, "https://")
-	in = strings.TrimPrefix(in, "http://")
-	in = strings.TrimRight(in, "/")
-	return strings.ToLower(in)
 }

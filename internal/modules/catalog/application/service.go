@@ -571,6 +571,10 @@ type CouponQuote struct {
 	Payable       int    `json:"payable"`
 	OriginalTotal int    `json:"original_total"`
 	Description   string `json:"description,omitempty"`
+	// Note is the small print the preview alone cannot decide: a guest's 每人限用
+	// could not be checked because there was no account to check, so the shop
+	// says the rule will be applied at checkout instead of implying it passed.
+	Note string `json:"note,omitempty"`
 
 	// couponID is kept off the wire: the buyer sees the code, the payment
 	// module needs the row it points at.
@@ -602,6 +606,12 @@ func (s *Service) QuoteCoupon(ctx context.Context, userID uint, productID uint, 
 	}
 	coupon, err := s.coupons.GetByCode(ctx, normalized)
 	if err != nil {
+		return nil, ErrCouponNotFound
+	}
+	// A guest may only preview a code the shop put on its own promo shelf. A
+	// privately-sent code answers the same way a typo does, so the public route
+	// cannot be used to learn which codes exist.
+	if userID == 0 && !coupon.Advertised {
 		return nil, ErrCouponNotFound
 	}
 	product, err := s.products.GetByID(ctx, productID)
@@ -645,6 +655,9 @@ func (s *Service) QuoteCoupon(ctx context.Context, userID uint, productID uint, 
 	}
 	if coupon.Description != nil {
 		quote.Description = *coupon.Description
+	}
+	if userID == 0 && coupon.PerUserLimit > 0 {
+		quote.Note = fmt.Sprintf("本码每人限用 %d 次。现在还没有登录账号，下单时会再核对一次。", coupon.PerUserLimit)
 	}
 	quote.couponID = coupon.ID
 	return quote, nil
@@ -743,20 +756,24 @@ func (s *Service) ExportCards(ctx context.Context, filter domain.CardFilter) ([]
 }
 
 // ImportResult reports what a bulk paste did, because the shop owner needs to
-// know that 40 of the 120 lines they pasted were already in stock.
+// know that 40 of the 120 lines they pasted were already in stock — and that all
+// 120 went in anyway.
 type ImportResult struct {
 	Created []domain.Card `json:"created"`
-	Skipped int           `json:"skipped"`
-	Blank   int           `json:"blank"`
+	// Duplicates counts the lines that repeat a key already on this shelf. They
+	// are stocked, not dropped: a shop selling the same 激活码 to everyone has
+	// one line per unit sold, and refusing the repeat loses the sale, not the
+	// duplicate.
+	Duplicates int `json:"duplicates"`
+	Blank      int `json:"blank"`
 	// Released counts the paid orders this restock was able to deliver on the
 	// spot, so the back office can say the goods went out rather than just that
 	// the keys arrived.
 	Released int `json:"released"`
 }
 
-// ImportCards adds lines to a product, dropping blanks and duplicates. Card
-// keys are only worth their scarcity, so a repeated paste must not create a
-// second copy of a key that was already sold.
+// ImportCards adds every non-blank line to a product. Repeats are counted and
+// kept, so pasting the same file twice stocks twice.
 func (s *Service) ImportCards(ctx context.Context, productID uint, contents []string) (*ImportResult, error) {
 	if err := s.ensureCardProduct(ctx, productID); err != nil {
 		return nil, err
@@ -766,23 +783,17 @@ func (s *Service) ImportCards(ctx context.Context, productID uint, contents []st
 		return nil, err
 	}
 	result := &ImportResult{Created: make([]domain.Card, 0, len(contents))}
-	seen := make(map[string]struct{}, len(contents))
+	seen := make(map[string]int, len(contents))
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
-		switch {
-		case content == "":
+		if content == "" {
 			result.Blank++
 			continue
 		}
-		if _, dup := existing[content]; dup {
-			result.Skipped++
-			continue
+		if _, taken := existing[content]; taken || seen[content] > 0 {
+			result.Duplicates++
 		}
-		if _, dup := seen[content]; dup {
-			result.Skipped++
-			continue
-		}
-		seen[content] = struct{}{}
+		seen[content]++
 		result.Created = append(result.Created, domain.Card{
 			ProductID: productID,
 			Content:   content,
@@ -790,7 +801,7 @@ func (s *Service) ImportCards(ctx context.Context, productID uint, contents []st
 		})
 	}
 	if len(result.Created) == 0 {
-		if result.Blank > 0 || result.Skipped > 0 {
+		if result.Blank > 0 {
 			return result, nil
 		}
 		return nil, fmt.Errorf("%w: 至少要填写一条非空的卡密。", domain.ErrInvalidInput)

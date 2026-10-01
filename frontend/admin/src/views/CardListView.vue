@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PaginationFooter from '../components/PaginationFooter.vue'
 import {
@@ -24,6 +24,10 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const PageSize = 50
+
+// 搜索框每敲一个字都要重新数一遍卡密的话，店里的数据库就先累了。
+let cardsRequestId = 0
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const products = ref<Product[]>([])
 const cards = ref<Card[]>([])
@@ -98,6 +102,11 @@ async function loadLowStock() {
 }
 
 async function loadCards() {
+  // Two guards, one per failure mode. A search box that reloads on every
+  // keystroke puts a request per character on the shop's own database, and the
+  // responses come back in no particular order — the older one winning would
+  // leave the table showing a query nobody typed any more.
+  const request = ++cardsRequestId
   loading.value = true
   error.value = ''
   try {
@@ -108,6 +117,7 @@ async function loadCards() {
       limit: PageSize,
       offset: (page.value - 1) * PageSize,
     })
+    if (request !== cardsRequestId) return
     cards.value = result.data
     total.value = result.total
     // Ids from a previous page are outside what is on screen now; keeping them
@@ -115,11 +125,12 @@ async function loadCards() {
     const visible = new Set(result.data.map((card) => card.id))
     selected.value = selected.value.filter((id) => visible.has(id))
   } catch (err) {
+    if (request !== cardsRequestId) return
     cards.value = []
     total.value = 0
     error.value = errorMessage(err, '加载卡密失败')
   } finally {
-    loading.value = false
+    if (request === cardsRequestId) loading.value = false
   }
 }
 
@@ -172,8 +183,8 @@ async function submitImport() {
   try {
     const result = await batchAddCards(productId.value, lines)
     const created = result.created?.length ?? 0
-    const skipped = result.skipped ?? 0
-    notice.value = `已导入 ${created} 条卡密${skipped ? `，跳过重复 ${skipped} 条` : ''}${releasedNote(result.released)}`
+    const duplicates = result.duplicates ?? 0
+    notice.value = `已导入 ${created} 条卡密${duplicates ? `，其中 ${duplicates} 条与已有卡密重复，已照常入库` : ''}${releasedNote(result.released)}`
     importText.value = ''
     showImport.value = false
     await reload()
@@ -190,7 +201,7 @@ async function submitGenerate() {
   error.value = ''
   try {
     const result = await generateCards(productId.value, Number(generateCount.value) || 0, generatePrefix.value.trim())
-    notice.value = `已生成 ${result.created?.length ?? 0} 条卡密${result.skipped ? `，${result.skipped} 条因重复被跳过` : ''}${releasedNote(result.released)}`
+    notice.value = `已生成 ${result.created?.length ?? 0} 条不重复的卡密${releasedNote(result.released)}`
     showGenerate.value = false
     await reload()
   } catch (err) {
@@ -276,9 +287,17 @@ async function batchDelete() {
   }
 }
 
-watch([statusFilter, query], () => {
+// 筛选标签是点一下就要结果的，搜索框是越打越长的：前者立即查，后者等人停手。
+watch(statusFilter, () => {
+  clearTimeout(searchTimer)
   page.value = 1
   loadCards()
+})
+
+watch(query, () => {
+  page.value = 1
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(loadCards, 300)
 })
 
 watch(page, loadCards)
@@ -293,6 +312,9 @@ watch(productId, () => {
 onMounted(async () => {
   await Promise.all([loadProducts(), loadCards(), loadLowStock()])
 })
+
+// 离开页面时还在倒计时的话，那一次请求会打到一个已经没有人在看的表格上。
+onBeforeUnmount(() => clearTimeout(searchTimer))
 </script>
 
 <template>
@@ -399,9 +421,25 @@ onMounted(async () => {
             <td colspan="8">
               <div class="empty-state">
                 <p class="empty-glyph" aria-hidden="true">◌</p>
-                <p class="empty-title">{{ query.trim() || statusFilter !== 'all' ? '没有符合条件的卡密' : '还没有卡密' }}</p>
+                <!-- 三件事不能混成一句：读失败、筛空了、店里真的没有卡密。
+                     把第一种说成「还没有卡密」，店家会去导入第二批，而列表其实只是没读出来。 -->
+                <p class="empty-title">
+                  {{
+                    error
+                      ? '卡密没有读出来'
+                      : query.trim() || statusFilter !== 'all'
+                        ? '没有符合条件的卡密'
+                        : '还没有卡密'
+                  }}
+                </p>
                 <p class="empty-hint">
-                  {{ productId || !query.trim() ? '选择商品后可以导入、生成或批量清理卡密。' : '换个关键词或清空筛选再试。' }}
+                  {{
+                    error
+                      ? '原因写在上面的红色提示里，重新载入这一页再试。'
+                      : query.trim() || statusFilter !== 'all'
+                        ? '换个关键词或清空筛选再试。'
+                        : '选择商品后可以导入、生成或批量清理卡密。'
+                  }}
                 </p>
               </div>
             </td>
@@ -486,7 +524,7 @@ onMounted(async () => {
     >
       <div class="card w-full max-w-lg !p-5">
         <h3 class="text-base font-semibold">导入卡密 · {{ product?.name }}</h3>
-        <p class="quiet mt-1 text-xs">每行一条，空行与重复内容会被跳过。导入后商品库存会自动重算。</p>
+        <p class="quiet mt-1 text-xs">每行一条，空行会被跳过；卡密允许重复，相同内容会照常入库并按条数计库存。导入后商品库存会自动重算。</p>
         <textarea
           v-model="importText"
           class="input mono mt-4 h-56 resize-none text-xs"

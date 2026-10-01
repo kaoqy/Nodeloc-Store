@@ -180,6 +180,53 @@ export function notificationKind(type: string): string {
   return NOTIFICATION_KIND[type] || type
 }
 
+// 设置 页的「最近 NodeLoc 登录记录」：买家只会说「登录不了」，而商店自己知道停在了
+// 哪一步。词表要跟着 handler 写下的 code 走，认不出的原样保留，那才是证据。
+const OAUTH_STEP: Record<string, string> = {
+  initiate: '发起授权',
+  callback: 'NodeLoc 回调',
+}
+
+const OAUTH_OUTCOME: Record<string, StatusMeta> = {
+  started: { label: '已跳转到 NodeLoc', badge: 'badge-info' },
+  success: { label: '登录成功', badge: 'badge-success' },
+  failed: { label: '未成功', badge: 'badge-danger' },
+}
+
+const OAUTH_REASON: Record<string, string> = {
+  disabled: 'OAuth 登录在设置里是关闭的',
+  not_configured: 'OAuth 参数没填全（站点地址 / Client ID / Client Secret）',
+  rejected: 'NodeLoc 不认这组 Client ID 与 Client Secret',
+  unreachable: '联系不上 NodeLoc，可能是服务商或出口网络问题',
+  provider: 'NodeLoc 的回答无法解析',
+  denied: 'NodeLoc 拒绝了这次授权（买家点了拒绝，或应用未获批）',
+  expired: '登录链接过期，或浏览器没能带回 state',
+  state: '回调带回的 state 与本店发出的不是同一个',
+  bind: '这一趟是把 NodeLoc 账号绑到当前登录的账号',
+}
+
+/** oauthStep names where a 登录 round trip was when the shop wrote the row. */
+export function oauthStep(step?: string | null): string {
+  if (!step) return '—'
+  return OAUTH_STEP[step] || step
+}
+
+/** oauthOutcome labels what the shop did with this attempt. */
+export function oauthOutcome(outcome?: string | null): StatusMeta {
+  if (!outcome) return { label: '—', badge: 'badge-neutral' }
+  return OAUTH_OUTCOME[outcome] || { label: outcome, badge: 'badge-neutral' }
+}
+
+/**
+ * oauthReason explains a code in Chinese. The code travels to the storefront's
+ * login page too, so it stays visible next to the sentence.
+ */
+export function oauthReason(reason?: string | null): string {
+  if (!reason) return ''
+  const known = OAUTH_REASON[reason]
+  return known ? `${known}（${reason}）` : reason
+}
+
 export function errorCode(error: unknown): string {
   const data = (error as { response?: { data?: { code?: string } } })?.response?.data
   return data?.code ?? ''

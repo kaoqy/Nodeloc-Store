@@ -249,3 +249,112 @@ func TestOAuthProbeKeepsTheAuthorizeLink(t *testing.T) {
 		t.Fatalf("before install: ok=%v msg=%q", ok, msg)
 	}
 }
+
+// 站点域名 is the one field a shop owner pastes with its scheme still attached.
+// Kept verbatim it doubles up in the OAuth redirect_uri
+// (https://https://shop.example.com//api/v1/…) and NodeLoc refuses the login,
+// while every local test that does not validate redirect_uri stays green.
+func TestNormalizeTurnsTheDomainIntoAHost(t *testing.T) {
+	cases := []struct {
+		typed string
+		want  string
+	}{
+		{"https://Shop.Example.com/", "shop.example.com"},
+		{"http://shop.example.com", "shop.example.com"},
+		{"shop.example.com/store/", "shop.example.com"},
+		{"shop.example.com:8080", "shop.example.com:8080"},
+		{"  shop.example.com  ", "shop.example.com"},
+		{"", ""},
+	}
+	for _, testCase := range cases {
+		runtime := Default()
+		runtime.App.Domain = testCase.typed
+		runtime.OAuth.RedirectURI = ""
+		runtime.Normalize()
+		if runtime.App.Domain != testCase.want {
+			t.Errorf("domain %q normalized to %q, want %q", testCase.typed, runtime.App.Domain, testCase.want)
+		}
+		if testCase.want == "" {
+			continue
+		}
+		wantRedirect := runtime.App.Scheme + "://" + testCase.want + "/api/v1/auth/oauth/callback"
+		if got := runtime.RedirectURI(); got != wantRedirect {
+			t.Errorf("redirect_uri for %q = %q, want %q", testCase.typed, got, wantRedirect)
+		}
+	}
+}
+
+// A 回调地址 typed without its scheme is a value the provider will never match,
+// so it is completed from the store's own scheme rather than sent as-is.
+func TestNormalizeCompletesAHandTypedCallback(t *testing.T) {
+	runtime := Default()
+	runtime.App.Scheme = "http"
+	runtime.App.Domain = "shop.example.com"
+	runtime.OAuth.RedirectURI = "shop.example.com/api/v1/auth/oauth/callback"
+	runtime.Normalize()
+
+	if got := runtime.RedirectURI(); got != "http://shop.example.com/api/v1/auth/oauth/callback" {
+		t.Errorf("redirect_uri = %q, want the typed path made absolute on http", got)
+	}
+
+	runtime.OAuth.RedirectURI = "not a url at all"
+	runtime.Normalize()
+	if runtime.OAuth.RedirectURI != "" {
+		t.Errorf("a callback that is not a URL stayed as %q, want it dropped so the domain derives it", runtime.OAuth.RedirectURI)
+	}
+}
+
+// 设置 has to say which box is still empty (missing) and which one is filled but
+// cannot work (warnings), because 「登录不了」 from a buyer names neither — and a
+// 重定向 URI on the wrong host is refused by NodeLoc before the shop ever sees a code.
+func TestOAuthDiagnosticsReadTheLoginSettings(t *testing.T) {
+	named := func(names []string, want string) bool {
+		for _, name := range names {
+			if name == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	runtime := Default()
+	runtime.App.Domain = ""
+	runtime.OAuth.RedirectURI = ""
+	runtime.OAuth.ClientID = ""
+	runtime.OAuth.ClientSecret = Redacted
+	missing := runtime.OAuthMissing()
+	if !named(missing, "client_id") || !named(missing, "client_secret") || !named(missing, "domain") {
+		t.Errorf("missing = %v, want client_id, client_secret and 站点域名 named", missing)
+	}
+
+	runtime.App.Domain = "shop.example.com"
+	runtime.OAuth.ClientID = "abc123"
+	runtime.OAuth.ClientSecret = "s3cret"
+	if got := runtime.OAuthMissing(); len(got) != 0 {
+		t.Errorf("a complete login config reports missing %v", got)
+	}
+	if got := runtime.OAuthWarnings(); len(got) != 0 {
+		t.Errorf("the derived callback warned %v, want silence about a field left empty on purpose", got)
+	}
+
+	runtime.OAuth.RedirectURI = "http://elsewhere.example.com" + oauthCallbackPath
+	warnings := runtime.OAuthWarnings()
+	if len(warnings) == 0 || !strings.Contains(warnings[0], "域名") {
+		t.Errorf("a callback on another host warned %v, want the host named", warnings)
+	}
+
+	runtime.OAuth.RedirectURI = "http://shop.example.com/login"
+	warnings = runtime.OAuthWarnings()
+	if len(warnings) == 0 || !strings.Contains(warnings[0], "路径") {
+		t.Errorf("a callback pointed at a page warned %v, want the path named", warnings)
+	}
+
+	// The same mistake in the other direction: the payment application's number
+	// pasted into the login field.
+	runtime.OAuth.ClientID = "pay_0f2c1b"
+	runtime.OAuth.RedirectURI = ""
+	warnings = runtime.OAuthWarnings()
+	if len(warnings) == 0 || !strings.Contains(warnings[0], "Payment ID") {
+		t.Errorf("a pay_ Client ID warned %v, want it read as the payment credential", warnings)
+	}
+}

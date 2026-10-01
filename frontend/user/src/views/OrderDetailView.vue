@@ -29,6 +29,9 @@ const copied = ref(false)
 const copiedNo = ref(false)
 const confirming = ref(false)
 const confirmNote = ref('')
+// 「浏览器不让复制」是这一页的一句旁白，不是支付失败：写进 payError 会让它和
+// 「网关拒绝签名」用同一个红色警报框，买家接着就不敢付款了。
+const copyNote = ref('')
 // Whether pressing 再查一次 can plausibly change the answer. "NodeLoc has not
 // seen it yet" and "the provider is down" yes; "the shop has no transaction id"
 // no, and saying so stops the button encouraging pointless clicks.
@@ -143,9 +146,10 @@ async function copyContent() {
   try {
     await navigator.clipboard.writeText(content)
     copied.value = true
+    copyNote.value = ''
     window.setTimeout(() => (copied.value = false), 1800)
   } catch {
-    payError.value = '浏览器不允许自动复制，请长按选中后手动复制'
+    copyNote.value = '浏览器不允许自动复制，请长按选中后手动复制'
   }
 }
 
@@ -155,9 +159,10 @@ async function copyOrderNo() {
   try {
     await navigator.clipboard.writeText(current.order_no)
     copiedNo.value = true
+    copyNote.value = ''
     window.setTimeout(() => (copiedNo.value = false), 1800)
   } catch {
-    payError.value = '浏览器不允许自动复制，请长按选中订单号后手动复制'
+    copyNote.value = '浏览器不允许自动复制，请长按选中订单号后手动复制'
   }
 }
 
@@ -227,7 +232,9 @@ async function refreshDelivery() {
 
 <template>
   <div class="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6">
-    <div v-if="loading" class="space-y-5">
+    <!-- 已经读到手的订单不会被轮询刷成一片灰骨架：等发货时每 6 秒重载一次，
+         把内容换成骨架等于把买家刚看到的卡密藏起来。 -->
+    <div v-if="loading && !order" class="space-y-5">
       <div class="skeleton h-28 w-full !rounded-lg" />
       <div class="skeleton h-52 w-full !rounded-lg" />
     </div>
@@ -341,6 +348,7 @@ async function refreshDelivery() {
             {{ loading ? '刷新中…' : '立即刷新交付' }}
           </button>
         </div>
+        <p v-if="copyNote" class="hint mt-4" role="status">{{ copyNote }}</p>
         <p v-if="confirmNote" class="hint mt-4 flex flex-wrap items-center gap-2" role="status">
           <span>{{ confirmNote }}</span>
           <button

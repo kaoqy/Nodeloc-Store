@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
@@ -51,6 +52,9 @@ type restockCards struct {
 	available int64
 	held      map[string]struct{}
 	statuses  map[uint]string
+	// created records every line the shop asked for, in order, because a repeat
+	// that was stocked and a repeat that was dropped look the same in `held`.
+	created []string
 }
 
 func (r *restockCards) ListByProduct(context.Context, uint) ([]domain.Card, error) {
@@ -64,6 +68,7 @@ func (r *restockCards) GetByID(_ context.Context, id uint) (*domain.Card, error)
 }
 func (r *restockCards) Create(_ context.Context, card *domain.Card) error {
 	r.held[card.Content] = struct{}{}
+	r.created = append(r.created, card.Content)
 	if card.Status == domain.CardStatusAvailable {
 		r.available++
 	}
@@ -150,6 +155,35 @@ func TestImportCardsReleasesTheWaitingOrders(t *testing.T) {
 	}
 	if len(wake.called) != 1 || wake.called[0] != 7 {
 		t.Errorf("wake called for %v, want product 7 once", wake.called)
+	}
+}
+
+// TestImportCardsKeepsRepeatedKeys is the shop that sells the same 激活码 to
+// everyone: one line per unit sold, so pasting the file twice must stock twice
+// and only tell the operator how many lines repeated.
+func TestImportCardsKeepsRepeatedKeys(t *testing.T) {
+	products, cards := newRestockFakes()
+	cards.held["A"] = struct{}{}
+	service := restockService(products, cards, &wakeSpy{})
+
+	result, err := service.ImportCards(context.Background(), 7, []string{"A", "A", "B", "   "})
+	if err != nil {
+		t.Fatalf("ImportCards: %v", err)
+	}
+	if len(result.Created) != 3 {
+		t.Fatalf("created = %d lines (%v), want every non-blank line stocked", len(result.Created), result.Created)
+	}
+	if strings.Join(cards.created, ",") != "A,A,B" {
+		t.Errorf("stocked %v, want A twice and B once", cards.created)
+	}
+	if result.Duplicates != 2 {
+		t.Errorf("duplicates = %d, want the shelf's existing A and the second pasted A", result.Duplicates)
+	}
+	if result.Blank != 1 {
+		t.Errorf("blank = %d, want the whitespace-only line reported", result.Blank)
+	}
+	if len(products.stockWrites) != 1 || products.stockWrites[0] != 3 {
+		t.Errorf("stock recount = %v, want the three lines counted", products.stockWrites)
 	}
 }
 

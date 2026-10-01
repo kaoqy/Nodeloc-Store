@@ -52,7 +52,9 @@ const soldOut = computed(() => limit.value === 0)
 const buyLabel = computed(() => {
   if (!site.paymentsEnabled) return '本店暂停收款'
   if (soldOut.value) return '暂时缺货'
-  return submitting.value ? '正在跳转支付…' : '立即购买'
+  if (submitting.value) return '正在跳转支付…'
+  // 上一单还没付掉时，这颗按钮做的是把那一份重发，不是再开一张新单，标签要说实话。
+  return unpaidOrderNo.value ? '继续未支付的这一单' : '立即购买'
 })
 const gross = computed(() => (product.value?.price ?? 0) * quantity.value)
 /** What NodeLoc is asked to collect: the quoted discount is already off it. */
@@ -105,6 +107,8 @@ function step(delta: number) {
 /**
  * The code is checked against the order the buyer is actually looking at, so a
  * 满 100 减 20 code says "还差多少" before checkout instead of failing at 支付.
+ * A buyer without a session may ask too: the shop published the code, and the
+ * one rule a guest cannot be measured against (每人限用) comes back as a note.
  */
 async function applyQuote() {
   const item = product.value
@@ -113,10 +117,6 @@ async function applyQuote() {
   if (!item) return
   const code = couponCode.value.trim()
   if (!code) return
-  if (!auth.isAuthenticated) {
-    couponError.value = '登录后才能使用优惠码。'
-    return
-  }
   quoting.value = true
   try {
     quote.value = await quoteCoupon({ code, slug: item.slug, quantity: quantity.value })
@@ -156,12 +156,39 @@ async function openPayment(orderNo: string, goods: string) {
   }
 }
 
+/**
+ * Put the code the buyer is looking at into the address they will be sent back
+ * to. Setting the parameter replaces it — the old string-append produced
+ * `?coupon=X&coupon=X` for a link the shop had already deep-linked, and the
+ * duplicate came back as an array the page read as empty, so a 已优惠 preview
+ * silently turned into full price across the sign-in round trip.
+ */
+function withCoupon(path: string, code: string): string {
+  if (!code) return path
+  const url = new URL(path, 'http://shop.invalid')
+  url.searchParams.set('coupon', code.slice(0, 64))
+  return `${url.pathname}${url.search}${url.hash}`
+}
+
 async function purchase() {
   const item = product.value
   if (!item || submitting.value) return
   if (!site.paymentsEnabled) return
+  if (unpaidOrderNo.value) {
+    // 刚才那一单还挂在这里。主按钮再点一次不该再开一张新单——买家会以为试第二次
+    // 是无害的，而两家店里会同时躺着两笔待付款，其中一笔可能被付掉两次。
+    await retryPayment()
+    return
+  }
   if (!auth.isAuthenticated) {
-    await router.push({ name: 'login', query: { redirect: route.fullPath } })
+    // The preview the guest just looked at must survive the sign-in round trip,
+    // so the code rides along in the address they are sent back to instead of
+    // being retyped against a page that already priced it.
+    const redirect = route.fullPath
+    await router.push({
+      name: 'login',
+      query: { redirect: withCoupon(redirect, couponCode.value.trim()) },
+    })
     return
   }
   submitting.value = true
@@ -229,7 +256,7 @@ async function load(slug: string) {
   product.value = null
   related.value = []
   quantity.value = 1
-  couponCode.value = ''
+  couponCode.value = typeof route.query.coupon === 'string' ? route.query.coupon.slice(0, 64) : ''
   quote.value = null
   couponError.value = ''
   promos.value = []
@@ -241,6 +268,9 @@ async function load(slug: string) {
     if (product.value) {
       void loadRelated(product.value)
       void loadPromos()
+      // A code that rode through the sign-in round trip is priced again on
+      // arrival, so the buyer comes back to the number they left.
+      if (couponCode.value) void applyQuote()
     }
   } catch (e) {
     // An address for goods the shop does not carry is not a fault worth
@@ -429,9 +459,10 @@ watch(
             <p v-if="quote?.accepted" class="alert alert-success mt-2 break-words">
               已优惠 {{ money(quote.discount) }}
               <span v-if="quote.description"> · {{ quote.description }}</span>
+              <span v-if="quote.note" class="mt-1 block font-normal">{{ quote.note }}</span>
             </p>
             <p v-else-if="couponError" class="alert alert-warning mt-2" role="status">{{ couponError }}</p>
-            <p v-else-if="!auth.isAuthenticated" class="hint mt-1.5">登录后即可核对优惠码。</p>
+            <p v-else-if="!auth.isAuthenticated" class="hint mt-1.5">不用登录也能先核对折扣，下单时才需要账号。</p>
           </div>
 
           <div class="divider" />

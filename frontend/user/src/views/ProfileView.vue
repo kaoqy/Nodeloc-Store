@@ -19,7 +19,7 @@ import type { InboxKind, InboxQuery } from '../api/notifications'
 import { useAuthStore } from '../stores/auth'
 import { useInboxStore } from '../stores/inbox'
 import { useSiteStore } from '../stores/site'
-import { dayLabel, oauthErrorText, when } from '../utils/format'
+import { dayLabel, oauthErrorText, roleLabel, when } from '../utils/format'
 import type { AppNotification, CheckinRecord, CheckinStatus, PointEntry } from '../types'
 
 const POINTS_PAGE = 20
@@ -389,7 +389,7 @@ onMounted(async () => {
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
             <p class="truncate text-lg font-semibold">{{ displayName }}</p>
-            <span v-if="auth.isStaff" class="badge badge-accent">{{ auth.accountRole || '工作人员' }}</span>
+            <span v-if="auth.isStaff" :class="['badge', roleLabel(auth.accountRole).badge]">{{ roleLabel(auth.accountRole).label }}</span>
             <span v-else-if="user?.is_admin" class="badge badge-accent">管理员</span>
             <span v-if="profileComplete" class="badge badge-success">资料完整</span>
             <span v-else class="badge badge-neutral">资料待完善</span>
@@ -532,7 +532,7 @@ onMounted(async () => {
           <h2 class="text-[15px] font-bold">NodeLoc 账号</h2>
           <p class="hint mt-1">
             <template v-if="bound">
-              已绑定 <span class="mono">{{ user?.oauth_username || user?.oauth_provider }}</span>
+              已绑定 <span class="mono">{{ user?.oauth_username || 'NodeLoc 账号' }}</span>
               <span v-if="user?.oauth_uid" class="mono"> · ID {{ user.oauth_uid }}</span>
               <span v-if="user?.oauth_trust_level !== null && user?.oauth_trust_level !== undefined">
                 · 信任等级 {{ user.oauth_trust_level }}

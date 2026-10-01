@@ -95,6 +95,12 @@ export interface SettingsDocument {
   // Credentials that are filled but cannot work: Token and Secret Key swapped, an
   // OAuth Client ID in the Payment ID box. Wording is the server's, in Chinese.
   payment_warnings?: string[]
+  // The same reading for 登录: which OAuth box is still empty, and what the store
+  // can see is wrong about the ones that are filled — a 重定向 URI on another host
+  // than 站点域名 is refused by NodeLoc before the shop ever sees a code.
+  oauth_ready?: boolean
+  oauth_missing?: string[]
+  oauth_warnings?: string[]
 }
 
 export const getRuntimeSettings = () =>
@@ -109,6 +115,26 @@ export const saveRuntimeSettings = (settings: RuntimeSettings) =>
 
 export const testOAuth = () =>
   client.post<{ ok: boolean; authorize_url?: string; msg?: string }>('/admin/settings/oauth-test').then((r) => r.data)
+
+// OAuthAttempt is one NodeLoc 登录 round trip as the shop recorded it. The
+// detail is the shop's own sentence or NodeLoc's, with tokens and codes already
+// removed by the server — there is nothing secret left to leak from this list.
+export interface OAuthAttempt {
+  id: number
+  created_at: string
+  step: string
+  outcome: string
+  reason?: string
+  detail?: string
+  redirect_uri?: string
+  username?: string
+  binding: boolean
+}
+
+export const getOAuthAttempts = (limit = 20) =>
+  client
+    .get<{ data: OAuthAttempt[] }>('/admin/oauth-attempts', { params: { limit } })
+    .then((r) => r.data.data ?? [])
 
 export const testPayment = () =>
   client.post<{ ok: boolean; msg: string }>('/admin/settings/payment-test').then((r) => r.data)

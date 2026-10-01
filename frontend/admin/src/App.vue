@@ -41,7 +41,16 @@ const titles: Record<string, string> = {
   '/forbidden': '权限不足',
 }
 
-const label = (segment: string) => titles['/' + segment] || segment
+// 子页面段：/products/new、/products/7/edit 会在面包屑里落下最后一段，
+// 原样写「new」「edit」就是把路由表贴给店家看。
+const subTitles: Record<string, string> = {
+  new: '新建',
+  edit: '编辑',
+  setup: '初始化',
+  login: '登录',
+}
+
+const label = (segment: string) => titles['/' + segment] || subTitles[segment] || segment
 
 // The catch-all has no section to name, and its raw path would otherwise sit in
 // the header as if it were a screen the shop has.

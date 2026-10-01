@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
-import { getRuntimeSettings, saveRuntimeSettings, testOAuth, testPayment } from '../api/system'
+import { getOAuthAttempts, getRuntimeSettings, saveRuntimeSettings, testOAuth, testPayment, type OAuthAttempt } from '../api/system'
 import type { FooterLink, RuntimeSettings } from '../types'
 import ImageField from '../components/ImageField.vue'
-import { errorMessage } from '../utils/format'
+import { errorMessage, oauthOutcome, oauthReason, oauthStep, when } from '../utils/format'
 import { applyBrand } from '../utils/brand'
 import { applyShopIdentity } from '../utils/identity'
 
@@ -26,6 +26,9 @@ const payment = ref<Probe | null>(null)
 const testingOAuth = ref(false)
 const testingPayment = ref(false)
 const snapshot = ref('')
+const attempts = ref<OAuthAttempt[]>([])
+const loadingAttempts = ref(false)
+const attemptsError = ref('')
 
 const settings = reactive<RuntimeSettings>({
   app: {
@@ -47,6 +50,8 @@ const settings = reactive<RuntimeSettings>({
 })
 
 const canManage = computed(() => auth.allows('settings', 'manage'))
+// 「测试 OAuth 配置」要能改配置才给按；登录记录只是读，客服之外的只读账号也该看到。
+const canViewAttempts = computed(() => auth.allows('settings', 'view') || canManage.value)
 
 const dirty = computed(() => snapshot.value !== '' && JSON.stringify(settings) !== snapshot.value)
 const redirectPreview = computed(() => {
@@ -71,6 +76,9 @@ const MISSING_LABELS: Record<string, string> = {
   token: 'Payment Token',
   secret_key: 'Secret Key',
   base_url: 'NodeLoc 域名',
+  client_id: 'Client ID',
+  client_secret: 'Client Secret',
+  domain: '站点域名',
 }
 const serverMissing = ref<string[]>([])
 const missingLabels = computed(() => serverMissing.value.map((name) => MISSING_LABELS[name] || name))
@@ -80,6 +88,17 @@ const missingLabels = computed(() => serverMissing.value.map((name) => MISSING_L
 const serverWarnings = ref<string[]>([])
 const paymentBlocked = computed(
   () => settings.payment.enabled && (paymentIncomplete.value || serverMissing.value.length > 0),
+)
+// 登录读的是同一套：商店发现空在哪一格，以及哪一格填了却不可能工作。缺了这两句，
+// 「登录不了」就只剩买家的一句抱怨。
+const oauthMissing = ref<string[]>([])
+const oauthWarnings = ref<string[]>([])
+const oauthMissingLabels = computed(() => oauthMissing.value.map((name) => MISSING_LABELS[name] || name))
+const oauthIncomplete = computed(
+  () => !settings.oauth.client_id.trim() || !settings.oauth.client_secret.trim(),
+)
+const oauthBlocked = computed(
+  () => settings.oauth.enabled && (oauthIncomplete.value || oauthMissing.value.length > 0),
 )
 const paymentBasePreview = computed(
   () =>
@@ -143,10 +162,14 @@ async function refreshReadiness() {
     const doc = await getRuntimeSettings()
     serverMissing.value = doc.payment_missing ?? []
     serverWarnings.value = doc.payment_warnings ?? []
+    oauthMissing.value = doc.oauth_missing ?? []
+    oauthWarnings.value = doc.oauth_warnings ?? []
   } catch {
     // A failed diagnostic read must not block the page that fixes the problem.
     serverMissing.value = []
     serverWarnings.value = []
+    oauthMissing.value = []
+    oauthWarnings.value = []
   }
 }
 
@@ -211,6 +234,8 @@ async function load() {
     snapshot.value = JSON.stringify(settings)
     serverMissing.value = document.payment_missing ?? []
     serverWarnings.value = document.payment_warnings ?? []
+    oauthMissing.value = document.oauth_missing ?? []
+    oauthWarnings.value = document.oauth_warnings ?? []
     lastProbe.value = readStoredProbe()
     // Remembered as the colour on file, so a save that fails can put it back.
     savedBrand.value = settings.theme.theme_primary
@@ -279,6 +304,22 @@ async function runOAuthTest() {
   }
 }
 
+// The shop's own record of every NodeLoc 登录 round trip. A container log is out
+// of reach for someone running Docker from a panel, and 「登录不了」 without a step
+// attached is not something they can act on.
+async function loadOAuthAttempts() {
+  if (!canViewAttempts.value) return
+  loadingAttempts.value = true
+  attemptsError.value = ''
+  try {
+    attempts.value = await getOAuthAttempts(20)
+  } catch (err) {
+    attemptsError.value = errorMessage(err, '无法读取登录记录')
+  } finally {
+    loadingAttempts.value = false
+  }
+}
+
 async function runPaymentTest() {
   testingPayment.value = true
   payment.value = null
@@ -304,7 +345,10 @@ async function runPaymentTest() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadOAuthAttempts()
+})
 </script>
 
 <template>
@@ -323,7 +367,7 @@ onMounted(load)
   <section v-else class="space-y-6">
     <div class="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <p class="eyebrow">Runtime configuration</p>
+        <p class="eyebrow">运行时配置</p>
         <h2 class="mt-1 text-xl font-bold">系统设置</h2>
         <p class="mt-1 text-sm text-[var(--text-quiet)]">保存后运行时配置立即重建，无需重启容器</p>
       </div>
@@ -410,6 +454,8 @@ onMounted(load)
               <p class="hint mt-0.5">买家与管理员均可使用 NodeLoc 账号登录</p>
             </div>
             <div class="flex items-center gap-2">
+              <span v-if="oauthBlocked" class="badge badge-danger" title="开关是开的，但登录参数不完整，买家点「用 NodeLoc 登录」仍会被拒">还登不了</span>
+              <span v-else-if="oauthWarnings.length" class="badge badge-warning" title="参数都填了，但商店看出有一项不可能工作；看下面这几条">配置可疑</span>
               <span class="hint">{{ settings.oauth.enabled ? '已启用' : '已禁用' }}</span>
               <button
                 class="switch"
@@ -440,7 +486,10 @@ onMounted(load)
             <div>
               <label class="label" for="oauth-redirect">重定向 URI</label>
               <input id="oauth-redirect" v-model="settings.oauth.redirect_uri" class="input mono" :placeholder="redirectPreview" />
-              <p class="hint mt-1">留空则自动生成：<span class="mono">{{ redirectPreview }}</span></p>
+              <p class="hint mt-1">
+                留空则按站点域名自动生成：<span class="mono">{{ redirectPreview }}</span>。
+                清空这一格并保存，就会丢掉之前手填的地址，回到上面这个。
+              </p>
             </div>
             <div>
               <label class="label" for="oauth-scopes">授权范围 scope</label>
@@ -449,6 +498,16 @@ onMounted(load)
                 必须包含 <span class="mono">openid</span>（NodeLoc 强制，缺失会被自动补上）。
                 <span class="mono">email</span> 需要 NodeLoc 管理员审批，应用没获批时填写会导致授权被拒。
               </p>
+            </div>
+            <div v-if="oauthBlocked && oauthMissingLabels.length" class="alert alert-danger" role="alert">
+              NodeLoc 登录现在还不能用，商店发现这几项是空的：{{ oauthMissingLabels.join('、') }}。
+              站点域名决定回调地址，缺了它商店无从生成，买家会在授权那一步被拒。
+            </div>
+            <div v-if="oauthWarnings.length" class="alert alert-warning" role="alert">
+              <p class="font-medium">这几项填了，但商店认为它们跑不通：</p>
+              <ul class="mt-1.5 list-disc space-y-1 pl-5">
+                <li v-for="(warning, index) in oauthWarnings" :key="index">{{ warning }}</li>
+              </ul>
             </div>
             <div class="flex flex-wrap items-center gap-3">
               <button class="btn btn-secondary btn-sm" type="button" :disabled="testingOAuth" @click="runOAuthTest">
@@ -520,7 +579,7 @@ onMounted(load)
             <p v-else-if="serverMissing.length" class="alert alert-warning" role="alert">
               开关是开着的，但商店还收不了钱：服务端认为缺少
               <strong>{{ missingLabels.join('、') }}</strong>。
-              填好后点「保存配置」，再用下面的「测试支付网关」复核。
+              填好后点「保存设置」，再用下面的「测试支付网关」复核。
             </p>
             <div v-if="serverWarnings.length" class="alert alert-warning" role="alert">
               <p class="font-medium">这几项填了，但商店认为它们用不了：</p>
@@ -739,6 +798,47 @@ onMounted(load)
           </p>
         </div>
       </fieldset>
+    </div>
+
+    <!-- 登录记录 -->
+    <div v-if="canViewAttempts" class="card">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 class="font-semibold">最近 NodeLoc 登录记录</h3>
+          <p class="hint mt-0.5">买家说「登录不了」时先看这里：卡在哪一步、商店记下的原因，以及它当时发出的回调地址</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span v-if="attempts.length" class="hint mono">最近 {{ attempts.length }} 条</span>
+          <button class="btn btn-secondary btn-sm" type="button" :disabled="loadingAttempts" @click="loadOAuthAttempts">
+            {{ loadingAttempts ? '读取中…' : '刷新' }}
+          </button>
+        </div>
+      </div>
+
+      <p v-if="attemptsError" class="alert alert-danger">{{ attemptsError }}</p>
+      <div v-else-if="loadingAttempts && !attempts.length" class="space-y-2">
+        <div v-for="i in 3" :key="i" class="skeleton h-12" />
+      </div>
+      <p v-else-if="!attempts.length" class="hint leading-relaxed">
+        还没有登录记录。让人从登录页走一次「用 NodeLoc 登录」（成功或失败都会记下来），这里就会写下它停在哪一步。
+        上面的「测试 OAuth 配置」只核对 Client ID 与 Secret，不会留下记录。
+      </p>
+      <ul v-else class="text-sm">
+        <li v-for="(row, index) in attempts" :key="row.id" :class="index ? 'mt-3 border-t border-[var(--stroke-quiet)] pt-3' : ''">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="mono text-xs text-[var(--text-quiet)]">{{ when(row.created_at) }}</span>
+            <span class="font-semibold">{{ oauthStep(row.step) }}</span>
+            <span :class="['badge', oauthOutcome(row.outcome).badge]">{{ oauthOutcome(row.outcome).label }}</span>
+            <span v-if="row.binding" class="badge badge-neutral">绑定已有账号</span>
+            <span v-if="row.username" class="badge badge-info">{{ row.username }}</span>
+          </div>
+          <p v-if="oauthReason(row.reason)" class="mt-1.5 text-[var(--text)]">{{ oauthReason(row.reason) }}</p>
+          <p v-if="row.detail" class="codebox mt-2 text-xs">{{ row.detail }}</p>
+          <p v-if="row.redirect_uri" class="hint mt-1.5 break-all">
+            回调地址：<span class="mono">{{ row.redirect_uri }}</span>
+          </p>
+        </li>
+      </ul>
     </div>
   </section>
 </template>

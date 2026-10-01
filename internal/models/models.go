@@ -75,6 +75,39 @@ func (OAuthIdentity) TableName() string { return "oauth_identities" }
 // legacyOAuthTable is what GORM named this table before TableName pinned it.
 const legacyOAuthTable = "o_auth_identities"
 
+// OAuthAttempt is one NodeLoc 登录 round trip as the shop experienced it: the
+// step it reached, whether it got there, and the provider's own words when it
+// did not. A failed login leaves nothing in the buyer's browser but a generic
+// 「链接过期」, and the real reason — a redirect_uri that does not match the
+// application, a rejected scope, a state cookie the proxy dropped — only ever
+// appeared in the container's log. This table puts it on the 设置 page the shop
+// owner is already looking at.
+//
+// It never holds a token, a secret or an authorization code: Detail is the
+// provider's error text, trimmed and scrubbed of anything that looks like a
+// credential before it is written.
+type OAuthAttempt struct {
+	Base
+	// Step is initiate (the browser was sent to NodeLoc) or callback (NodeLoc
+	// sent something back).
+	Step string `gorm:"size:16;index" json:"step"`
+	// Outcome is started, success or failed.
+	Outcome string `gorm:"size:16" json:"outcome"`
+	// Reason is the machine code the storefront reads: disabled, not_configured,
+	// rejected, unreachable, denied, expired, state…
+	Reason string `gorm:"size:32" json:"reason,omitempty"`
+	Detail string `gorm:"type:text" json:"detail,omitempty"`
+	// RedirectURI records what the shop actually told NodeLoc to send the buyer
+	// back to, because a mismatch there is the most common broken login and the
+	// one thing the forum never explains.
+	RedirectURI string `gorm:"type:text" json:"redirect_uri,omitempty"`
+	// Username is the NodeLoc account a successful login resolved to.
+	Username string `gorm:"size:64" json:"username,omitempty"`
+	Binding  bool   `gorm:"not null;default:false" json:"binding"`
+}
+
+func (OAuthAttempt) TableName() string { return "oauth_attempts" }
+
 // ── Points & Checkin ─────────────────────────────────────────────────
 
 type PointLedger struct {
@@ -301,6 +334,7 @@ func Migrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&User{},
 		&OAuthIdentity{},
+		&OAuthAttempt{},
 		&PointLedger{},
 		&CheckIn{},
 		&Category{},

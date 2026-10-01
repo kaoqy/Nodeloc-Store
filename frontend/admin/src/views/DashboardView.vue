@@ -294,7 +294,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div v-else-if="stats" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
         label="期间收入"
         :value="money(stats?.revenue_period ?? 0)"
@@ -323,6 +323,17 @@ onUnmounted(() => {
         :delta="(stats?.new_users_prev ?? 0) > 0 ? (stats?.new_users_delta ?? null) : null"
         :spark="sparklines.users"
       />
+    </div>
+
+    <!-- 概览一次都没读出来时，整块看板都不该开口：那些面板只会把「没有数据」念成
+         「0 笔」「卡密充足，无需补货」，而这两句话在这家店里都不是结论。 -->
+    <div v-else class="card !p-0 overflow-hidden">
+      <div class="empty-state">
+        <p class="empty-glyph" aria-hidden="true">◌</p>
+        <p class="empty-title">概览数据没有读出来</p>
+        <p class="empty-hint">原因写在上面的红色提示里。修好之前，收入、订单与库存预警都不会给出数字，免得把「读不到」说成「生意是 0」。</p>
+        <button class="btn btn-secondary btn-sm mt-3" type="button" @click="load()">再读一次</button>
+      </div>
     </div>
 
     <div v-if="!loading && onboarding" class="card">
@@ -357,7 +368,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="grid gap-5 xl:grid-cols-3">
+    <div v-if="stats" class="grid gap-5 xl:grid-cols-3">
       <div class="card xl:col-span-2">
         <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -484,7 +495,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="stagger grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+    <div v-if="stats" class="stagger grid gap-5 md:grid-cols-2 xl:grid-cols-4">
       <div class="card">
         <div class="mb-4 flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold">热销商品</h2>
@@ -641,7 +652,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="stagger grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+    <div v-if="stats" class="stagger grid gap-5 md:grid-cols-2 xl:grid-cols-4">
       <div class="card">
         <div class="mb-4 flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold">分类销售</h2>
@@ -788,7 +799,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="card !p-0 overflow-hidden">
+    <div v-if="stats" class="card !p-0 overflow-hidden">
       <div class="flex items-center justify-between gap-3 px-5 py-4">
         <div>
           <h2 class="text-base font-semibold">最新订单</h2>

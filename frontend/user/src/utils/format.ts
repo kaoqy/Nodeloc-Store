@@ -131,6 +131,23 @@ export function providerStatus(status?: string): string {
   return `未知道账状态（${status}）`
 }
 
+const ROLE: Record<string, StatusMeta> = {
+  user: { label: '普通用户', badge: 'badge-neutral' },
+  support: { label: '客服', badge: 'badge-info' },
+  operator: { label: '运营', badge: 'badge-teal' },
+  admin: { label: '管理员', badge: 'badge-warning' },
+  super_admin: { label: '超级管理员', badge: 'badge-danger' },
+}
+
+/**
+ * roleLabel names an account role the way 后台 does — the server answers with
+ * `super_admin`, and a buyer-facing page that prints that word is quoting the
+ * permission table at the person reading it.
+ */
+export function roleLabel(role?: string | null): StatusMeta {
+  return ROLE[role || 'user'] || { label: role || '普通用户', badge: 'badge-neutral' }
+}
+
 const OAUTH_ERROR: Record<string, string> = {
   denied: 'NodeLoc 说这次授权被拒绝了：可能是你点了取消，或应用没有获得申请的权限。',
   expired: '登录链接已失效：发起登录后超过 10 分钟没完成，或浏览器没有把校验凭证带回来。',

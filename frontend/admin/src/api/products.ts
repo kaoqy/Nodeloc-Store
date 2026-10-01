@@ -11,7 +11,10 @@ export interface CardQuery {
 
 export interface GeneratedCards {
   created: Card[]
-  skipped: number
+  // duplicates counts the pasted lines that repeated a key already on the
+  // shelf. They are stocked anyway — the number only tells the operator that
+  // the same code went in more than once.
+  duplicates: number
   blank: number
   // released counts the paid orders this restock delivered on the spot; the keys
   // going on the shelf is only half of what the operator wanted to know.

@@ -179,6 +179,36 @@ func (r *GormUserRepo) CountOAuthIdentities(ctx context.Context, userID uint) (i
 	return count, err
 }
 
+// oauthAttemptKeep is how far back the shop remembers 登录 attempts. The trail is
+// written to be read after a complaint, not to be a history of who ever signed
+// in: it names buyers, so it has to stop growing at some point.
+const oauthAttemptKeep = 500
+
+func (r *GormUserRepo) RecordOAuthAttempt(ctx context.Context, attempt *domain.OAuthAttempt) error {
+	if err := r.db.WithContext(ctx).Create(attempt).Error; err != nil {
+		return err
+	}
+	// Best-effort trim, in the same write path so it cannot be forgotten: a
+	// scheduled sweep would need the container to stay up long enough to run one.
+	r.db.WithContext(ctx).Exec(
+		"DELETE FROM oauth_attempts WHERE id <= (SELECT COALESCE(MAX(id), 0) - ? FROM oauth_attempts)",
+		oauthAttemptKeep,
+	)
+	return nil
+}
+
+func (r *GormUserRepo) ListOAuthAttempts(ctx context.Context, limit int) ([]domain.OAuthAttempt, error) {
+	switch {
+	case limit <= 0:
+		limit = 20
+	case limit > 200:
+		limit = 200
+	}
+	var attempts []domain.OAuthAttempt
+	err := r.db.WithContext(ctx).Order("id DESC").Limit(limit).Find(&attempts).Error
+	return attempts, err
+}
+
 func translateGormError(err error) error {
 	if err == nil {
 		return nil
