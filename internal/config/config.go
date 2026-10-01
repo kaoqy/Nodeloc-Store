@@ -37,13 +37,16 @@ type FeaturesConfig struct {
 	// The two NodeLoc 启用 switches on 设置 live here too. They used to be stored
 	// and never read, so turning NodeLoc 登录 or 收款 off changed nothing but the
 	// badge on the settings card.
-	OAuthDisabled    bool `mapstructure:"oauth_disabled"`
-	PaymentsDisabled bool `mapstructure:"payments_disabled"`
+	OAuthDisabled        bool `mapstructure:"oauth_disabled"`
+	PaymentsDisabled     bool `mapstructure:"payments_disabled"`
+	RegistrationDisabled bool `mapstructure:"registration_disabled"`
 }
 
 func (f FeaturesConfig) CheckinOn() bool { return !f.CheckinDisabled }
 
 func (f FeaturesConfig) CouponsOn() bool { return !f.CouponsDisabled }
+
+func (f FeaturesConfig) RegistrationOn() bool { return !f.RegistrationDisabled }
 
 func (f FeaturesConfig) OAuthOn() bool { return !f.OAuthDisabled }
 

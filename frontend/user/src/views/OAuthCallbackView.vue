@@ -86,7 +86,7 @@ onMounted(async () => {
         <p class="hint mt-2">请稍候，无需刷新页面…</p>
       </template>
       <template v-else>
-        <div class="eyebrow">Sign in</div>
+        <div class="eyebrow">登录</div>
         <h1 class="mt-2 text-lg font-bold text-[var(--danger)]">登录未完成</h1>
         <p class="card-quiet mt-4 text-left text-sm text-[var(--text-dim)]">{{ error }}</p>
         <RouterLink to="/login" class="btn btn-primary mt-6">返回登录</RouterLink>

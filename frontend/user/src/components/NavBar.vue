@@ -93,10 +93,15 @@ async function logout() {
         </template>
         <template v-else>
           <RouterLink to="/login" class="btn btn-ghost btn-sm">登录</RouterLink>
-          <RouterLink to="/register" class="btn btn-primary btn-sm">注册</RouterLink>
+          <RouterLink v-if="site.registrationEnabled" to="/register" class="btn btn-primary btn-sm">注册</RouterLink>
         </template>
 
-        <button class="btn btn-quiet btn-sm lg:hidden" aria-label="打开菜单" @click="menuOpen = !menuOpen">
+        <button
+          class="btn btn-quiet btn-sm lg:hidden"
+          aria-label="打开菜单"
+          :aria-expanded="menuOpen"
+          @click="menuOpen = !menuOpen"
+        >
           {{ menuOpen ? '✕' : '☰' }}
         </button>
       </div>
@@ -118,7 +123,7 @@ async function logout() {
       </template>
       <template v-else>
         <RouterLink to="/login" class="nav-item w-full">登录</RouterLink>
-        <RouterLink to="/register" class="nav-item w-full">注册</RouterLink>
+        <RouterLink v-if="site.registrationEnabled" to="/register" class="nav-item w-full">注册</RouterLink>
       </template>
     </nav>
   </header>

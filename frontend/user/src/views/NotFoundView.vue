@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
@@ -6,8 +7,10 @@ const auth = useAuthStore()
 const route = useRoute()
 
 // The address is echoed back because a dead link is usually a typo the visitor
-// can see and fix, and a shop has no way to know which one they meant.
-const attempted = route.fullPath
+// can see and fix, and a shop has no way to know which one they meant. Every
+// dead path is the same route record, so this page stays mounted while the
+// address changes — read it live or it shows the last 404 they walked past.
+const attempted = computed(() => route.fullPath)
 </script>
 
 <template>

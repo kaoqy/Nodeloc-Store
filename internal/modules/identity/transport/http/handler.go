@@ -793,6 +793,8 @@ func errorCopy(err error) (int, string, string) {
 		return http.StatusForbidden, "account_disabled", "账号已被停用，请联系管理员"
 	case errors.Is(err, domain.ErrCheckinDisabled):
 		return http.StatusForbidden, "checkin_disabled", "签到功能当前未开启"
+	case errors.Is(err, domain.ErrRegistrationDisabled):
+		return http.StatusForbidden, "registration_disabled", "本店已关闭注册，请使用 NodeLoc 账号登录，或联系店家开启"
 	case errors.Is(err, domain.ErrUserNotFound):
 		return http.StatusNotFound, "user_not_found", "用户不存在"
 	case errors.Is(err, domain.ErrIdentityNotFound):

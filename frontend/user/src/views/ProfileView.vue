@@ -373,7 +373,7 @@ onMounted(async () => {
 <template>
   <div class="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6">
     <header class="mb-7">
-      <p class="eyebrow">Account</p>
+      <p class="eyebrow">账号、积分与通知</p>
       <h1 class="mt-2 text-2xl font-bold">个人中心</h1>
     </header>
 

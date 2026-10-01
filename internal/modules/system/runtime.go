@@ -199,14 +199,19 @@ func shortValue(value string) string {
 }
 
 type FeaturesConfig struct {
-	RegistrationEnabled bool `json:"enabled_registration"`
-	// The new switches are pointers so that a settings document written before
-	// they existed keeps its old meaning. Absent means on, because a shop that
-	// never opted out of 签到 or 优惠码 should not lose them on upgrade.
+	// Every switch is a pointer so that a settings document written before it
+	// existed keeps its old meaning. Absent means on, because a shop that never
+	// opted out of 注册, 签到 or 优惠码 should not lose them on upgrade — and since
+	// these now decide real behaviour instead of only the badge on 设置, losing one
+	// silently would lock buyers out of a store that never asked for that.
+	Registration        *bool `json:"enabled_registration,omitempty"`
 	Checkin             *bool `json:"enabled_checkin,omitempty"`
 	Coupons             *bool `json:"enabled_coupons,omitempty"`
 	StockAlertThreshold *int  `json:"stock_alert_threshold,omitempty"`
 }
+
+// RegistrationEnabled reports whether a visitor may open a local account.
+func (f FeaturesConfig) RegistrationEnabled() bool { return f.Registration == nil || *f.Registration }
 
 // CheckinEnabled reports whether the daily check-in is live for buyers.
 func (f FeaturesConfig) CheckinEnabled() bool { return f.Checkin == nil || *f.Checkin }
@@ -269,7 +274,7 @@ func Default() *RuntimeConfig {
 			Scopes:  "openid profile",
 		},
 		Payment:  PaymentConfig{Enabled: &yes},
-		Features: FeaturesConfig{RegistrationEnabled: true, Checkin: &yes, Coupons: &yes, StockAlertThreshold: &threshold},
+		Features: FeaturesConfig{Checkin: &yes, Coupons: &yes, StockAlertThreshold: &threshold},
 		Theme:    ThemeConfig{Primary: defaultAccent, Locale: defaultLocale},
 	}
 }
@@ -562,4 +567,5 @@ func (r *RuntimeConfig) ApplyTo(cfg *config.Config) {
 	cfg.Features.StockAlertThreshold = r.Features.AlertThreshold()
 	cfg.Features.OAuthDisabled = !r.OAuth.On()
 	cfg.Features.PaymentsDisabled = !r.Payment.On()
+	cfg.Features.RegistrationDisabled = !r.Features.RegistrationEnabled()
 }

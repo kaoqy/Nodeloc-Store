@@ -2,8 +2,11 @@ package system
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/kaoqy/Nodeloc-Store/internal/config"
 )
 
 // A credential pasted out of NodeLoc's console arrives quoted half the time, and
@@ -356,5 +359,34 @@ func TestOAuthDiagnosticsReadTheLoginSettings(t *testing.T) {
 	warnings = runtime.OAuthWarnings()
 	if len(warnings) == 0 || !strings.Contains(warnings[0], "Payment ID") {
 		t.Errorf("a pay_ Client ID warned %v, want it read as the payment credential", warnings)
+	}
+}
+
+// 关闭注册 now decides whether POST /auth/register creates an account, so a
+// settings document that never mentioned the switch must not read as 「关闭」:
+// the store would wake up after an upgrade unable to sign anyone up, with
+// nothing but a checkbox on 设置 to explain it.
+func TestRegistrationSwitchReachesTheProcessConfig(t *testing.T) {
+	var stored RuntimeConfig
+	if err := json.Unmarshal([]byte(`{"app":{"name":"Old Shop"}}`), &stored); err != nil {
+		t.Fatalf("decode a pre-switch settings document: %v", err)
+	}
+	if !stored.Features.RegistrationEnabled() {
+		t.Fatal("a document without enabled_registration reads as 关闭")
+	}
+
+	process := &config.Config{}
+	stored.ApplyTo(process)
+	if process.Features.RegistrationDisabled {
+		t.Fatal("an untouched switch disabled registration")
+	}
+
+	off := RuntimeConfig{}
+	no := false
+	off.Features.Registration = &no
+	process = &config.Config{}
+	off.ApplyTo(process)
+	if !process.Features.RegistrationDisabled {
+		t.Fatal("the switch was off and the modules still think 注册 is open")
 	}
 }

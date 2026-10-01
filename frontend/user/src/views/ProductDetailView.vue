@@ -37,6 +37,12 @@ const couponError = ref('')
 const quoting = ref(false)
 const promos = ref<StorefrontCoupon[]>([])
 
+// Bumped every time the address names a new product. Related goods link to each
+// other inside this same component, so requests from the page the buyer left can
+// still be in flight when the new one renders — and a late answer would be
+// written into the goods the address no longer names.
+let requestId = 0
+
 const cardStock = computed(() => {
   const item = product.value
   if (!item || item.product_type !== 'card' || !item.auto_deliver) return null
@@ -109,9 +115,15 @@ function step(delta: number) {
  * 满 100 减 20 code says "还差多少" before checkout instead of failing at 支付.
  * A buyer without a session may ask too: the shop published the code, and the
  * one rule a guest cannot be measured against (每人限用) comes back as a note.
+ *
+ * Each write below is checked against `requestId`, because the quote is re-run
+ * when the quantity changes and when the address names another product: one for
+ * the previous goods landing late would set a 「已优惠」 figure the buyer is
+ * about to pay against, or leave 核对中… on a button nobody waits for.
  */
 async function applyQuote() {
   const item = product.value
+  const request = requestId
   couponError.value = ''
   quote.value = null
   if (!item) return
@@ -119,11 +131,14 @@ async function applyQuote() {
   if (!code) return
   quoting.value = true
   try {
-    quote.value = await quoteCoupon({ code, slug: item.slug, quantity: quantity.value })
+    const result = await quoteCoupon({ code, slug: item.slug, quantity: quantity.value })
+    if (request !== requestId) return
+    quote.value = result
   } catch (e) {
+    if (request !== requestId) return
     couponError.value = couponQuoteMessage(e)
   } finally {
-    quoting.value = false
+    if (request === requestId) quoting.value = false
   }
 }
 
@@ -241,16 +256,20 @@ async function retryPayment() {
 
 async function loadRelated(item: Product) {
   if (!item.category_id) return
+  const request = requestId
   try {
     const list = await listProducts({ category: item.category_id, limit: 4 })
+    if (request !== requestId) return
     related.value = list.data.filter((other) => other.id !== item.id).slice(0, 3)
   } catch {
+    if (request !== requestId) return
     related.value = []
   }
 }
 
 /** Read the goods this address names, starting every product-only panel fresh. */
 async function load(slug: string) {
+  const request = ++requestId
   loading.value = true
   error.value = ''
   product.value = null
@@ -259,25 +278,33 @@ async function load(slug: string) {
   couponCode.value = typeof route.query.coupon === 'string' ? route.query.coupon.slice(0, 64) : ''
   quote.value = null
   couponError.value = ''
+  quoting.value = false
   promos.value = []
   submitting.value = false
+  // 上一件商品留下的「继续未支付的这一单」必须跟着旧商品一起清掉：只要它还挂着，
+  // 主按钮点的就是旧订单的支付页，而买家眼前写的是新商品的价钱。
+  unpaidOrderNo.value = ''
+  payAdvice.value = ''
   try {
-    product.value = await getProduct(slug)
+    const item = await getProduct(slug)
+    if (request !== requestId) return
+    product.value = item
     // The tab says which goods the visitor is reading about, not just which shop.
-    setPageTitle(product.value?.name)
-    if (product.value) {
-      void loadRelated(product.value)
+    setPageTitle(item?.name)
+    if (item) {
+      void loadRelated(item)
       void loadPromos()
       // A code that rode through the sign-in round trip is priced again on
       // arrival, so the buyer comes back to the number they left.
       if (couponCode.value) void applyQuote()
     }
   } catch (e) {
+    if (request !== requestId) return
     // An address for goods the shop does not carry is not a fault worth
     // reporting: the empty state below already says the item is gone.
     error.value = errorStatus(e) === 404 ? '' : errorMessage(e, '商品加载失败')
   } finally {
-    loading.value = false
+    if (request === requestId) loading.value = false
   }
 }
 

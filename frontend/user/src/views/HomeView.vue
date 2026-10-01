@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProductCard from '../components/ProductCard.vue'
 import { listCategories, listProducts, storeStats } from '../api/products'
@@ -49,13 +49,29 @@ function dismissKey(value: string) {
   return `announcement:${value}`
 }
 
+// The site identity arrives after this page mounts, so the dismissal has to be
+// re-read when it does — checking it once at mount looks in an empty store and
+// means a buyer who closed the notice sees it again on every refresh.
+watch(
+  () => site.announcement,
+  (text) => {
+    hidden.value = text && sessionStorage.getItem(dismissKey(text)) ? dismissKey(text) : ''
+  },
+  { immediate: true },
+)
+
 function hideAnnouncement() {
   if (!site.announcement) return
   hidden.value = dismissKey(site.announcement)
   sessionStorage.setItem(hidden.value, '1')
 }
 
+// Two watches can fire a reload back to back (a sort chip click plus the keyword
+// debounce), so the responses arrive in any order. Only the newest one may write.
+let requestId = 0
+
 async function load() {
+  const request = ++requestId
   loading.value = true
   error.value = ''
   try {
@@ -68,6 +84,7 @@ async function load() {
       limit: PAGE_SIZE,
       offset: (page.value - 1) * PAGE_SIZE,
     })
+    if (request !== requestId) return
     const pages = Math.max(1, Math.ceil(list.total / PAGE_SIZE))
     // A narrower filter can leave the current page past the last one; step back
     // and let the page watcher fetch the window that does exist.
@@ -81,9 +98,10 @@ async function load() {
     products.value = list.data
     total.value = list.total
   } catch (e) {
+    if (request !== requestId) return
     error.value = errorMessage(e, '商品加载失败，请稍后重试')
   } finally {
-    loading.value = false
+    if (request === requestId) loading.value = false
   }
 }
 
@@ -117,6 +135,21 @@ watch(keyword, () => {
   typing = setTimeout(run, 280)
 })
 
+// The debounce outlives the page it was set on: a buyer who types and then
+// clicks a product would be pulled back to 首页 by their own keystroke, because
+// run() rewrites the address of wherever they ended up.
+onBeforeUnmount(() => clearTimeout(typing))
+
+/**
+ * Whether the buyer narrowed the shelf themselves. The server counts only what
+ * the filters leave, so an empty `total` says nothing about whether the shop has
+ * goods at all — and 「店铺还没有上架商品」 aimed at someone who just mistyped a
+ * search is the one empty state that is never true.
+ */
+const narrowed = computed(
+  () => keyword.value.trim() !== '' || activeCategory.value !== '' || featuredOnly.value || inStockOnly.value,
+)
+
 watch([activeCategory, sortBy, featuredOnly, inStockOnly], () => {
   if (page.value === 1) run()
   else page.value = 1 // the page watcher runs the reload
@@ -140,7 +173,6 @@ onMounted(async () => {
   inStockOnly.value = query.in_stock === '1'
   const parsed = Number(query.page)
   page.value = Number.isInteger(parsed) && parsed > 0 ? parsed : 1
-  hidden.value = sessionStorage.getItem(`announcement:${site.announcement}`) ? `announcement:${site.announcement}` : ''
 
   const [categoriesResult] = await Promise.all([
     listCategories().catch(() => [] as Category[]),
@@ -171,7 +203,7 @@ onMounted(async () => {
 
     <!-- Editorial intro: what this store ships, stated plainly. -->
     <section class="rise-in mt-12 max-w-3xl">
-      <p class="eyebrow">Digital goods store</p>
+      <p class="eyebrow">数字商品商店</p>
       <h1 class="mt-3 text-4xl font-bold sm:text-5xl">
         下单、支付、<span class="accent-text">即时到货</span>
       </h1>
@@ -277,11 +309,11 @@ onMounted(async () => {
 
     <div v-else class="card mt-8 py-20 text-center">
       <p class="text-[var(--text-quiet)]" aria-hidden="true">◍</p>
-      <p class="mt-3 font-semibold">{{ total ? '没有匹配的商品' : '店铺还没有上架商品' }}</p>
+      <p class="mt-3 font-semibold">{{ narrowed ? '没有匹配的商品' : '店铺还没有上架商品' }}</p>
       <p class="mt-1.5 text-sm text-[var(--text-quiet)]">
-        {{ total ? '换个关键词或分类试试' : '管理员在后台上架商品后即可在此购买' }}
+        {{ narrowed ? '换个关键词或分类试试' : '管理员在后台上架商品后即可在此购买' }}
       </p>
-      <button v-if="total" class="btn btn-secondary btn-sm mt-6" @click="resetFilters">清除筛选</button>
+      <button v-if="narrowed" class="btn btn-secondary btn-sm mt-6" @click="resetFilters">清除筛选</button>
     </div>
   </div>
 </template>

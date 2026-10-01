@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listOrders, reconcileMessage, reconcileOrder } from '../api/payment'
 import { errorMessage } from '../api/client'
@@ -10,7 +10,7 @@ import type { Order } from '../types'
 const PageSize = 20
 
 /** Statuses the buyer can narrow the list to; must match the server's allow-list. */
-const FILTERS: { key: string; label: string }[] = ['', 'pending', 'paid', 'completed', 'cancelled', 'refunded'].map(
+const FILTERS: { key: string; label: string }[] = ['', 'pending', 'paid', 'completed', 'failed', 'cancelled', 'refunded'].map(
   (key) => ({ key, label: key ? orderStatus(key).label : '全部' }),
 )
 
@@ -27,6 +27,26 @@ const reconciling = ref(false)
 const reconcileNote = ref('')
 const status = ref(FILTERS.some((item) => item.key === route.query.status) ? String(route.query.status) : '')
 const notice = computed(() => paymentNotice(typeof route.query.pay === 'string' ? route.query.pay : ''))
+
+function wanted(): { q: string; status: string } | null {
+  const next = {
+    q: typeof route.query.q === 'string' ? route.query.q : '',
+    status: FILTERS.some((item) => item.key === route.query.status) ? String(route.query.status) : '',
+  }
+  // Only a link that no longer matches the list is a navigation; 筛选 and 搜索
+  // push the address themselves right after setting these refs.
+  return next.q === query.value && next.status === status.value ? null : next
+}
+
+// The chips and the search box write the address, so the address has to be able
+// to write them back: 后退 is how a buyer leaves a filter they just applied.
+watch(route.query, () => {
+  const next = wanted()
+  if (!next) return
+  query.value = next.q
+  status.value = next.status
+  void load(0)
+})
 const pending = computed(() => orders.value.filter((item) => item.status === 'pending'))
 // A pending order that got as far as NodeLoc has a transaction id, and only then
 // can 查单 say anything about it. The rest were never opened for payment, so
@@ -54,8 +74,20 @@ async function load(offset: number) {
   }
 }
 
+/**
+ * The filter lives in the address, so a refresh or a link sent to the shop owner
+ * lands on the same list — and 后退 undoes it the way the buyer expects.
+ */
+function syncUrl() {
+  const next: Record<string, string> = {}
+  if (status.value) next.status = status.value
+  if (query.value.trim()) next.q = query.value.trim()
+  void router.replace({ path: '/orders', query: next })
+}
+
 function search() {
-  load(0)
+  syncUrl()
+  void load(0)
 }
 
 /**
@@ -69,7 +101,7 @@ async function reconcilePending() {
   reconcileNote.value = '正在向 NodeLoc 核实…'
   let settled = 0
   let checked = 0
-  let failure = ''
+  const failures: string[] = []
   for (const item of queue) {
     try {
       const result = await reconcileOrder(item.order_no)
@@ -77,13 +109,17 @@ async function reconcilePending() {
       if (result.settled) settled += 1
     } catch (e) {
       checked += 1
-      failure = reconcileMessage(e)
+      const reason = reconcileMessage(e)
+      if (!failures.includes(reason)) failures.push(reason)
     }
     reconcileNote.value = `正在向 NodeLoc 核实…（${checked}/${queue.length}）`
   }
+  // One confirmed payment must not bury the two that errored: those are the ones
+  // whose reason the shop owner needs when they ask why 到账 is missing.
+  const refused = failures.length ? `，另有 ${failures.length} 笔核实失败：${failures[0]}` : ''
   reconcileNote.value = settled
-    ? `已确认 ${settled} 笔订单到账${unstarted.value.length ? '，另有未付款订单见下方' : ''}。`
-    : failure || 'NodeLoc 暂无这些订单的到账记录，商店会每隔几分钟自动再核实一次。'
+    ? `已确认 ${settled} 笔订单到账${refused}${unstarted.value.length && !failures.length ? '，另有未付款订单见下方' : ''}。`
+    : failures[0] || 'NodeLoc 暂无这些订单的到账记录，商店会每隔几分钟自动再核实一次。'
   reconciling.value = false
   await load(0)
 }
@@ -91,14 +127,9 @@ async function reconcilePending() {
 function choose(next: string) {
   if (next === status.value) return
   status.value = next
-  // Keep the filter in the URL so a refresh or a shared link lands on the same list.
-  const query_: Record<string, string> = {}
-  if (next) query_.status = next
-  if (query.value.trim()) query_.q = query.value.trim()
-  router.replace({ path: '/orders', query: query_ })
+  syncUrl()
   load(0)
 }
-
 onMounted(() => {
   void load(0)
   // The buyer usually lands here straight from NodeLoc, which is when the shop
@@ -111,7 +142,7 @@ onMounted(() => {
   <div class="mx-auto w-full max-w-4xl px-4 py-10 sm:px-6">
     <header class="mb-8 flex items-end justify-between gap-4">
       <div>
-        <p class="eyebrow">Orders</p>
+        <p class="eyebrow">进行中与历史订单</p>
         <h1 class="mt-2 text-2xl font-bold">我的订单</h1>
       </div>
       <p v-if="!loading && orders.length" class="hint nums whitespace-nowrap">共 {{ total }} 笔</p>

@@ -251,7 +251,7 @@ async function refreshDelivery() {
       <section class="card">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
-            <p class="eyebrow">Order</p>
+            <p class="eyebrow">订单详情</p>
             <div class="flex flex-wrap items-center gap-2">
               <h1 class="mono mt-1.5 break-all text-lg font-semibold">{{ order.order_no }}</h1>
               <button

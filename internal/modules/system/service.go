@@ -148,7 +148,7 @@ func (s *Service) Status() map[string]any {
 			app["footer_links"] = rt.App.FooterLinks
 			app["announcement"] = rt.App.Announcement
 			status["features"] = map[string]any{
-				"registration": rt.Features.RegistrationEnabled,
+				"registration": rt.Features.RegistrationEnabled(),
 				"checkin":      rt.Features.CheckinEnabled(),
 				"coupons":      rt.Features.CouponsEnabled(),
 				"oauth":        rt.OAuth.On(),
@@ -542,6 +542,13 @@ func (s *Service) GetSettings() (map[string]any, error) {
 	view.OAuth.ClientSecret = maskSecret(view.OAuth.ClientSecret)
 	view.Payment.Token = maskSecret(view.Payment.Token)
 	view.Payment.SecretKey = maskSecret(view.Payment.SecretKey)
+	// An absent switch means 「开」, but the settings form needs a real checkbox:
+	// resolving it here keeps a store that never touched 注册 from saving the
+	// missing key back as 「关」 and locking its own registration page.
+	if view.Features.Registration == nil {
+		on := true
+		view.Features.Registration = &on
+	}
 	// The owner's switch says what they want; this says whether the shop can act
 	// on it. Without it a storefront with an empty Payment Token advertises
 	// 「支付已启用」 while every buyer is refused at 下单.

@@ -52,7 +52,14 @@ func NewService(repo contract.UserRepo, oauth contract.OAuthProvider, tokens con
 // CheckinEnabled reports whether 签到 is switched on for this shop.
 func (s *Service) CheckinEnabled() bool { return s.features.CheckinOn() }
 
+// RegistrationEnabled tells the storefront whether 注册 is still open, so the
+// 注册 button disappears with the switch instead of leading to a refused form.
+func (s *Service) RegistrationEnabled() bool { return s.features.RegistrationOn() }
+
 func (s *Service) Register(ctx context.Context, input RegisterInput) (*OAuthResult, error) {
+	if !s.features.RegistrationOn() {
+		return nil, domain.ErrRegistrationDisabled
+	}
 	username := strings.TrimSpace(input.Username)
 	password := input.Password
 	if username == "" || len(username) > 64 || len(password) < 8 || len(password) > 72 {

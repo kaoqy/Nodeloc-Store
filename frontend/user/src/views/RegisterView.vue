@@ -17,9 +17,13 @@ const confirmPassword = ref('')
 const error = ref('')
 const loading = ref(false)
 
-const redirect = computed(() =>
-  typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/') ? route.query.redirect : '/'
-)
+// A destination has to be a path in this shop. `//example.com` starts with a
+// slash but is a host, and pushing one walks a freshly logged-in buyer out the
+// front door.
+const redirect = computed(() => {
+  const target = typeof route.query.redirect === 'string' ? route.query.redirect : ''
+  return target.startsWith('/') && !target.startsWith('//') ? target : '/'
+})
 
 const mismatch = computed(
   () => confirmPassword.value.length > 0 && confirmPassword.value !== password.value
@@ -56,7 +60,16 @@ async function submit() {
         本地账号可独立完成下单与订单查询；注册后可在个人中心绑定 NodeLoc。
       </p>
 
-      <form class="card mt-7 space-y-4" @submit.prevent="submit">
+      <!-- 设置 can close 注册 at any moment, and this page is often already open
+           when it does, so the notice replaces the form instead of waiting for
+           the server to refuse the submit. -->
+      <div v-if="!site.registrationEnabled" class="card mt-7 p-6 text-center">
+        <p class="font-semibold">本店已关闭注册</p>
+        <p class="mt-2 text-sm text-[var(--text-dim)]">店家只开放 NodeLoc 账号登录，或直接与店家联系购买。</p>
+        <RouterLink to="/login" class="btn btn-primary mt-6">前往登录</RouterLink>
+      </div>
+
+      <form v-else class="card mt-7 space-y-4" @submit.prevent="submit">
         <div>
           <label class="label" for="username">用户名</label>
           <input

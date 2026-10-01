@@ -23,6 +23,10 @@ var (
 	ErrLastLoginMethod      = errors.New("cannot remove the last login method")
 	ErrAlreadyCheckedIn     = errors.New("already checked in today")
 	ErrCheckinDisabled      = errors.New("check-in is disabled")
+	// ErrRegistrationDisabled is the 允许注册 switch on 设置 turned off: local
+	// accounts can no longer be opened, so 注册 has to refuse instead of creating
+	// a user the shop owner said they did not want.
+	ErrRegistrationDisabled = errors.New("registration is disabled")
 	ErrNotBound             = errors.New("no oauth account is bound")
 	// ErrOAuthNotConfigured is the store's own answer, not NodeLoc's: the 设置 page
 	// is missing a field the login round trip needs. It names them, so the shop

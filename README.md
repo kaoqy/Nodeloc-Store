@@ -439,7 +439,7 @@ sudo openresty -t && sudo openresty -s reload
 |---|---|---|
 | 商店状态 | `GET /system/status`（公开） | — 返回安装状态、商店名/标语/简介/Logo/公告/页脚文案与链接、注册/签到/优惠码三个开关，以及 `theme`（`primary` 主题色、`locale` 前台语言）；两端据此上色，并把商店名与简介写成标签页标题和 `description` |
 | | `POST /system/install`（公开，仅未安装时可用） | — |
-| 会话 | `POST /auth/register`、`POST /auth/login`、`POST /auth/logout`、`POST /auth/refresh` | 登录（refresh 用 refresh_token 换新的 access/refresh 对） |
+| 会话 | `POST /auth/register`、`POST /auth/login`、`POST /auth/logout`、`POST /auth/refresh` | 登录（refresh 用 refresh_token 换新的 access/refresh 对）。`/auth/register` 受设置里的「允许注册」控制：关掉时回 403 `registration_disabled`（中文提示改用 NodeLoc 登录），前台的「注册」入口与注册页也一并换成「本店已关闭注册」；这个开关在旧的安装文档里可能压根不存在，缺省一律按「开」处理，升级不会把一家没关过注册的店悄悄锁死 |
 | | `GET /auth/oauth/initiate`、`GET /auth/oauth/callback`（公开） | — 见 2.3 |
 | 买家资料 | `GET /auth/me`、`PATCH /auth/me`（昵称、简介、联系邮箱、头像） | 登录 |
 | | `POST /auth/me/avatar`（表单字段 `image`） | 登录 只凭会话，不需要任何后台授权。图片写进 `uploads/avatars`、文件名由服务端生成，账号随即指向新图，**上一张本店自己存的头像同时删除**；限制与后台上传一致（png / jpg / gif、2 MB、边长 8192 px） |

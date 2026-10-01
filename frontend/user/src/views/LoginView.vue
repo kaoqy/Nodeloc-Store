@@ -17,9 +17,13 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 
-const redirect = computed(() =>
-  typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/') ? route.query.redirect : '/'
-)
+// A destination has to be a path in this shop: `//example.com` starts with a
+// slash but names a host, and pushing one after a successful login either walks
+// the buyer off-site or throws, which the catch below reported as a bad password.
+const redirect = computed(() => {
+  const target = typeof route.query.redirect === 'string' ? route.query.redirect : ''
+  return target.startsWith('/') && !target.startsWith('//') ? target : '/'
+})
 
 const oauthError = computed(() => (typeof route.query.oauth_error === 'string' ? route.query.oauth_error : ''))
 
@@ -102,7 +106,7 @@ async function submit() {
         </button>
       </form>
 
-      <p class="hint mt-6 text-center">
+      <p v-if="site.registrationEnabled" class="hint mt-6 text-center">
         还没有账号？
         <RouterLink :to="{ path: '/register', query: redirect === '/' ? {} : { redirect } }" class="accent-text font-semibold underline underline-offset-4">注册本地账号</RouterLink>
       </p>
