@@ -2,6 +2,7 @@ package contract
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
@@ -33,6 +34,13 @@ type OrderRepo interface {
 	// and the background retry will pick it up, so the wait is explained rather
 	// than looking like a lost payment.
 	MarkOrderDeliveryPending(ctx context.Context, orderNo, note string) error
+	// MarkOrderPluginDelivering marks a paid order as being delivered by a
+	// plugin rather than by the shop's own card/manual queue. The order stays in
+	// this state until the plugin's delivery is written, so a crash in between is
+	// retried through the plugin instead of falling back to cards.
+	MarkOrderPluginDelivering(ctx context.Context, orderNo string) error
+	// MarkOrderPluginDelivered writes a plugin's finished delivery onto the order.
+	MarkOrderPluginDelivered(ctx context.Context, orderNo, content, note string) error
 	// ListUndeliveredPaidOrders returns paid orders whose delivery never
 	// completed, including those waiting for card stock to be refilled.
 	ListUndeliveredPaidOrders(ctx context.Context, limit int) ([]models.Order, error)
@@ -163,6 +171,37 @@ type ProbeOutcome struct {
 type FulfillmentService interface {
 	Fulfill(ctx context.Context, order *models.Order) error
 }
+
+// PluginDeliverer is the plugin runtime as the money side sees it.
+//
+// It mirrors the plugin module's own contract without importing it — modules
+// only depend on each other's contract packages — and it is two calls because
+// the decision and the delivery are separate: Owns decides whether a plugin is
+// responsible for this order at all, and Fulfill performs the delivery.
+type PluginDeliverer interface {
+	// Owns reports whether an enabled plugin is bound to this order's product.
+	// It is how payment knows to route the delivery through the plugin rather
+	// than the shop's own card/manual queue.
+	Owns(ctx context.Context, order *models.Order) (bool, error)
+	// Fulfill resolves the order's plugin binding and delivers it. A nil
+	// result with a nil error means the binding vanished in between; the caller
+	// falls back to the shop's own fulfilment.
+	Fulfill(ctx context.Context, order *models.Order) (*PluginDelivery, error)
+	// ValidateSelection refuses a purchase whose answers do not resolve to a
+	// delivery item, before any money moves.
+	ValidateSelection(ctx context.Context, productID uint, formValues map[string]string) error
+}
+
+// PluginDelivery is what a plugin handed back for one order.
+type PluginDelivery struct {
+	Content   string
+	Note      string
+	Reference string
+}
+
+// ErrPluginUnbound is the sentinel ErrPluginUnbound implementations return from
+// PrepareOrder when a product has no enabled plugin binding.
+var ErrPluginUnbound = errors.New("no plugin is bound to this product")
 
 // CouponPricing is the catalogue's answer to "what is this code worth on that
 // order". Payment asks before any money moves, because the amount handed to

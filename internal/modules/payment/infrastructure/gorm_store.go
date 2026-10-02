@@ -263,7 +263,7 @@ func (s *GormStore) ListUndeliveredPaidOrders(ctx context.Context, limit int) ([
 	}
 	orders := make([]models.Order, 0, limit)
 	err := s.db.WithContext(ctx).Model(&models.Order{}).
-		Where("status IN ? AND fulfillment_status IN ?", []string{"paid", "completed"}, []string{"pending", "waiting_stock"}).
+		Where("status IN ? AND fulfillment_status IN ?", []string{"paid", "completed"}, []string{"pending", "waiting_stock", "plugin_pending"}).
 		Where("paid_at IS NOT NULL AND paid_at <= ?", time.Now().UTC().Add(-time.Minute)).
 		Preload("Product").
 		Order("paid_at ASC, id ASC").
@@ -287,7 +287,7 @@ func (s *GormStore) ListUndeliveredPaidOrdersForProduct(ctx context.Context, pro
 	orders := make([]models.Order, 0, limit)
 	err := s.db.WithContext(ctx).Model(&models.Order{}).
 		Where("product_id = ? AND status IN ? AND fulfillment_status IN ?",
-			productID, []string{"paid", "completed"}, []string{"pending", "waiting_stock"}).
+			productID, []string{"paid", "completed"}, []string{"pending", "waiting_stock", "plugin_pending"}).
 		Preload("Product").
 		Order("paid_at ASC, id ASC").
 		Limit(limit).
@@ -305,7 +305,7 @@ func (s *GormStore) CountUndeliveredPaidOrdersByProduct(ctx context.Context) (ma
 	err := s.db.WithContext(ctx).Model(&models.Order{}).
 		Select("product_id, COUNT(*) AS waiting").
 		Where("status IN ? AND fulfillment_status IN ?",
-			[]string{"paid", "completed"}, []string{"pending", "waiting_stock"}).
+			[]string{"paid", "completed"}, []string{"pending", "waiting_stock", "plugin_pending"}).
 		Group("product_id").
 		Scan(&rows).Error
 	if err != nil {
@@ -485,6 +485,53 @@ func isDelivered(status string) bool {
 // Fulfill atomically performs automatic card delivery. Manual products are
 // queued for manual handling, while insufficient card inventory is marked as
 // waiting_stock so a later stock import can retry fulfillment safely.
+// MarkOrderPluginDelivering puts a paid order into the plugin-owned delivery
+// state. It is written before the plugin runs, so a crash after a plugin has
+// already shipped the goods is retried through the same plugin instead of
+// falling into the card queue and handing the buyer a second, different item.
+func (s *GormStore) MarkOrderPluginDelivering(ctx context.Context, orderNo string) error {
+	note := "本单由插件交付，正在处理中，完成前会自动重试。"
+	return s.db.WithContext(ctx).Model(&models.Order{}).
+		Where("order_no = ?", orderNo).
+		Updates(map[string]any{
+			"fulfillment_status": "plugin_pending",
+			"delivery_note":      note,
+			"updated_at":         time.Now().UTC(),
+		}).Error
+}
+
+// MarkOrderPluginDelivered writes a plugin's finished delivery onto the order
+// and its delivery record, and marks the order complete. It is idempotent: a
+// retry that arrives after the first write simply updates the same rows.
+func (s *GormStore) MarkOrderPluginDelivered(ctx context.Context, orderNo, content, note string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order models.Order
+		if err := tx.Where("order_no = ?", orderNo).First(&order).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrOrderNotFound
+			}
+			return err
+		}
+		now := time.Now().UTC()
+		contentValue := content
+		noteValue := strings.TrimSpace(note)
+		if noteValue == "" {
+			noteValue = "插件交付完成"
+		}
+		if err := recordDelivery(tx, order.ID, "plugin", "delivered", &noteValue, &contentValue, &now); err != nil {
+			return err
+		}
+		return tx.Model(&models.Order{}).Where("id = ?", order.ID).
+			Updates(map[string]any{
+				"fulfillment_status": "delivered",
+				"delivery_content":   contentValue,
+				"delivery_note":      noteValue,
+				"delivered_at":       now,
+				"updated_at":         now,
+			}).Error
+	})
+}
+
 func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 	if order == nil || order.ID == 0 {
 		return ErrOrderNotFound
@@ -512,34 +559,7 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 		// sweep calls Fulfill every few minutes, so inserting per attempt would
 		// bury the order's history in identical rows; update in place instead.
 		record := func(deliveryType, status string, note *string, content *string, completedAt *time.Time) error {
-			updates := map[string]any{"status": status, "updated_at": time.Now().UTC()}
-			if note != nil {
-				updates["note"] = *note
-			}
-			if content != nil {
-				updates["content"] = *content
-			}
-			if completedAt != nil {
-				updates["completed_at"] = *completedAt
-			}
-			result := tx.Model(&models.DeliveryRecord{}).
-				Where("order_id = ? AND delivery_type = ?", current.ID, deliveryType).
-				Updates(updates)
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected > 0 {
-				return nil
-			}
-			return tx.Create(&models.DeliveryRecord{
-				OrderID:      current.ID,
-				Sequence:     1,
-				DeliveryType: deliveryType,
-				Status:       status,
-				Content:      content,
-				Note:         note,
-				CompletedAt:  completedAt,
-			}).Error
+			return recordDelivery(tx, current.ID, deliveryType, status, note, content, completedAt)
 		}
 
 		// A missing product row (deleted after checkout) is treated as manual so
@@ -645,4 +665,39 @@ func (s *GormStore) Fulfill(ctx context.Context, order *models.Order) error {
 
 		return tx.Preload("Product").Preload("Cards").Preload("Records").First(order, current.ID).Error
 	})
+}
+
+// recordDelivery writes one order's delivery row in place. A retry sweep calls
+// Fulfill every few minutes, so inserting a row per attempt would bury the
+// order's history in identical records: the row for a given delivery type is
+// updated rather than duplicated.
+func recordDelivery(tx *gorm.DB, orderID uint, deliveryType, status string, note, content *string, completedAt *time.Time) error {
+	updates := map[string]any{"status": status, "updated_at": time.Now().UTC()}
+	if note != nil {
+		updates["note"] = *note
+	}
+	if content != nil {
+		updates["content"] = *content
+	}
+	if completedAt != nil {
+		updates["completed_at"] = *completedAt
+	}
+	result := tx.Model(&models.DeliveryRecord{}).
+		Where("order_id = ? AND delivery_type = ?", orderID, deliveryType).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	return tx.Create(&models.DeliveryRecord{
+		OrderID:      orderID,
+		Sequence:     1,
+		DeliveryType: deliveryType,
+		Status:       status,
+		Content:      content,
+		Note:         note,
+		CompletedAt:  completedAt,
+	}).Error
 }

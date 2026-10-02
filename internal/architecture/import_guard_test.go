@@ -136,9 +136,17 @@ func TestNoCrossModuleImports(t *testing.T) {
 						continue
 					}
 					otherName := otherMod.Name()
-					if strings.Contains(importPath, "/modules/"+otherName+"/") &&
-						!strings.Contains(importPath, "/"+otherName+"/contract/") &&
-						!strings.Contains(importPath, "/"+otherName+"/domain/") {
+					// A module may depend on another module's contract (and
+					// domain) packages, and those are imported as the package
+					// itself — "…/payment/contract" with no trailing segment.
+					// Matching only "/contract/" therefore missed every legal
+					// cross-module import and rejected the contract packages the
+					// same file says are allowed.
+					allowed := strings.Contains(importPath, "/"+otherName+"/contract/") ||
+						strings.HasSuffix(importPath, "/"+otherName+"/contract") ||
+						strings.Contains(importPath, "/"+otherName+"/domain/") ||
+						strings.HasSuffix(importPath, "/"+otherName+"/domain")
+					if strings.Contains(importPath, "/modules/"+otherName+"/") && !allowed {
 						t.Errorf("%s: module %s should not import non-contract package from %s: %s",
 							path, modName, otherName, importPath)
 					}

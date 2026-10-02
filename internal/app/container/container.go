@@ -20,6 +20,7 @@ import (
 	notificationapp "github.com/kaoqy/Nodeloc-Store/internal/modules/notification/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment"
 	paymentcontract "github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/plugin"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/system"
 	"github.com/kaoqy/Nodeloc-Store/internal/platform/database/gormdb"
 )
@@ -33,6 +34,10 @@ type Container struct {
 	Catalog      *catalog.Module
 	Notification *notification.Module
 	Audit        *audit.Module
+	// Plugin is the extension runtime. It carries the providers this release
+	// ships and the shop's enrollments of them; the money side calls its Fulfill
+	// hook for a product a plugin is bound to.
+	Plugin *plugin.Module
 	// Stock warns the accounts that refill shelves when a published product runs
 	// short. The maintenance loop sweeps it and the back office can ask for one
 	// pass on demand.
@@ -130,6 +135,10 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		return nil, err
 	}
 	auditMod := audit.Wire(db)
+	pluginMod := plugin.Wire(db)
+	// The money side delivers a plugin-bound order through the plugin runtime;
+	// every other product keeps the shop's own card/manual queue.
+	paymentMod.Service.SetPluginDeliverer(plugin.NewDeliveryBridge(pluginMod.Service))
 
 	// Restock warnings are the one thing that closes the loop for the shop
 	// itself: the catalogue already knows which shelves are short, the inbox
@@ -185,6 +194,7 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		Catalog:      catalogMod,
 		Notification: notificationMod,
 		Audit:        auditMod,
+		Plugin:       pluginMod,
 		Stock:        stockWatch,
 	}, nil
 }

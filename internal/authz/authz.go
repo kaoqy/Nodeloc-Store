@@ -83,12 +83,13 @@ func SeedDefaults() error {
 			{"users", "view"}, {"users", "manage"}, {"categories", "view"}, {"categories", "manage"},
 			{"coupons", "view"}, {"coupons", "manage"}, {"settings", "view"}, {"settings", "manage"},
 			{"notifications", "view"}, {"notifications", "manage"}, {"roles", "view"}, {"logs", "view"},
+			{"plugins", "view"}, {"plugins", "manage"},
 		},
 		"operator": {
 			{"stats", "view"}, {"products", "view"}, {"products", "manage"},
 			{"cards", "view"}, {"cards", "manage"}, {"orders", "view"}, {"orders", "manage"},
 			{"categories", "view"}, {"coupons", "view"}, {"coupons", "manage"},
-			{"notifications", "view"},
+			{"notifications", "view"}, {"plugins", "view"}, {"plugins", "manage"},
 		},
 		"support": {
 			{"stats", "view"}, {"orders", "view"}, {"orders", "manage"},
@@ -123,6 +124,23 @@ func SeedDefaults() error {
 	}
 	if stored < 3 {
 		if migrateLegacyGrants(seed) {
+			changed = true
+		}
+	}
+	if stored < 4 {
+		// 插件管理 arrived as its own resource. An existing 管理员/运营 role was
+		// seeded before it existed, so the grant has to be added explicitly;
+		// otherwise the screen would be there but every request would 403.
+		if addMissing("admin", "plugins", "view") {
+			changed = true
+		}
+		if addMissing("admin", "plugins", "manage") {
+			changed = true
+		}
+		if addMissing("operator", "plugins", "view") {
+			changed = true
+		}
+		if addMissing("operator", "plugins", "manage") {
 			changed = true
 		}
 	}
@@ -277,6 +295,7 @@ func PermissionCatalog() []PermissionGroup {
 		{Resource: "settings", Label: "设置", Actions: []string{"view", "manage"}},
 		{Resource: "roles", Label: "角色权限", Actions: []string{"view", "manage"}},
 		{Resource: "logs", Label: "审计日志", Actions: []string{"view"}},
+		{Resource: "plugins", Label: "插件", Actions: []string{"view", "manage"}},
 	}
 }
 

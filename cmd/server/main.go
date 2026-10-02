@@ -283,6 +283,7 @@ func buildFullRouter(ctn *container.Container, sysSvc *system.Service, dataDir s
 	ctn.Payment.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
 	ctn.Catalog.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
 	ctn.Notification.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
+	ctn.Plugin.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
 	ctn.Audit.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
 	sysSvc.Handler().RegisterRoutes(router, &cfg.JWT, accounts)
 	registerUploads(router, filepath.Dir(dataDir), &cfg.JWT, accounts, ctn.Identity.Service)

@@ -382,6 +382,78 @@ type Coupon struct {
 	PerUserLimit int `gorm:"default:0;not null" json:"per_user_limit"`
 }
 
+// ── Plugins ──────────────────────────────────────────────────────────
+
+// Plugin is one extension the shop owner installs. The shop ships the runtime;
+// what makes a plugin a plugin is this enrollment: which provider it is, whether
+// it is switched on, and the non-secret settings it runs with.
+//
+// Settings holds provider configuration such as a base URL or a default template
+// and is stored as JSON. It is never the place for keys: ConfigSecrets holds the
+// credential half, is tagged json:"-", and never leaves the server through any
+// read route.
+type Plugin struct {
+	Base
+	// Key is the stable provider key (external-card-v1, for example). One row per
+	// key: enrolling the same provider twice would give two copies of the same
+	// order hook and deliver every purchase twice.
+	Key         string `gorm:"size:64;uniqueIndex;not null" json:"key"`
+	Name        string `gorm:"size:120;not null" json:"name"`
+	Description string `gorm:"type:text" json:"description,omitempty"`
+	Version     string `gorm:"size:32" json:"version"`
+	Author      string `gorm:"size:120" json:"author,omitempty"`
+	// IsEnabled is the owner's switch. Turning it off stops new orders from being
+	// fulfilled through the plugin; it never rewrites orders already placed.
+	IsEnabled bool   `gorm:"default:false;not null;index" json:"is_enabled"`
+	Settings  string `gorm:"type:text" json:"settings,omitempty"`
+	// ConfigSecrets is the credential half of the configuration (JSON). It is
+	// never marshalled to a client.
+	ConfigSecrets string `gorm:"type:text" json:"-"`
+	// ConfigSchema is the JSON description of the settings form the back office
+	// renders, so 插件管理 stays one generic screen as providers are added.
+	ConfigSchema string `gorm:"type:text" json:"config_schema,omitempty"`
+	// Capabilities is the JSON list of what this plugin can do (fulfill, form,
+	// notify). The storefront and the back office read it to decide what to show.
+	Capabilities string     `gorm:"type:text" json:"capabilities,omitempty"`
+	InstalledAt  *time.Time `json:"installed_at,omitempty"`
+}
+
+// PluginBinding attaches a plugin to one product and carries the value that
+// decides which concrete product a purchase resolves to: a plan, a region, a
+// template — whatever the provider needs.
+//
+// Value is normalized to lowercase on write. Matching is deliberately exact
+// rather than clever: a purchase with no mapping is a refusal the buyer can read,
+// never a silent substitution of the wrong product.
+type PluginBinding struct {
+	Base
+	PluginID  uint `gorm:"not null;uniqueIndex:uniq_plugin_binding;index" json:"plugin_id"`
+	ProductID uint `gorm:"not null;uniqueIndex:uniq_plugin_binding;index" json:"product_id"`
+	// Value is what the buyer answered (typically a form field) that this binding
+	// resolves. Empty matches a product whose plugin needs no such choice.
+	Value string `gorm:"size:120;not null;default:'';uniqueIndex:uniq_plugin_binding" json:"value"`
+	// MatchField names the purchase-form field whose answer is compared with
+	// Value. It is what makes the standard uniform: every plugin says 「用哪个
+	// 表单项来匹配」 in the same place, instead of each provider inventing a
+	// different way to pick a delivery item.
+	MatchField string `gorm:"size:64" json:"match_field,omitempty"`
+	// RemoteName labels the resolved product for the back office, so a mapping
+	// reads as 「这个选项发的是哪个商品」 without opening the provider.
+	RemoteName string `gorm:"size:160" json:"remote_name,omitempty"`
+	// RemoteRef is the provider-side identifier (sku, plan id, template id).
+	RemoteRef string `gorm:"size:160" json:"remote_ref,omitempty"`
+	// Extra is provider-specific JSON handed to the fulfillment hook.
+	Extra string `gorm:"type:text" json:"extra,omitempty"`
+	// IsEnabled lets one mapping be parked without deleting it.
+	IsEnabled bool `gorm:"default:true;not null" json:"is_enabled"`
+	SortOrder int  `gorm:"default:0;not null" json:"sort_order"`
+
+	Plugin  Plugin  `gorm:"foreignKey:PluginID;constraint:OnDelete:CASCADE;" json:"-"`
+	Product Product `gorm:"foreignKey:ProductID;constraint:OnDelete:CASCADE;" json:"-"`
+}
+
+func (PluginBinding) TableName() string { return "plugin_bindings" }
+
 // ── Notification ─────────────────────────────────────────────────────
 
 type Notification struct {
@@ -439,6 +511,8 @@ func Migrate(db *gorm.DB) error {
 		&Order{},
 		&DeliveryRecord{},
 		&Coupon{},
+		&Plugin{},
+		&PluginBinding{},
 		&Notification{},
 		&AuditLog{},
 		&AppSetting{},

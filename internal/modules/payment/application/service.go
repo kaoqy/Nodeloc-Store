@@ -56,8 +56,13 @@ type Service struct {
 	orders      contract.OrderRepo
 	gateway     contract.PaymentGateway
 	fulfillment contract.FulfillmentService
-	users       contract.UserLookup
-	coupons     contract.CouponPricing
+	// plugins is optional. When a product is bound to a plugin, that plugin
+	// delivers the order through this hook instead of the shop's own card/manual
+	// fulfillment. A shop with no plugin installed leaves it nil and nothing
+	// changes.
+	plugins contract.PluginDeliverer
+	users   contract.UserLookup
+	coupons contract.CouponPricing
 	// events is optional: a store with no inbox still has to be able to take money.
 	events    contract.BuyerNotifier
 	paymentID string
@@ -128,6 +133,14 @@ type RefundInput struct {
 	ToUsername string
 }
 
+// SetPluginDeliverer attaches the plugin runtime. It is a setter rather than a
+// constructor argument because the plugin module is wired after payment (it
+// reads the shop's own catalogue to resolve a mapping), and a nil deliverer is a
+// valid configuration: no plugin, the shop's own delivery.
+func (s *Service) SetPluginDeliverer(deliverer contract.PluginDeliverer) {
+	s.plugins = deliverer
+}
+
 func NewService(orders contract.OrderRepo, gateway contract.PaymentGateway, fulfillment contract.FulfillmentService, users contract.UserLookup, coupons contract.CouponPricing, events contract.BuyerNotifier, paymentID string, features config.FeaturesConfig) *Service {
 	if orders == nil || gateway == nil || fulfillment == nil || users == nil {
 		panic("payment: nil dependency")
@@ -180,6 +193,18 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 	formValuesJSON, err := models.ValidateProductForm(formFields, input.FormValues)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	// A product bound to a plugin has to resolve to a delivery item before the
+	// order exists: the same failure at delivery time would be a paid order the
+	// shop can only untangle by hand.
+	if s.plugins != nil {
+		var answers map[string]string
+		if formValuesJSON != "" {
+			_ = json.Unmarshal([]byte(formValuesJSON), &answers)
+		}
+		if err := s.plugins.ValidateSelection(ctx, product.ID, answers); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+		}
 	}
 	if len(contact) > 255 {
 		return nil, fmt.Errorf("%w: contact information is too long", ErrInvalidInput)
@@ -636,7 +661,7 @@ func (s *Service) settle(ctx context.Context, orderNo string, paymentOrder *doma
 	if err != nil {
 		return nil, err
 	}
-	if err := s.fulfillment.Fulfill(ctx, order); err != nil {
+	if _, err := s.deliverOrder(ctx, order); err != nil {
 		// NodeLoc has confirmed the money by now. Returning this error told the
 		// buyer the payment could not be checked — the one message that makes
 		// people pay twice — so the order stays paid, the note explains the wait,
@@ -891,12 +916,69 @@ func pointsOfValue(text string) (int, bool) {
 	return int(math.Round(decimal)), true
 }
 
+// deliverOrder runs one order's delivery. A product bound to a plugin is handed
+// to that plugin; every other product keeps the shop's own card/manual queue.
+//
+// pluginFailure is a partial-delivery marker: the plugin delivered the goods
+// but writing them onto the order did not go through, so the next sweep has to
+// try the plugin again rather than fall back to the shop's queue and hand the
+// same buyer a second, different item. An error means the plugin could not
+// deliver and the caller should retry later.
+func (s *Service) deliverOrder(ctx context.Context, order *models.Order) (pluginFailure bool, err error) {
+	if s.plugins == nil || order == nil || order.ProductID == 0 {
+		return false, s.fulfillment.Fulfill(ctx, order)
+	}
+	owns, err := s.plugins.Owns(ctx, order)
+	if err != nil {
+		return false, err
+	}
+	if !owns {
+		// Nothing is bound, or the plugin was uninstalled between the two calls:
+		// the shop's own delivery is still the right answer.
+		return false, s.fulfillment.Fulfill(ctx, order)
+	}
+	if order.FulfillmentStatus != "plugin_pending" {
+		// Mark the order plugin-owned before the plugin runs. A crash between
+		// the plugin shipping and the order being written leaves the order in
+		// this state, so the retry sweep asks the same plugin again instead of
+		// falling into the card queue and handing the buyer a second item.
+		if err := s.orders.MarkOrderPluginDelivering(ctx, order.OrderNo); err != nil {
+			return false, err
+		}
+		order.FulfillmentStatus = "plugin_pending"
+	}
+	result, err := s.plugins.Fulfill(ctx, order)
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		// The binding disappeared between PrepareOrder and Fulfill; the shop's
+		// own queue is still the correct fallback for a product a plugin no
+		// longer claims.
+		return false, s.fulfillment.Fulfill(ctx, order)
+	}
+	if result.Content == "" {
+		result.Content = "插件已完成本次交付，请查看订单详情。"
+	}
+	if err := s.orders.MarkOrderPluginDelivered(ctx, order.OrderNo, result.Content, result.Note); err != nil {
+		log.Printf("payment delivery %s: plugin delivered but the order could not be updated: %v", order.OrderNo, err)
+		return true, nil
+	}
+	if fresh, readErr := s.orders.GetOrderByNo(ctx, order.OrderNo); readErr == nil && fresh != nil {
+		*order = *fresh
+	} else {
+		order.FulfillmentStatus = "delivered"
+		order.DeliveryContent = &result.Content
+	}
+	return false, nil
+}
+
 func (s *Service) FulfillOrder(ctx context.Context, orderNo string) (*models.Order, error) {
 	order, err := s.orders.GetOrderByNo(ctx, strings.TrimSpace(orderNo))
 	if err != nil {
 		return nil, err
 	}
-	if err := s.fulfillment.Fulfill(ctx, order); err != nil {
+	if _, err := s.deliverOrder(ctx, order); err != nil {
 		return nil, err
 	}
 	return s.orders.GetOrderByNo(ctx, order.OrderNo)
@@ -927,7 +1009,7 @@ func (s *Service) RetryPendingDeliveries(ctx context.Context) (int, error) {
 // retryDelivery attempts one order's delivery again and reports where it ended
 // up: an empty status means the attempt failed outright.
 func (s *Service) retryDelivery(ctx context.Context, order *models.Order) string {
-	if err := s.fulfillment.Fulfill(ctx, order); err != nil {
+	if _, err := s.deliverOrder(ctx, order); err != nil {
 		log.Printf("delivery retry %s: still undelivered: %v", order.OrderNo, err)
 		return ""
 	}
