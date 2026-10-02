@@ -6,6 +6,42 @@
 
 ![license](https://img.shields.io/github/license/kaoqy/Nodeloc-Store)
 
+## 🧩 插件标准（v1.0.0）
+
+插件运行在这台服务器里，不下载、不执行第三方代码：一个插件就是「本版本内置的提供者」+「本店的启用与配置」。后续接入新插件只需实现一个接口并在 `internal/modules/plugin/wire.go` 注册，其余代码不用动。
+
+**一套标准包含这几件事**
+
+| 概念 | 位置 | 作用 |
+| --- | --- | --- |
+| `Plugin` | `internal/models/models.go` | 按 `key` 登记一个提供者，带开关、非敏感 `settings`、**只写不回读**的 `secrets`、配置表单 `config_schema` 与 `capabilities` |
+| `PluginBinding` | 同上 | 把「商品 + 购买表单某个字段的取值」映射到提供方侧的交付项目 `remote_ref` |
+| `contract.Provider` | `internal/modules/plugin/contract` | 提供者要实现的方法：`Key / Manifest / Validate / Deliver` |
+| `capabilities` | `form` / `fulfill` / `notify` | 声明这个插件能贡献什么，后台与前台据此决定显示什么 |
+
+**买家侧的一次购买**
+
+1. 商品详情页渲染商品自己的购买表单；插件告诉前台这个商品要不要选择交付项目（`GET /api/v1/products/:id/plugin`）。
+2. 点「立即购买」时服务端先做 `ValidateSelection`：选不到交付项就**当场拒绝**，不会让买家付了钱才卡住。
+3. 付款确认后走 `Owns → Fulfill`：先把订单标成 `plugin_pending`，再交给插件。交付成功写回订单与交付记录；崩在中间时后台重试**仍然走插件**，不会退回卡密队列重复发一份。
+4. 买家在订单详情页看到交付内容；`plugin_pending` 会显示「插件交付中」，交付完成后自动刷新。
+
+**匹配规则怎么定**
+
+- 匹配字段（`match_field`）指向购买表单项的 `key`；留空表示这个商品固定交付下面那一项。
+- 匹配值统一 **去首尾空格 + 转小写** 后精确比对，所以 `Beijing`、` beijing ` 都能命中同一条规则。
+- 没有命中时给的是「可选：…」这样的可执行提示，而不是随便发一个看起来差不多的东西。
+
+**内置的参考实现**
+
+「人工交付（按选项匹配）」(`manual-delivery-v1`，见 `internal/modules/plugin/infrastructure/manual_delivery.go`)：把买家选的选项匹配到店家写好的交付项目，付款后进入人工发货队列，并把这单匹配到哪一项写进交付内容。它把整套标准跑通，也是接真实 API 前的模板。
+
+**密钥处理**
+
+配置表单里的密码字段只写不回读：留空表示保持原样，输入新值才覆盖，发 `__clear__` 表示删除。任何读取接口都不会把凭据带出来，后台只会告诉你「这个字段已保存」。
+
+---
+
 ## ✨ 功能特性
 
 > SMTP 说明：当前 Go/Vue 主应用提供管理员受保护的 SMTP 测试发信接口，配置从环境变量读取；订单、验证码、找回密码等邮件事件尚未接通。用户邮箱用于账号资料/NodeLoc profile，站内通知仍通过应用内收件箱完成。不要把客服邮箱或站内通知描述成 SMTP。
@@ -15,6 +51,7 @@
 - 💎 **精美 UI** — Tailwind + 玻璃拟态 + 渐变设计，深色主题，响应式
 - 📦 **商品管理** — 卡密商品与人工交付商品、图片、定价、交付说明、联系方式要求、库存可见性和上下架；「推荐」标记进首页店长推荐位（列表页一键切换，商品表单同一字段），销量计数，列表支持搜索、排序（销量/价格/最新）与分页
 - 🎫 **卡密系统** — 批量导入（每行一个，允许重复：同一个激活码卖给所有人都照常入库）、内置生成器、按商品与状态筛选、关键字搜索、批量启用/停用、批量删除、CSV 导出，库存自动同步
+- 🧩 **插件** — 统一的交付标准：安装 / 配置 / 启用停用 / 移除，按「商品的某个购买表单项」把买家选的选项映射到具体交付项目；选不到就在付款前当场拒绝，付款后交付失败重试仍走插件，不会重复发一份。密钥只写不回读。—— 详见上面「插件标准」
 - 💰 **Nodeloc Payments** — 所有订单统一走 Nodeloc Payments，支持多种回调参数、HMAC-SHA256 验签和幂等履约
 - 💸 **店家直接转账 NL 给买家** — 后台「用户」列表每一行都有「转账」，不用离开列表就能把 NL 从商店自己的 NodeLoc 应用打到那位买家的账户（用户详情页有同一个入口和 TA 的历史流水）。金额限 1–1000 的整数，本地先拦住，不消耗 NodeLoc 的额度也不留流水；收款人必须已经用 NodeLoc 登录绑定过，没绑定的会直接说「这个账号还没有绑定 NodeLoc，请让对方先用 NodeLoc 登录一次」。成功与失败都进流水（`status` 为 `succeeded` / `failed`），转成功才给买家发站内通知，带上金额、流水号与店家留言。NodeLoc 的八种拒绝（余额不足 / 转账功能未开启 / 收款方对不上 / 不能给自己转 / 低于或超过限额 / 签名无效 / 单号已用过）各自翻成中文，并把对方报出来的数字留在文案里（需要多少、现有多少、限额多少），后面附 NodeLoc 原文。状态含糊（`pending`）或网关没有回音的一律按未完成处理，流水留着待查并写明「不要立刻重转」，不与真的拒绝混为一谈。列表右上「转账流水」看全店，用户详情页看单个人；每一次转账都写审计日志，操作者取自会话而不是请求体
 - 🩺 **「无法支付」不再是一句死胡同** — 下单被服务商拒绝时，这次失败会记在该订单的支付流水上（一旦成功即清除），并且分清是网关暂时不通（提示稍后再点一次通常就好）还是店里参数没配好（明说重复点击不会有不同结果，请把订单号发给店家）。已经创建但没付成的订单不会变成孤儿：失败面板直接写出这一单的编号，「再试一次支付」用原单重发而不重复下第二单，另有「或去订单 XXXX 继续支付」的入口。后台设置新增「支付 API 地址」：留空时下单/查单/转账跟随 OAuth 域名，登录走镜像域而支付走主域的店必须填对，否则每一单都只会看到「无法支付」。设置接口同时回报 `payment_ready`、`payment_missing`（缺哪几项，用设置页上看得见的字段名点名）与 `payment_warnings`（填了但不可能对的凭据：Token 与 Secret Key 互换、把 OAuth 的 Client ID 填进 Payment ID、密钥还是 `********` 占位符）。「测试支付网关」不再把服务商的返回糊成一句结论，而是按 NodeLoc 实际回的东西分别说：参数没配齐（点名缺哪一项）/ 网关连不上 / 这个域上没有这个 Payment ID（`payment_id_unknown`，点名去支付应用页复制 `pay_` 那串）/ 查单只认浏览器会话（`provider_guarded`，判为**可达**并说明改用下单回执与回调核实）/ 时间戳被拒（`provider_clock`，直说去同步 NTP，密钥没问题）/ 签名被拒（`provider_rejected`，附商店依次试过的签名档）/ 签名已被接受。结论后面还会带上「本次实测：<这一路由真正生效的签名方式>」，店家看得见商店究竟在用哪把密钥签名。
@@ -127,6 +164,10 @@ sudo mysql -e "
 > 买家那边到底卡在哪一步，后台 **设置 → 最近 NodeLoc 登录记录**（`GET /api/v1/admin/oauth-attempts`）按时间倒序摊开：发起授权 / 回调两步各自的成败、中文原因（`not_configured` / `rejected` / `unreachable` / `denied` / `expired` / `state` / `bind`）、当时报出去的回调地址，以及服务商原文。**授权码、`state`、Client Secret 和换回来的会话 token 一律不写进这张表**（入库前按正则洗一遍，长正文裁到 500 字），所以店家可以放心截图发给任何人排查。这张表只留最近 500 条——它记下的是「谁来过」，不是店家的永久访客名册。
 >
 > 登录失败不再是一句「服务器开小差了」：`oauth_not_configured`（503，本店参数没配齐）/`oauth_rejected`（502，NodeLoc 拒绝，如授权码已用过、Client ID/Secret 或回调白名单不匹配）/`oauth_unreachable`（502，连不上 NodeLoc）/`oauth_transaction_used`（授权事务已过期或已处理）分别给文案。服务端使用 `oauth_transactions` 保存 state hash、intent、回跳地址、过期时间和一次性消费状态；重复 callback 在 Token Exchange 前直接拒绝，不会再次兑换 authorization code。登录 callback 在服务端完成 Token/UserInfo 后才把本站 Session 交给前端，绑定流程也由服务端完成。服务商返回原文只进入脱敏后的 OAuth 诊断记录与服务端日志：会保留 `error`/`error_description`，但不会记录 code、state、secret 或 token。userinfo 认 `id`/`uid`/`user_id`/`sub`，用户名认 `username`/`preferred_username`/`nickname`/`display_name`，头像认 `avatar_url`/`picture`，也认 `{"data": …}` 外层包装和 HTTP 200 下的 `{"success": false,…}` 业务拒绝。
+
+> **已按官方文档 `docs.nodeloc.com/api-reference/introduction` 对齐并修掉一个会让登录必败的 bug**：文档里 userinfo 的账号标识是**整数**（`{"id": 123, "username": "user1", "name": "user1", "avatar_url": …, "trust_level": 2}`），而商店原来把它按**字符串**解码——于是文档形态的论坛上，买家在 NodeLoc 那侧明明授权成功，换到令牌后却一定停在「资料里没有账号标识」。现在整数与字符串两种写法都能读（OIDC 的 `sub`、论坛的 `uid` 也照旧），**但一个账号标识都没有的资料会被明确拒绝**，不会拿空 key 去建号。
+
+> **「绑定 NodeLoc」也重写了**：绑定是一次顶层浏览器跳转，带不上 SPA 的 `Authorization`；原来这条路由挂在鉴权中间件后面，点下去必然 401。现在分支是先换一个 10 分钟、`Type=bind` 的一次性令牌（`GET /api/v1/auth/oauth/bind-token`），把它放进跳转参数与 Cookie，回调时校验这个令牌与授权事务里的账号一致才写入绑定。会话令牌当绑定令牌用会被拒（`Parse` 只认 `access`），绑定成功后服务端直接 302 回个人中心并带 `oauth_bind=ok`，失败则带上可直接展示的中文原因。
 
 商店侧的 Scope 在后台设置里填（默认 `openid profile`）：留空或漏写 `openid` 时商店会自动补上，因为 NodeLoc 要求授权请求必须带它；只有申请到 `email` 审核后才把它加进去，否则拿不到邮箱。
 
