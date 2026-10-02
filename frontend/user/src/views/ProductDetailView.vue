@@ -22,6 +22,7 @@ const product = ref<Product | null>(null)
 const quantity = ref(1)
 const contact = ref('')
 const note = ref('')
+const formValues = ref<Record<string, string>>({})
 const loading = ref(true)
 const submitting = ref(false)
 const submittingPhase = ref<'order' | 'payment' | ''>('')
@@ -244,6 +245,7 @@ async function purchase() {
       contact: contact.value.trim() || undefined,
       note: note.value.trim() || undefined,
       coupon_code: couponForOrder,
+      form_values: Object.fromEntries(Object.entries(formValues.value).map(([key, value]) => [key, value.trim()])),
     })
   } catch (e) {
     error.value = errorMessage(e, '下单失败，请稍后重试')
@@ -284,6 +286,9 @@ async function load(slug: string) {
   product.value = null
   related.value = []
   quantity.value = 1
+  contact.value = ''
+  note.value = ''
+  formValues.value = {}
   couponCode.value = typeof route.query.coupon === 'string' ? route.query.coupon.slice(0, 64) : ''
   quote.value = null
   couponError.value = ''
@@ -435,6 +440,17 @@ watch(
             <span v-if="soldOut" class="text-[var(--warning)]">暂时缺货，补货后可购买</span>
             <span v-else-if="cardStock <= 3" class="text-[var(--warning)]">库存紧张，仅剩 <span class="nums">{{ cardStock }}</span> 件</span>
             <span v-else>现货 <span class="nums">{{ cardStock }}</span> 件</span>
+          </div>
+
+          <div v-if="product.form_schema?.length" class="space-y-4">
+            <div v-for="field in product.form_schema" :key="field.key">
+              <label class="label" :for="`custom-${field.key}`">{{ field.label }} <span v-if="field.required" class="accent-text">*</span></label>
+              <select v-if="field.type === 'select'" :id="`custom-${field.key}`" v-model="formValues[field.key]" class="input" :required="field.required">
+                <option value="">请选择</option>
+                <option v-for="option in field.options" :key="option" :value="option">{{ option }}</option>
+              </select>
+              <input v-else :id="`custom-${field.key}`" v-model="formValues[field.key]" class="input" :required="field.required" :maxlength="field.max_length || 255" :placeholder="field.placeholder" />
+            </div>
           </div>
 
           <div v-if="product.require_contact">

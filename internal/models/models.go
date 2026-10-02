@@ -1,6 +1,9 @@
 package models
 
 import (
+	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -166,6 +169,83 @@ type Category struct {
 	Products []Product `gorm:"foreignKey:CategoryID;" json:"-"`
 }
 
+type ProductFormField struct {
+	Key         string   `json:"key"`
+	Label       string   `json:"label"`
+	Type        string   `json:"type"`
+	Required    bool     `json:"required"`
+	Placeholder string   `json:"placeholder,omitempty"`
+	Options     []string `json:"options,omitempty"`
+	MaxLength   int      `json:"max_length,omitempty"`
+}
+
+func ValidateProductForm(fields []ProductFormField, values map[string]string) (string, error) {
+	if len(fields) == 0 {
+		if len(values) > 0 {
+			return "", fmt.Errorf("商品未配置购买表单")
+		}
+		return "", nil
+	}
+	if len(fields) > 20 {
+		return "", fmt.Errorf("商品购买表单配置无效")
+	}
+	if values == nil {
+		values = map[string]string{}
+	}
+	allowed := make(map[string]ProductFormField, len(fields))
+	for _, field := range fields {
+		field.Key = strings.TrimSpace(field.Key)
+		field.Label = strings.TrimSpace(field.Label)
+		field.Type = strings.TrimSpace(field.Type)
+		if field.Key == "" || field.Label == "" || (field.Type != "text" && field.Type != "select") || allowed[field.Key].Key != "" {
+			return "", fmt.Errorf("商品购买表单字段配置无效")
+		}
+		if field.MaxLength <= 0 || field.MaxLength > 1000 {
+			field.MaxLength = 255
+		}
+		if field.Type == "select" && len(field.Options) == 0 {
+			return "", fmt.Errorf("选择字段必须配置选项")
+		}
+		allowed[field.Key] = field
+	}
+	for key := range values {
+		if _, ok := allowed[key]; !ok {
+			return "", fmt.Errorf("购买表单包含未定义字段")
+		}
+	}
+	for key, field := range allowed {
+		value := strings.TrimSpace(values[key])
+		if field.Required && value == "" {
+			return "", fmt.Errorf("请填写%s", field.Label)
+		}
+		if len(value) > field.MaxLength {
+			return "", fmt.Errorf("%s内容过长", field.Label)
+		}
+		if field.Type == "select" && value != "" {
+			found := false
+			for _, option := range field.Options {
+				if value == option {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return "", fmt.Errorf("%s选项无效", field.Label)
+			}
+		}
+		if value == "" {
+			delete(values, key)
+		} else {
+			values[key] = value
+		}
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return "", fmt.Errorf("购买表单数据无效")
+	}
+	return string(encoded), nil
+}
+
 type Product struct {
 	Base
 	Slug                 string  `gorm:"size:120;uniqueIndex;not null" json:"slug"`
@@ -197,6 +277,7 @@ type Product struct {
 	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
 	SortOrder   int        `gorm:"default:0;not null" json:"sort_order"`
 	CategoryID  *uint      `json:"category_id,omitempty"`
+	FormSchema  string     `gorm:"type:text" json:"form_schema,omitempty"`
 
 	Category *Category `gorm:"foreignKey:CategoryID;" json:"category,omitempty"`
 	Cards    []Card    `gorm:"foreignKey:ProductID;constraint:OnDelete:CASCADE;" json:"-"`
@@ -242,6 +323,7 @@ type Order struct {
 	FulfillmentStatus string     `gorm:"size:32;default:'pending';not null;index" json:"fulfillment_status"`
 	CustomerContact   *string    `gorm:"size:255" json:"customer_contact,omitempty"`
 	CustomerNote      *string    `gorm:"type:text" json:"customer_note,omitempty"`
+	FormValues        string     `gorm:"type:text" json:"form_values,omitempty"`
 	DeliveryContent   *string    `gorm:"type:text" json:"delivery_content,omitempty"`
 	DeliveryNote      *string    `gorm:"type:text" json:"delivery_note,omitempty"`
 

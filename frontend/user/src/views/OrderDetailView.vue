@@ -458,6 +458,10 @@ async function refreshDelivery() {
             <dt class="text-[var(--text-quiet)]">我的备注</dt>
             <dd class="mt-0.5 break-words whitespace-pre-line text-[var(--text-dim)]">{{ order.customer_note }}</dd>
           </div>
+          <div v-if="order.form_values" class="min-w-0">
+            <dt class="text-[var(--text-quiet)]">购买信息</dt>
+            <dd class="mt-0.5 text-[var(--text-dim)]"><div v-for="(value, key) in JSON.parse(order.form_values)" :key="key" class="break-words">{{ key }}：{{ value }}</div></dd>
+          </div>
         </dl>
       </section>
     </div>

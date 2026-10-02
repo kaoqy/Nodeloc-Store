@@ -55,6 +55,16 @@ export interface LoginResponse {
   tokens: AuthTokens
 }
 
+export interface ProductFormField {
+  key: string
+  label: string
+  type: 'text' | 'select'
+  required: boolean
+  placeholder?: string
+  options?: string[]
+  max_length?: number
+}
+
 export interface Product {
   id: number
   name: string
@@ -75,6 +85,7 @@ export interface Product {
   delivery_instructions?: string | null
   image_path?: string | null
   require_contact?: boolean
+  form_schema?: string | null
   category_id?: number | null
   category?: Category | null
   sort_order?: number
@@ -116,6 +127,7 @@ export interface Order {
   delivery_note?: string | null
   customer_contact?: string | null
   customer_note?: string | null
+  form_values?: string
   paid_at?: string | null
   delivered_at?: string | null
   created_at?: string

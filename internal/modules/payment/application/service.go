@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -78,6 +79,7 @@ type CreateOrderInput struct {
 	Note     string
 	// CouponCode is what the buyer typed in the 优惠码 field, if anything.
 	CouponCode string
+	FormValues map[string]string
 }
 
 type CreatePaymentOutput struct {
@@ -169,6 +171,16 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 
 	contact := strings.TrimSpace(input.Contact)
 	note := strings.TrimSpace(input.Note)
+	var formFields []models.ProductFormField
+	if product.FormSchema != "" {
+		if err := json.Unmarshal([]byte(product.FormSchema), &formFields); err != nil {
+			return nil, fmt.Errorf("%w: 商品购买表单配置无效", ErrInvalidInput)
+		}
+	}
+	formValuesJSON, err := models.ValidateProductForm(formFields, input.FormValues)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
 	if len(contact) > 255 {
 		return nil, fmt.Errorf("%w: contact information is too long", ErrInvalidInput)
 	}
@@ -229,6 +241,7 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 	if note != "" {
 		order.CustomerNote = &note
 	}
+	order.FormValues = formValuesJSON
 	if err := s.orders.CreateOrder(ctx, order); err != nil {
 		return nil, fmt.Errorf("create order: %w", err)
 	}

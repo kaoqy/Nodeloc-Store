@@ -687,7 +687,7 @@ func (h *Handler) oauthFailure(c *gin.Context, step, reason string, err error, d
 		return
 	}
 	if binding {
-		c.Redirect(http.StatusFound, "/profile?oauth_error="+reason)
+		c.Redirect(http.StatusFound, "/profile?oauth_error="+url.QueryEscape(reason))
 		return
 	}
 	c.Redirect(http.StatusFound, "/login?oauth_error="+reason)

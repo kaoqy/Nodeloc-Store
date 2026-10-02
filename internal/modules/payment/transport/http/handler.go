@@ -30,11 +30,12 @@ type createPaymentRequest struct {
 }
 
 type createOrderRequest struct {
-	Slug       string `json:"slug" binding:"required"`
-	Quantity   int    `json:"quantity"`
-	Contact    string `json:"contact"`
-	Note       string `json:"note"`
-	CouponCode string `json:"coupon_code"`
+	Slug       string            `json:"slug" binding:"required"`
+	Quantity   int               `json:"quantity"`
+	Contact    string            `json:"contact"`
+	Note       string            `json:"note"`
+	CouponCode string            `json:"coupon_code"`
+	FormValues map[string]string `json:"form_values"`
 }
 
 func NewHandler(service *application.Service) *Handler {
@@ -115,6 +116,7 @@ func (h *Handler) CreateOrder(c *gin.Context) {
 		Contact:    strings.TrimSpace(request.Contact),
 		Note:       strings.TrimSpace(request.Note),
 		CouponCode: strings.TrimSpace(request.CouponCode),
+		FormValues: request.FormValues,
 	})
 	if err != nil {
 		writeError(c, err)

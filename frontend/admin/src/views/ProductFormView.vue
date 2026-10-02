@@ -5,7 +5,7 @@ import { createProduct, getProduct, updateProduct } from '../api/products'
 import { listCategories } from '../api/categories'
 import ImageField from '../components/ImageField.vue'
 import { errorMessage } from '../utils/format'
-import type { Category, Product } from '../types'
+import type { Category, Product, ProductFormField } from '../types'
 
 const route = useRoute()
 const router = useRouter()
@@ -36,6 +36,7 @@ const form = reactive({
   is_archived: false,
   sort_order: 0,
   category_id: null as number | null,
+  form_schema: [] as ProductFormField[],
 })
 
 const isCard = computed(() => form.product_type === 'card')
@@ -63,6 +64,7 @@ function payload(): Partial<Product> {
     is_archived: form.is_archived,
     sort_order: Number(form.sort_order) || 0,
     category_id: form.category_id,
+    form_schema: JSON.stringify(form.form_schema.filter((field) => field.key.trim() && field.label.trim())),
   }
 }
 
@@ -97,6 +99,7 @@ async function load() {
         is_archived: product.is_archived ?? false,
         sort_order: product.sort_order ?? 0,
         category_id: product.category_id ?? null,
+        form_schema: product.form_schema ? JSON.parse(product.form_schema) : [],
       })
     }
   } catch (err) {
@@ -226,6 +229,28 @@ onMounted(load)
               在商品页显示库存
             </label>
           </div>
+        </div>
+
+        <div class="card">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-semibold">购买表单字段</h3>
+              <p class="hint mt-1">买家下单时填写，内容会保存在订单中。仅支持文本与单选，不执行外部代码。</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" type="button" :disabled="form.form_schema.length >= 20" @click="form.form_schema.push({ key: `field_${form.form_schema.length + 1}`, label: '', type: 'text', required: false, max_length: 255 })">添加字段</button>
+          </div>
+          <div v-if="form.form_schema.length" class="mt-4 space-y-3">
+            <div v-for="(field, index) in form.form_schema" :key="index" class="grid gap-3 rounded-lg border border-[var(--stroke)] p-3 sm:grid-cols-2">
+              <div><label class="label">字段标识</label><input v-model="field.key" class="input mono" maxlength="48" placeholder="account_id" /></div>
+              <div><label class="label">买家看到的名称</label><input v-model="field.label" class="input" maxlength="80" placeholder="游戏账号" /></div>
+              <div><label class="label">字段类型</label><select v-model="field.type" class="input"><option value="text">文本</option><option value="select">单选</option></select></div>
+              <div class="flex items-end justify-between gap-3"><label class="flex items-center gap-2 pb-2 text-sm"><input v-model="field.required" type="checkbox" />必填</label><button class="btn btn-danger btn-sm" type="button" @click="form.form_schema.splice(index, 1)">移除</button></div>
+              <div v-if="field.type === 'text'"><label class="label">提示文字</label><input v-model="field.placeholder" class="input" maxlength="120" placeholder="请输入账号" /></div>
+              <div v-if="field.type === 'text'"><label class="label">最多字符数</label><input v-model.number="field.max_length" class="input" type="number" min="1" max="1000" /></div>
+              <div v-if="field.type === 'select'" class="sm:col-span-2"><label class="label">选项（每行一项）</label><textarea :value="field.options?.join('\n')" class="input min-h-24" @input="field.options = ($event.target as HTMLTextAreaElement).value.split('\n').map((item) => item.trim()).filter(Boolean)" /></div>
+            </div>
+          </div>
+          <p v-else class="hint mt-4">尚未添加字段；商品购买无需额外表单。</p>
         </div>
 
         <div v-if="!isCard" class="card">

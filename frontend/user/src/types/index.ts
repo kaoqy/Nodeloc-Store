@@ -38,6 +38,16 @@ export interface Category {
 
 export type ProductType = 'card' | 'manual'
 
+export interface ProductFormField {
+  key: string
+  label: string
+  type: 'text' | 'select'
+  required: boolean
+  placeholder?: string
+  options?: string[]
+  max_length?: number
+}
+
 export interface Product {
   id: number
   slug: string
@@ -59,6 +69,7 @@ export interface Product {
   category_id?: number | null
   category?: Category | null
   delivery_instructions?: string | null
+  form_schema?: ProductFormField[] | null
   created_at?: string
   updated_at?: string
 }
@@ -89,6 +100,7 @@ export interface Order {
   delivered_at?: string | null
   customer_contact?: string | null
   customer_note?: string | null
+  form_values?: string
   delivery_content?: string | null
   delivery_note?: string | null
   product?: Product | null

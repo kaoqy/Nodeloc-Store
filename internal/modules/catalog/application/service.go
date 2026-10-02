@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
+	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/domain"
 )
@@ -943,6 +945,21 @@ func (s *Service) ensureCardProduct(ctx context.Context, productID uint) error {
 }
 
 func normalizeProduct(product *domain.Product) error {
+	product.FormSchema = strings.TrimSpace(product.FormSchema)
+	if product.FormSchema != "" {
+		var fields []models.ProductFormField
+		if err := json.Unmarshal([]byte(product.FormSchema), &fields); err != nil {
+			return fmt.Errorf("%w: 商品购买表单配置无效", domain.ErrInvalidInput)
+		}
+		if _, err := models.ValidateProductForm(fields, map[string]string{}); err != nil {
+			return fmt.Errorf("%w: %v", domain.ErrInvalidInput, err)
+		}
+		encoded, err := json.Marshal(fields)
+		if err != nil {
+			return fmt.Errorf("%w: 商品购买表单配置无效", domain.ErrInvalidInput)
+		}
+		product.FormSchema = string(encoded)
+	}
 	product.Name = strings.TrimSpace(product.Name)
 	product.Slug = strings.TrimSpace(product.Slug)
 	product.ProductType = strings.ToLower(strings.TrimSpace(product.ProductType))

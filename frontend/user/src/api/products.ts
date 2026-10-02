@@ -1,5 +1,16 @@
 import client, { errorMessage } from './client'
-import type { Category, CouponQuote, Product, StorefrontCoupon, StoreStats } from '../types'
+import type { Category, CouponQuote, Product, ProductFormField, StorefrontCoupon, StoreStats } from '../types'
+
+function normalizeProduct(product: Product & { form_schema?: string | ProductFormField[] | null }): Product {
+  if (typeof product.form_schema === 'string') {
+    try {
+      product.form_schema = JSON.parse(product.form_schema) as ProductFormField[]
+    } catch {
+      product.form_schema = []
+    }
+  }
+  return product as Product
+}
 
 /**
  * The storefront lists from the server, not from a copy of the whole catalogue:
@@ -38,7 +49,7 @@ export async function listProducts(params: ProductListParams = {}): Promise<Prod
 
 export async function getProduct(slug: string): Promise<Product> {
   const { data } = await client.get<{ data: Product }>(`/store/products/${slug}`)
-  return data.data
+  return normalizeProduct(data.data)
 }
 
 export async function listCategories(): Promise<Category[]> {
