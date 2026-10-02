@@ -91,8 +91,8 @@ type OAuthTransaction struct {
 	StateHash  string     `gorm:"size:64;uniqueIndex;not null" json:"-"`
 	Intent     string     `gorm:"size:16;not null" json:"intent"`
 	UserID     *uint      `gorm:"index" json:"user_id,omitempty"`
-	ReturnURL  string     `gorm:"size:2048;not null" json:"return_url"`
-	Status     string     `gorm:"size:16;not null;index" json:"status"`
+	ReturnURL  string     `gorm:"size:2048;not null;default:'/'" json:"return_url"`
+	Status     string     `gorm:"size:16;not null;default:'pending';index" json:"status"`
 	ExpiresAt  time.Time  `gorm:"index;not null" json:"expires_at"`
 	ConsumedAt *time.Time `json:"consumed_at,omitempty"`
 }
