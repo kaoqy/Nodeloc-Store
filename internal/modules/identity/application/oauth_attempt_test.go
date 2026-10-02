@@ -52,7 +52,7 @@ func TestLogOAuthAttemptKeepsCredentialsOutOfTheShopRecords(t *testing.T) {
 		Step:    "callback",
 		Outcome: "failed",
 		Reason:  "rejected",
-		Detail:  "换取令牌失败（invalid_grant：code=abc123secret, access_token=AT, client_secret=CS）",
+		Detail:  "换取令牌失败（error=invalid_grant, error_description=authorization code expired, code=abc123secret, access_token=AT, client_secret=CS）",
 	})
 	if len(spy.recorded) != 1 {
 		t.Fatalf("recorded %d attempts, want one", len(spy.recorded))
@@ -63,7 +63,10 @@ func TestLogOAuthAttemptKeepsCredentialsOutOfTheShopRecords(t *testing.T) {
 			t.Errorf("detail kept %q readable, i.e. unredacted: %q", leaked, detail)
 		}
 	}
-	if !strings.Contains(detail, "code=[已隐藏]") || !strings.Contains(detail, "client_secret=[已隐藏]") {
+	if !strings.Contains(detail, "error=invalid_grant") || !strings.Contains(detail, "error_description=authorization code expired") {
+		t.Errorf("detail lost provider diagnostics: %q", detail)
+	}
+	if !strings.Contains(detail, "code=[已隐藏]") || !strings.Contains(detail, "access_token=[已隐藏]") || !strings.Contains(detail, "client_secret=[已隐藏]") {
 		t.Errorf("detail was not scrubbed: %q", detail)
 	}
 	if !strings.Contains(detail, "invalid_grant") {
