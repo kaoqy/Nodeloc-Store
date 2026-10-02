@@ -301,6 +301,7 @@ onUnmounted(() => {
         :hint="`累计 ${money(stats?.revenue_total ?? 0)} · 上期 ${money(stats?.revenue_prev ?? 0)}`"
         :delta="(stats?.revenue_prev ?? 0) > 0 ? (stats?.revenue_delta ?? null) : null"
         :spark="sparklines.revenue"
+        icon="coupons"
         accent
       />
       <StatCard
@@ -309,12 +310,14 @@ onUnmounted(() => {
         :hint="`下单 ${stats?.orders_period ?? 0} 笔 · 转化率 ${Math.round(stats?.conversion ?? 0)}%`"
         :delta="(stats?.paid_prev ?? 0) > 0 ? (stats?.paid_delta ?? null) : null"
         :spark="sparklines.orders"
+        icon="orders"
       />
       <StatCard
         label="客单价"
         :value="money(stats?.aov ?? 0)"
         :hint="`已交付 ${stats?.delivered_period ?? 0} 笔 · 退款 ${stats?.refunded_period ?? 0} 笔`"
         :spark="sparklines.aov"
+        icon="cards"
       />
       <StatCard
         label="期间新客"
@@ -322,6 +325,7 @@ onUnmounted(() => {
         :hint="`购买用户 ${stats?.active_buyers_period ?? 0} 人 · 复购 ${stats?.repeat_buyers_period ?? 0} 人`"
         :delta="(stats?.new_users_prev ?? 0) > 0 ? (stats?.new_users_delta ?? null) : null"
         :spark="sparklines.users"
+        icon="users"
       />
     </div>
 

@@ -35,6 +35,7 @@ const titles: Record<string, string> = {
   '/coupons': '优惠券',
   '/users': '用户管理',
   '/notifications': '通知中心',
+  '/plugins': '插件管理',
   '/roles': '角色权限',
   '/logs': '审计日志',
   '/settings': '系统设置',
@@ -84,7 +85,11 @@ const breadcrumb = computed(() => {
     <div class="lg:pl-64">
       <header class="site-header">
         <div class="admin-topbar flex h-[68px] items-center gap-3 px-5 sm:px-7">
-          <button class="btn btn-quiet !px-3 lg:hidden" aria-label="打开导航菜单" @click="open = true">☰</button>
+          <button class="icon-btn lg:hidden" aria-label="打开导航菜单" @click="open = true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" class="size-[18px]" aria-hidden="true">
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
 
           <div class="min-w-0">
             <p class="eyebrow">管理后台</p>
@@ -105,16 +110,39 @@ const breadcrumb = computed(() => {
             </template>
           </nav>
 
-          <div class="ml-auto flex items-center gap-2">
+          <div class="ml-auto flex items-center gap-1.5">
             <button
-              class="btn btn-ghost !px-2.5"
+              class="icon-btn"
+              type="button"
               :title="theme.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
               :aria-label="theme.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
               @click="theme.toggle"
             >
-              <span aria-hidden="true">{{ theme.theme === 'dark' ? '☀' : '☾' }}</span>
+              <svg v-if="theme.theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" class="size-[18px]" aria-hidden="true">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" class="size-[18px]" aria-hidden="true">
+                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+              </svg>
             </button>
-            <RouterLink v-if="auth.allows('notifications', 'view')" to="/notifications" class="btn btn-quiet btn-sm">通知</RouterLink>
+
+            <span class="topbar-sep hidden sm:block" />
+
+            <RouterLink v-if="auth.allows('notifications', 'view')" to="/notifications" class="icon-btn" aria-label="通知中心">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-[18px]" aria-hidden="true">
+                <path d="M18 8A6 6 0 1 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+              </svg>
+              <span v-if="inbox.unread" class="count nums">{{ inbox.unread > 99 ? '99+' : inbox.unread }}</span>
+            </RouterLink>
+
+            <a href="/" class="btn btn-quiet btn-sm ml-1 hidden sm:inline-flex" target="_blank" rel="noopener">
+              看店铺
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true">
+                <path d="M7 17 17 7M9 7h8v8" />
+              </svg>
+            </a>
           </div>
         </div>
       </header>
