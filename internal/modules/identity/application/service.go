@@ -253,6 +253,45 @@ func (s *Service) ConsumeOAuth(ctx context.Context, state string) (*domain.OAuth
 	return s.repo.ConsumeOAuthTransaction(ctx, stateHash(strings.TrimSpace(state)), s.now())
 }
 
+// IssueBindToken mints the short-lived token the 绑定 redirect travels on. The
+// account is re-read rather than trusted from the caller, so a token can never be
+// issued for an account that no longer exists or has been switched off.
+func (s *Service) IssueBindToken(ctx context.Context, userID uint) (string, error) {
+	if userID == 0 {
+		return "", domain.ErrInvalidCredentials
+	}
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	if !user.IsActive {
+		return "", domain.ErrInactiveUser
+	}
+	return s.tokens.IssueBind(ctx, user)
+}
+
+// AuthenticateBind is what the bind redirect presents instead of a session: the
+// token identifies the local account to attach the NodeLoc identity to. It is a
+// different token type, so a stolen access token is no use here, and the account
+// is re-checked because it may have been disabled since the token was minted.
+func (s *Service) AuthenticateBind(ctx context.Context, token string) (*domain.TokenClaims, error) {
+	claims, err := s.tokens.ParseBind(ctx, token)
+	if err != nil {
+		return nil, domain.ErrInvalidCredentials
+	}
+	user, err := s.repo.FindByID(ctx, claims.UserID)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return nil, domain.ErrInvalidCredentials
+		}
+		return nil, err
+	}
+	if !user.IsActive {
+		return nil, domain.ErrInactiveUser
+	}
+	return claims, nil
+}
+
 func (s *Service) InitiateOAuth(state string) (string, string, error) {
 	if !s.features.OAuthOn() {
 		return "", "", domain.ErrOAuthDisabled

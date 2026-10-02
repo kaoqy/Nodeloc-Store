@@ -26,10 +26,33 @@ export async function refresh(refreshToken: string) {
   return data
 }
 
-export function oauthInitiate(bind = false) {
-  const path = bind ? '/api/v1/auth/oauth/bind-initiate' : '/api/v1/auth/oauth/initiate'
-  const returnURL = bind ? '/profile' : '/oauth/callback'
-  window.location.href = `${path}?redirect=true&return_url=${encodeURIComponent(returnURL)}`
+export function oauthInitiate() {
+  const returnURL = '/oauth/callback'
+  window.location.href = `/api/v1/auth/oauth/initiate?redirect=true&return_url=${encodeURIComponent(returnURL)}`
+}
+
+/**
+ * Prepares a 绑定 NodeLoc round trip.
+ *
+ * NodeLoc sends the buyer back to a callback that carries no Authorization header
+ * (it is a top-level browser navigation), so the account to attach cannot ride on
+ * the SPA session. The server mints a short-lived bind token for the signed-in
+ * account and the navigation carries that instead — the session token itself never
+ * enters a URL, where a proxy log or the Referer header could keep it. The server
+ * checks the token again on the way back and refuses a bind whose token does not
+ * name the same account the transaction started with.
+ */
+export async function oauthBindURL(returnURL = '/profile') {
+  const { data } = await client.get<{ token: string }>('/auth/oauth/bind-token')
+  const token = data?.token ?? ''
+  if (!token) throw new Error('未能取得绑定凭据，请稍后再试')
+  const params = new URLSearchParams({ redirect: 'true', return_url: returnURL, bind_token: token })
+  return `/api/v1/auth/oauth/bind-initiate?${params.toString()}`
+}
+
+/** Starts the 绑定 navigation; the caller catches a failure to mint the token. */
+export async function startOAuthBind(returnURL = '/profile') {
+  window.location.href = await oauthBindURL(returnURL)
 }
 
 export async function oauthCallback(code: string, state: string) {

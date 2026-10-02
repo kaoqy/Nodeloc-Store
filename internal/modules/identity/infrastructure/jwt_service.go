@@ -26,7 +26,10 @@ type JWTService struct {
 	issuer     string
 	accessTTL  time.Duration
 	refreshTTL time.Duration
-	now        func() time.Time
+	// bindTTL bounds a 绑定 round trip. It only has to outlive the walk through
+	// NodeLoc's consent screen, so it is deliberately far shorter than a session.
+	bindTTL time.Duration
+	now     func() time.Time
 }
 
 type jwtClaims struct {
@@ -56,6 +59,7 @@ func NewJWTService(config JWTConfig) (*JWTService, error) {
 		issuer:     config.Issuer,
 		accessTTL:  config.AccessTTL,
 		refreshTTL: config.RefreshTTL,
+		bindTTL:    10 * time.Minute,
 		now:        time.Now,
 	}, nil
 }
@@ -90,6 +94,31 @@ func (s *JWTService) Parse(_ context.Context, tokenString string) (*domain.Token
 		return nil, err
 	}
 	if claims.Type != "access" {
+		return nil, ErrInvalidToken
+	}
+	return claimsToDomain(claims), nil
+}
+
+// IssueBind signs the one-purpose token the 绑定 redirect runs on. Its Type is
+// "bind", so the normal AuthMiddleware (which only accepts "access") will never
+// take it as a session even if the cookie leaks.
+func (s *JWTService) IssueBind(_ context.Context, user *domain.User) (string, error) {
+	if user == nil || user.ID == 0 {
+		return "", domain.ErrInvalidInput
+	}
+	now := s.now().UTC()
+	return s.sign(user, "bind", now, now.Add(s.bindTTL))
+}
+
+// ParseBind validates a bind token. Anything that is not a live "bind" token is
+// refused, so a session or refresh token cannot be used to start a binding for its
+// own account through the public route.
+func (s *JWTService) ParseBind(_ context.Context, token string) (*domain.TokenClaims, error) {
+	claims, err := s.parse(token)
+	if err != nil {
+		return nil, err
+	}
+	if claims.Type != "bind" {
 		return nil, ErrInvalidToken
 	}
 	return claimsToDomain(claims), nil

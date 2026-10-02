@@ -159,6 +159,13 @@ const OAUTH_ERROR: Record<string, string> = {
     'NodeLoc 拒绝了这次登录请求：后台凭据不对、授权码已用过或已过期，或回调地址不在白名单里。',
   unreachable: '本店此刻连不上 NodeLoc，可能是对方短暂不可用或服务器的出网设置。',
   disabled: '本店已暂停 NodeLoc 登录，店家可以在后台「设置 → NodeLoc OAuth 登录」重新打开。',
+  // 绑定 uses its own reasons on top of the login ones, because 「绑定失败」 and
+  // 「登录失败」 are different next steps for the buyer.
+  account_binding: '这个 NodeLoc 账号已经绑定了其他用户，或这次绑定凭据已失效；请回到个人中心重新发起绑定。',
+  identity_bound: '这个 NodeLoc 账号已经绑定了其他用户，一个论坛账号只能对应一个本站账号。',
+  bind_token_missing: '浏览器没有把绑定凭据带回来（多为 HTTPS、域名或隐私设置所致），请回到个人中心重新发起绑定。',
+  bind_account_mismatch: '这次绑定凭据与发起时的账号不一致，多半是中途切换了账号或页面停留过久，请重新发起绑定。',
+  unauthenticated: '绑定需要先登录本站账号，请登录后回到个人中心重试。',
 }
 
 /**

@@ -68,7 +68,13 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	auth.POST("/refresh", h.RefreshToken)
 	auth.GET("/oauth/initiate", h.InitiateOAuth)
 	auth.GET("/oauth/callback", h.OAuthCallback)
-	authed.GET("/oauth/bind-initiate", h.InitiateOAuth)
+	// 绑定 starts with a top-level browser navigation, which cannot carry the
+	// SPA's Authorization header. Its route therefore runs under
+	// BindAuthMiddleware, which accepts only the one-purpose bind token the SPA
+	// fetched from /oauth/bind-token; a bare session token is refused.
+	bind := router.Group("/api/v1/auth", h.BindAuthMiddleware())
+	bind.GET("/oauth/bind-initiate", h.InitiateOAuth)
+	authed.GET("/oauth/bind-token", h.IssueOAuthBindToken)
 	authed.POST("/bind-oauth", h.BindOAuth)
 	authed.DELETE("/unbind-oauth", h.UnbindOAuth)
 	authed.GET("/me", h.Me)
@@ -467,6 +473,66 @@ func (h *Handler) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }
 
+// IssueOAuthBindToken trades a signed-in session for the one-purpose token the
+// 绑定 redirect runs on. The storefront calls it through the normal authenticated
+// client, then appends the answer to the bind navigation: that is what lets a
+// top-level redirect name the account to attach, without putting the session
+// token in a URL where a proxy log or the Referer header would keep it.
+func (h *Handler) IssueOAuthBindToken(c *gin.Context) {
+	claims, ok := claimsFromContext(c)
+	if !ok {
+		writeError(c, domain.ErrInvalidCredentials)
+		return
+	}
+	token, err := h.service.IssueBindToken(c.Request.Context(), claims.UserID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token})
+}
+
+// bindClaims reads the bind credential the 绑定 redirect carries. It is accepted
+// from the query string (the browser navigation) or the Authorization header (a
+// caller that can set one).
+func (h *Handler) bindClaims(c *gin.Context) (*domain.TokenClaims, error) {
+	token := strings.TrimSpace(c.Query("bind_token"))
+	if token == "" {
+		header := strings.TrimSpace(c.GetHeader("Authorization"))
+		if len(header) >= 7 && strings.EqualFold(header[:7], "Bearer ") {
+			token = strings.TrimSpace(header[7:])
+		}
+	}
+	if token == "" {
+		return nil, domain.ErrInvalidCredentials
+	}
+	return h.service.AuthenticateBind(c.Request.Context(), token)
+}
+
+// BindAuthMiddleware is AuthMiddleware's sibling for the 绑定 routes: it accepts
+// only a live bind token, so a stale session token cannot start a binding for its
+// account through the public entry point.
+func (h *Handler) BindAuthMiddleware() gin.HandlerFunc {
+	rejected := func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"error": "绑定凭据已失效，请回到个人中心重新发起绑定",
+			"code":  "invalid_bind_token",
+		})
+	}
+	return func(c *gin.Context) {
+		claims, err := h.bindClaims(c)
+		if err != nil {
+			rejected(c)
+			return
+		}
+		c.Set(claimsKey, claims)
+		c.Set("user_id", claims.UserID)
+		c.Set(middleware.UserRoleKey, claims.Role)
+		c.Set(middleware.IsAdminKey, claims.IsAdmin)
+		c.Next()
+	}
+}
+
 func (h *Handler) InitiateOAuth(c *gin.Context) {
 	binding := c.Query("bind") == "true" || c.FullPath() == "/api/v1/auth/oauth/bind-initiate"
 	intent := "login"
@@ -474,13 +540,20 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 		intent = "bind"
 	}
 	var userID *uint
+	// bindToken is the one-purpose credential the 绑定 redirect presents; it is
+	// handed back to the callback as a cookie, because the callback is a different
+	// request and the state cookie alone cannot prove who started the round trip.
+	bindToken := ""
 	if binding {
-		id, ok := currentUserID(c)
-		if !ok {
-			h.oauthFailure(c, oauthStepInitiate, "unauthenticated", domain.ErrInvalidCredentials, "绑定 NodeLoc 前必须先登录本站账号", true)
+		claims, err := h.bindClaims(c)
+		if err != nil {
+			h.oauthFailure(c, oauthStepInitiate, "unauthenticated", err,
+				"绑定 NodeLoc 前必须先登录本站账号；如果刚才在这里停留太久，请重新发起绑定。", true)
 			return
 		}
+		id := claims.UserID
 		userID = &id
+		bindToken = strings.TrimSpace(c.Query("bind_token"))
 	}
 	returnURL := c.Query("return_url")
 	redirectURL, state, err := h.service.BeginOAuth(c.Request.Context(), "", intent, userID, returnURL)
@@ -507,7 +580,7 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 	// A bind intent tells the callback to hand the code back to the signed-in
 	// SPA instead of logging the NodeLoc identity in.
 	if binding {
-		c.SetCookie(oauthBindCookie(state), "1", int((5 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
+		c.SetCookie(oauthBindCookie(state), bindToken, int((5 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
 	} else {
 		c.SetCookie(oauthBindCookie(state), "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
 	}
@@ -526,9 +599,13 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	// Consume and validate the one-time state before handling either success or
 	// provider error. NodeLoc includes state on denial too.
 	stateCookie := ""
+	bindCookie := ""
 	var cookieErr error
 	if state != "" {
 		stateCookie, cookieErr = c.Cookie(oauthStateCookie(state))
+		// Read the bind credential before clearing, so a bind round trip can be
+		// told apart from a login one even when NodeLoc answers without a code.
+		bindCookie, _ = c.Cookie(oauthBindCookie(state))
 	}
 	h.clearOAuthState(c, state)
 	if state == "" {
@@ -580,12 +657,35 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 			h.oauthFailure(c, oauthStepCallback, "account_binding", domain.ErrInvalidCredentials, "绑定事务缺少本站用户，请重新从个人中心发起绑定。", true)
 			return
 		}
+		if bindCookie == "" {
+			log.Printf("nodeloc oauth: the bind round trip came back without its bind cookie state_fp=%s host=%q", application.StateFingerprint(state), c.Request.Host)
+			h.oauthFailure(c, oauthStepCallback, "bind_token_missing", domain.ErrInvalidCredentials,
+				"浏览器没有带回绑定凭据（多为 HTTPS、域名或浏览器隐私设置所致），请回到个人中心重新发起绑定。", true)
+			return
+		}
+		// The token is what proves this callback belongs to *this* local account:
+		// the state proves the round trip is ours, the bind token proves whose it
+		// is. Both have to agree before the NodeLoc identity is attached.
+		bindClaims, bindErr := h.service.AuthenticateBind(c.Request.Context(), bindCookie)
+		if bindErr != nil || bindClaims.UserID != *transaction.UserID {
+			log.Printf("nodeloc oauth: the bind token did not match the transaction state_fp=%s transaction_user=%d", application.StateFingerprint(state), *transaction.UserID)
+			h.oauthFailure(c, oauthStepCallback, "bind_account_mismatch", domain.ErrInvalidCredentials,
+				"这次绑定凭据与发起时的账号不一致或已经过期，请回到个人中心重新发起绑定。", true)
+			return
+		}
 		_, err := h.service.BindOAuth(c.Request.Context(), *transaction.UserID, c.Query("code"), queryParams(c))
 		if err != nil {
 			h.oauthFailure(c, oauthStepCallback, "account_binding", err, err.Error(), true)
 			return
 		}
-		c.Redirect(http.StatusFound, transaction.ReturnURL)
+		h.service.LogOAuthAttempt(c.Request.Context(), application.OAuthAttemptLog{
+			Step:    oauthStepCallback,
+			Outcome: "success",
+			Binding: true,
+		})
+		// The server already exchanged the code, so the SPA is told the outcome
+		// directly instead of being handed a fragment to redeem a second time.
+		c.Redirect(http.StatusFound, withQuery(transaction.ReturnURL, "oauth_bind", "ok"))
 		return
 	}
 	params := queryParams(c)
@@ -662,6 +762,9 @@ func (h *Handler) clearOAuthState(c *gin.Context, state string) {
 		return
 	}
 	c.SetCookie(oauthStateCookie(state), "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
+	// The bind cookie is cleared with the state cookie: a leftover bind token
+	// would otherwise wait for the next round trip to pick it up.
+	c.SetCookie(oauthBindCookie(state), "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
 }
 
 func oauthCookieNames(c *gin.Context) []string {
@@ -727,6 +830,20 @@ func callbackFromAuthorizeURL(authorizeURL string) string {
 
 func acceptsJSON(c *gin.Context) bool {
 	return strings.Contains(c.GetHeader("Accept"), "application/json")
+}
+
+// withQuery adds one query parameter to a local path, keeping any it already has.
+// The callback's return URL is validated when the transaction is created (it must
+// start with a single "/"), so this never turns the redirect into an open one.
+func withQuery(path, key, value string) string {
+	if path == "" {
+		path = "/"
+	}
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + url.Values{key: {value}}.Encode()
 }
 
 // AuthMiddleware validates JWT and sets identity claims in context.

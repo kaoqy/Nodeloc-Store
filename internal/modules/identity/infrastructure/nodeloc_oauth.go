@@ -200,18 +200,17 @@ func (n *NodeLocOAuth) ExchangeCode(ctx context.Context, code string) (*domain.O
 		return nil, fmt.Errorf("%w：换取令牌失败（%s）", domain.ErrOAuthRejected, reason)
 	}
 
-	var userResponse nodeLocUserResponse
-	if err := n.getBearing(ctx, "/oauth-provider/userinfo", accessToken, &userResponse); err != nil {
-		return nil, fmt.Errorf("retrieve nodeloc userinfo: %w", err)
-	}
-
-	uid := firstNonEmpty(userResponse.ID, userResponse.UID, userResponse.UserID, userResponse.Subject)
-	if uid == "" {
-		return nil, fmt.Errorf("%w：NodeLoc 的用户资料里没有账号标识（id / uid / sub）", domain.ErrOAuthRejected)
+	userResponse, err := n.userinfo(ctx, accessToken)
+	if err != nil {
+		return nil, err
 	}
 	scope := firstNonEmpty(tokenResponse.Scope, n.scopes)
 
-	return n.profile(userResponse, uid, accessToken, tokenResponse.RefreshToken, scope), nil
+	profile, err := n.profile(userResponse, accessToken, tokenResponse.RefreshToken, scope)
+	if err != nil {
+		return nil, err
+	}
+	return profile, nil
 }
 
 // FetchProfile re-reads the account behind a stored access token. It is the
@@ -222,23 +221,45 @@ func (n *NodeLocOAuth) FetchProfile(ctx context.Context, accessToken string) (*d
 	if accessToken == "" {
 		return nil, errors.New("access token is required")
 	}
-	var userResponse nodeLocUserResponse
-	if err := n.getBearing(ctx, "/oauth-provider/userinfo", accessToken, &userResponse); err != nil {
-		return nil, fmt.Errorf("retrieve nodeloc userinfo: %w", err)
+	userResponse, err := n.userinfo(ctx, accessToken)
+	if err != nil {
+		return nil, err
 	}
-	uid := firstNonEmpty(userResponse.ID, userResponse.UID, userResponse.UserID, userResponse.Subject)
-	if uid == "" {
-		return nil, fmt.Errorf("%w：NodeLoc 的用户资料里没有账号标识（id / uid / sub）", domain.ErrOAuthRejected)
+	profile, err := n.profile(userResponse, accessToken, "", n.scopes)
+	if err != nil {
+		return nil, err
 	}
-	return n.profile(userResponse, uid, accessToken, "", n.scopes), nil
+	return profile, nil
 }
 
-// profile reads one NodeLoc userinfo payload into the store's profile. The
-// claim names differ between a forum-shaped answer and an OIDC one (id/uid/sub,
-// username/preferred_username, avatar/avatar_url/picture), so all of them are
-// consulted; the login worked for accounts whose reply happened to use the first
-// spelling and failed for the rest.
-func (n *NodeLocOAuth) profile(userResponse nodeLocUserResponse, uid, accessToken, refreshToken, scope string) *domain.OAuthProfile {
+// userinfo loads the account behind an access token and hands back the raw payload.
+// The account id is deliberately not resolved here: the documented reply, the
+// OIDC-shaped one and the forum-shaped one each spell it differently, and profile()
+// is where that spelling is decided.
+func (n *NodeLocOAuth) userinfo(ctx context.Context, accessToken string) (nodeLocUserResponse, error) {
+	var userResponse nodeLocUserResponse
+	if err := n.getBearing(ctx, "/oauth-provider/userinfo", accessToken, &userResponse); err != nil {
+		return nodeLocUserResponse{}, fmt.Errorf("retrieve nodeloc userinfo: %w", err)
+	}
+	return userResponse, nil
+}
+
+// profile reads one NodeLoc userinfo payload into the store's profile.
+//
+// The account id is the field that decides whether a login can bind at all. The
+// official reply (see https://docs.nodeloc.com/api-reference/introduction) documents it as
+// an integer — `{"id": 123, "username": "user1", …}` — so decoding it as a Go string
+// failed outright on the documented answer and every buyer saw 「资料里没有账号标识」
+// after NodeLoc had already accepted their code. The string spellings OIDC and some
+// forum releases use (`uid`, `sub`, `user_id`) are still read through nodeLocIdentifier.
+func (n *NodeLocOAuth) profile(userResponse nodeLocUserResponse, accessToken, refreshToken, scope string) (*domain.OAuthProfile, error) {
+	uid := nodeLocIdentifier(userResponse)
+	if uid == "" {
+		// No account id means no identity to bind. Creating a user keyed on an
+		// empty string would merge every such buyer into one account, so this is
+		// a refusal that names the claim the forum left out.
+		return nil, fmt.Errorf("%w：NodeLoc 的用户资料里没有账号标识（id / uid / sub）", domain.ErrOAuthRejected)
+	}
 	return &domain.OAuthProfile{
 		Provider:     nodeLocProviderName,
 		ProviderUID:  uid,
@@ -250,11 +271,15 @@ func (n *NodeLocOAuth) profile(userResponse nodeLocUserResponse, uid, accessToke
 		Scope:        scope,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-	}
+	}, nil
 }
 
 type nodeLocUserResponse struct {
-	ID          string          `json:"id"`
+	// ID is the documented account identifier. The official reply carries it as an
+	// integer (`{"id": 123, …}`); OIDC-shaped and older deployments answer a string.
+	// flexibleText absorbs either without turning the documented spelling into a
+	// decode error that throws the whole profile away.
+	ID          flexibleText    `json:"id"`
 	UID         string          `json:"uid"`
 	UserID      string          `json:"user_id"`
 	Subject     string          `json:"sub"`
@@ -597,6 +622,36 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// flexibleText is a JSON scalar that may arrive quoted or bare. NodeLoc documents
+// the account id as an integer while some releases (and OIDC in general) send the
+// same claim as a string; both are read into the same trimmed text.
+type flexibleText string
+
+func (value *flexibleText) UnmarshalJSON(raw []byte) error {
+	text := strings.TrimSpace(string(raw))
+	if text == "" || text == "null" {
+		*value = ""
+		return nil
+	}
+	if text[0] == '"' {
+		var decoded string
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return err
+		}
+		*value = flexibleText(strings.TrimSpace(decoded))
+		return nil
+	}
+	// A bare scalar (123, 123.0, true) is kept verbatim after the JSON wrapper is
+	// trimmed, which is what the store binds on.
+	*value = flexibleText(text)
+	return nil
+}
+
+// nodeLocIdentifier resolves the account id from every spelling NodeLoc has used.
+func nodeLocIdentifier(response nodeLocUserResponse) string {
+	return firstNonEmpty(string(response.ID), response.UID, response.UserID, response.Subject)
 }
 
 func optionalString(value string) *string {

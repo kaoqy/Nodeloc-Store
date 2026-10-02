@@ -28,6 +28,103 @@ func TestProfileSyncKeepsExistingRefreshToken(t *testing.T) {
 	}
 }
 
+// The official NodeLoc OAuth 对接文档 documents the userinfo reply as
+// `{"id": 123, "username": "user1", "name": "user1", "avatar_url": …, "trust_level": 2}`.
+// The account id is an integer there, and decoding it into a Go string failed the
+// whole exchange after NodeLoc had already accepted the authorization code, so every
+// buyer on a documented forum saw 「资料里没有账号标识」. The number has to bind like
+// any other id, and the empty-id answer still has to be a refusal rather than an
+// account keyed on "".
+func TestLoginReadsTheDocumentedIntegerID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/oauth-provider/token":
+			_, _ = w.Write([]byte(`{"access_token":"at_1","token_type":"Bearer","expires_in":7200,"scope":"openid profile email"}`))
+		case "/oauth-provider/userinfo":
+			if r.Header.Get("Authorization") != "Bearer at_1" {
+				http.Error(w, "missing bearer", http.StatusUnauthorized)
+				return
+			}
+			// Verbatim from the docs: integer id, avatar_url, integer trust_level.
+			_, _ = w.Write([]byte(`{"id":123,"username":"user1","name":"user1","avatar_url":"https://cdn/a.png","trust_level":2,"email":"user1@example.com"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	oauth := NewNodeLocOAuth(NodeLocOAuthConfig{
+		BaseURL: server.URL, ClientID: "ci", ClientSecret: "cs", RedirectURI: server.URL + "/callback",
+	}, server.Client())
+	profile, err := oauth.ExchangeCode(context.Background(), "code_1")
+	if err != nil {
+		t.Fatalf("login with the documented integer id: %v", err)
+	}
+	if profile.ProviderUID != "123" {
+		t.Fatalf("ProviderUID = %q, want the documented id bound as text", profile.ProviderUID)
+	}
+	if profile.Username != "user1" || profile.AvatarURL != "https://cdn/a.png" {
+		t.Fatalf("profile = %+v", profile)
+	}
+	if profile.TrustLevel == nil || *profile.TrustLevel != 2 {
+		t.Fatalf("trust level = %v, want 2", profile.TrustLevel)
+	}
+	if profile.Email == nil || *profile.Email != "user1@example.com" {
+		t.Fatalf("email = %v, want the documented address", profile.Email)
+	}
+}
+
+// A quoted id is what OIDC-shaped replies send, and it has to keep working: a forum
+// that switches between the two spellings must not lock anyone out either way.
+func TestLoginAcceptsAQuotedID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/oauth-provider/token" {
+			_, _ = w.Write([]byte(`{"access_token":"at_1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"9001","username":"ada"}`))
+	}))
+	defer server.Close()
+
+	oauth := NewNodeLocOAuth(NodeLocOAuthConfig{
+		BaseURL: server.URL, ClientID: "ci", ClientSecret: "cs", RedirectURI: server.URL + "/callback",
+	}, server.Client())
+	profile, err := oauth.ExchangeCode(context.Background(), "code_1")
+	if err != nil {
+		t.Fatalf("login with a quoted id: %v", err)
+	}
+	if profile.ProviderUID != "9001" {
+		t.Fatalf("ProviderUID = %q, want 9001", profile.ProviderUID)
+	}
+}
+
+// A profile with no account id at all cannot be bound: the store must refuse it
+// loudly instead of creating a user whose OAuth key is the empty string.
+func TestLoginWithoutAnAccountIDIsRefused(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/oauth-provider/token" {
+			_, _ = w.Write([]byte(`{"access_token":"at_1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"username":"nameless"}`))
+	}))
+	defer server.Close()
+
+	oauth := NewNodeLocOAuth(NodeLocOAuthConfig{
+		BaseURL: server.URL, ClientID: "ci", ClientSecret: "cs", RedirectURI: server.URL + "/callback",
+	}, server.Client())
+	_, err := oauth.ExchangeCode(context.Background(), "code_1")
+	if !errors.Is(err, domain.ErrOAuthRejected) {
+		t.Fatalf("a profile with no id = %v, want a refusal naming the missing claim", err)
+	}
+	if !strings.Contains(err.Error(), "账号标识") {
+		t.Fatalf("the refusal does not name the missing claim: %v", err)
+	}
+}
+
 func TestLoginReadsAnOIDCShapedProfile(t *testing.T) {
 	var tokenRequests int
 	var server *httptest.Server

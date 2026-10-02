@@ -2,12 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  bindOAuth,
   checkinHistory,
   checkinStatus,
   checkIn,
   myPoints,
-  oauthInitiate,
+  startOAuthBind,
   syncOAuthProfile,
   unbindOAuth,
   updateProfile,
@@ -337,28 +336,18 @@ async function readNotification(item: AppNotification) {
   }
 }
 
-function startOAuthBinding() {
+async function startOAuthBinding() {
   if (oauthStarting.value) return
   oauthStarting.value = true
-  oauthInitiate(true)
-}
-
-async function consumeBindCode() {
-  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''))
-  const code = fragment.get('bind_code') || ''
-  const state = fragment.get('state') || ''
-  if (!code || !state) return
-  history.replaceState(null, '', window.location.pathname + window.location.search)
-  busy.value = true
   error.value = ''
+  message.value = ''
   try {
-    auth.user = await bindOAuth(code, state)
-    message.value = 'NodeLoc 账号已绑定，之后可直接用 NodeLoc 登录。'
-    await reloadAccountPanels()
+    // 绑定 leaves this page for NodeLoc and comes back to /profile with the
+    // reason in the query string, so the outcome is reported by onMounted.
+    await startOAuthBind('/profile')
   } catch (e) {
-    error.value = errorMessage(e, '绑定失败，请重试')
-  } finally {
-    busy.value = false
+    error.value = errorMessage(e, '无法开始绑定，请稍后重试')
+    oauthStarting.value = false
   }
 }
 
@@ -369,10 +358,25 @@ onMounted(async () => {
     return
   }
   if (typeof route.query.oauth_error === 'string') {
+    // A bind that failed before a code was exchanged is reported here, in the
+    // address bar; a bind that succeeded is reported through oauth_bind below.
     error.value = oauthErrorText(route.query.oauth_error, '绑定')
     await router.replace({ path: '/profile' })
   }
-  await consumeBindCode()
+  // The 绑定 callback lands here with the outcome rather than a fragment: the
+  // server already exchanged the code and attached the identity.
+  if (typeof route.query.oauth_bind === 'string') {
+    const outcome = route.query.oauth_bind
+    await router.replace({ path: '/profile' })
+    if (outcome === 'ok') {
+      await auth.fetchUser().catch(() => undefined)
+      message.value = 'NodeLoc 账号已绑定，之后可直接用 NodeLoc 登录。'
+    } else {
+      error.value = oauthErrorText(outcome, '绑定')
+    }
+    await reloadAccountPanels()
+    return
+  }
   await reloadAccountPanels()
 })
 </script>

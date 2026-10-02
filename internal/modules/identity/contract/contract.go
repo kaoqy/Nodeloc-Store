@@ -77,4 +77,11 @@ type TokenService interface {
 	// the new pair is left to the caller, which re-reads the account first so a
 	// disabled or demoted one cannot keep renewing on its old claims.
 	ParseRefresh(ctx context.Context, token string) (*domain.TokenClaims, error)
+	// IssueBind mints the short-lived token a NodeLoc 绑定 round trip travels on.
+	// 绑定 starts with a top-level browser navigation, which cannot carry the
+	// Authorization header the SPA uses, so a signed-in buyer first exchanges the
+	// session for this cookie-scoped token. It authorizes nothing but that bind.
+	IssueBind(ctx context.Context, user *domain.User) (string, error)
+	// ParseBind validates a bind token and returns its claims.
+	ParseBind(ctx context.Context, token string) (*domain.TokenClaims, error)
 }
