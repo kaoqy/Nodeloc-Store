@@ -39,19 +39,24 @@ func NewHandler(service *application.Service) *Handler {
 	return &Handler{service: service}
 }
 
-// cookieSecure marks the OAuth state cookie Secure only when this request
-// really arrived over TLS. Reading the configured scheme instead is what caused
-// "登录未完成，可能是链接过期": a store reached over plain http (LAN, or a
-// container port without TLS) keeps the default https setting, the browser then
-// silently drops the cookie and the callback can never match its state.
+// cookieSecure uses the request's actual transport, including the first value
+// from a proxy chain. The OAuth callback is a top-level cross-site GET; secure
+// production deployments therefore use SameSite=None, while plain HTTP local
+// development falls back to Lax because browsers reject None without Secure.
 func (h *Handler) cookieSecure(c *gin.Context) bool {
 	if c.Request != nil && c.Request.TLS != nil {
 		return true
 	}
-	if c.GetHeader("X-Forwarded-Proto") == "https" || c.GetHeader("X-Forwarded-Ssl") == "on" {
-		return true
+	forwardedProto := strings.TrimSpace(strings.Split(c.GetHeader("X-Forwarded-Proto"), ",")[0])
+	forwardedSSL := strings.TrimSpace(c.GetHeader("X-Forwarded-Ssl"))
+	return strings.EqualFold(forwardedProto, "https") || strings.EqualFold(forwardedSSL, "on")
+}
+
+func (h *Handler) oauthCookieSameSite(c *gin.Context) http.SameSite {
+	if h.cookieSecure(c) {
+		return http.SameSiteNoneMode
 	}
-	return false
+	return http.SameSiteLaxMode
 }
 
 func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig) {
@@ -497,8 +502,8 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 		Redirect: callbackFromAuthorizeURL(redirectURL),
 		Binding:  binding,
 	})
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(oauthStateCookie(state), state, int((10 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
+	c.SetSameSite(h.oauthCookieSameSite(c))
+	c.SetCookie(oauthStateCookie(state), state, int((5 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
 	// A bind intent tells the callback to hand the code back to the signed-in
 	// SPA instead of logging the NodeLoc identity in.
 	if binding {
@@ -514,6 +519,7 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 }
 
 func (h *Handler) OAuthCallback(c *gin.Context) {
+	startedAt := time.Now()
 	state := strings.TrimSpace(c.Query("state"))
 	binding := false
 
@@ -526,13 +532,13 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	}
 	h.clearOAuthState(c, state)
 	if cookieErr != nil || stateCookie == "" {
-		log.Printf("nodeloc oauth: no state cookie on the callback, so the round trip was interrupted (state_in_redirect=%v)", c.Query("state") != "")
+		log.Printf("nodeloc oauth: callback state cookie missing state_received=%t cookie_found=%t host=%q forwarded_proto=%q secure=%t elapsed=%s", state != "", cookieErr == nil && stateCookie != "", c.Request.Host, c.GetHeader("X-Forwarded-Proto"), h.cookieSecure(c), time.Since(startedAt))
 		h.oauthFailure(c, oauthStepCallback, "expired", domain.ErrInvalidCredentials,
 			"回调没有带回 state cookie；浏览器没存住、跨了域名回来、或登录超过 10 分钟都会这样。", binding)
 		return
 	}
 	if c.Query("state") == "" || stateCookie != c.Query("state") {
-		log.Printf("nodeloc oauth: state mismatch between cookie and callback query")
+		log.Printf("nodeloc oauth: state mismatch state_received=%t cookie_found=%t host=%q forwarded_proto=%q secure=%t elapsed=%s", state != "", stateCookie != "", c.Request.Host, c.GetHeader("X-Forwarded-Proto"), h.cookieSecure(c), time.Since(startedAt))
 		h.oauthFailure(c, oauthStepCallback, "state", domain.ErrInvalidCredentials,
 			"回调带回的 state 与本店发出的不是同一个。", binding)
 		return

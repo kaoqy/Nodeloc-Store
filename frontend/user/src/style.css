@@ -342,6 +342,24 @@ html[data-theme='light'] {
     border-radius: 2px;
     background: var(--accent);
   }
+  .mobile-nav .nav-item {
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+  }
+  .mobile-nav .nav-item.router-link-active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .mobile-nav .nav-item.router-link-active::after {
+    top: 8px;
+    right: auto;
+    bottom: 8px;
+    left: 0;
+    width: 3px;
+    height: auto;
+    border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  }
   .brand-mark {
     display: grid;
     place-items: center;
@@ -523,6 +541,7 @@ html[data-theme='light'] {
     overflow: hidden;
   }
   .mobile-nav-open { opacity: 1; transform: none; }
+  .mobile-nav .btn { min-height: 44px; }
   .table-scroll-hint { scrollbar-color: var(--stroke-hi) transparent; }
   .order-row { align-items: flex-start; }
   .order-row > div:last-child { margin-left: auto; }

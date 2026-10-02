@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { Product } from '../types'
 import { money } from '../utils/format'
 
 defineProps<{ product: Product }>()
+const imageFailed = ref(false)
 </script>
 
 <template>
@@ -12,12 +14,13 @@ defineProps<{ product: Product }>()
   >
     <div class="relative aspect-[16/9] overflow-hidden border-b border-[var(--stroke-quiet)] bg-[var(--surface-sunken)]">
       <img
-        v-if="product.image_path"
+        v-if="product.image_path && !imageFailed"
         :src="product.image_path"
         :alt="product.name"
         class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+        @error="imageFailed = true"
       />
-      <div v-else class="grid h-full place-items-center">
+      <div v-if="!product.image_path" class="grid h-full place-items-center">
         <span class="mono text-2xl font-bold tracking-[0.2em] text-[var(--text-quiet)]/50">
           {{ product.name.slice(0, 2).toUpperCase() }}
         </span>
