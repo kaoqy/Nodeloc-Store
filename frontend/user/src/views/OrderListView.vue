@@ -27,6 +27,7 @@ const reconciling = ref(false)
 const reconcileNote = ref('')
 const status = ref(FILTERS.some((item) => item.key === route.query.status) ? String(route.query.status) : '')
 const notice = computed(() => paymentNotice(typeof route.query.pay === 'string' ? route.query.pay : ''))
+let requestId = 0
 
 function wanted(): { q: string; status: string } | null {
   const next = {
@@ -55,6 +56,7 @@ const awaitingConfirm = computed(() => pending.value.filter((item) => item.trans
 const unstarted = computed(() => pending.value.filter((item) => !item.transaction_id))
 
 async function load(offset: number) {
+  const request = ++requestId
   if (offset === 0) {
     loading.value = true
     error.value = ''
@@ -63,12 +65,15 @@ async function load(offset: number) {
   }
   try {
     const page = await listOrders(PageSize, offset, status.value, query.value)
+    if (request !== requestId) return
     orders.value = offset === 0 ? page.orders : [...orders.value, ...page.orders]
     total.value = page.total ?? orders.value.length
   } catch (e) {
+    if (request !== requestId) return
     if (offset === 0) error.value = errorMessage(e, '订单加载失败，请稍后重试')
     else error.value = errorMessage(e, '加载更多失败，请稍后重试')
   } finally {
+    if (request !== requestId) return
     loading.value = false
     loadingMore.value = false
   }
@@ -205,7 +210,13 @@ onMounted(() => {
       </div>
     </div>
 
-    <p v-else-if="error && !orders.length" class="alert alert-danger" role="alert">{{ error }}</p>
+    <div v-else-if="error && !orders.length" class="card text-center">
+      <p class="alert alert-danger text-left" role="alert">{{ error }}</p>
+      <button class="btn btn-secondary mt-5" :disabled="loading" @click="load(0)">
+        <span v-if="loading" class="spinner" />
+        {{ loading ? '重新加载中…' : '重新加载订单' }}
+      </button>
+    </div>
 
     <template v-else>
       <ul class="stagger space-y-3">

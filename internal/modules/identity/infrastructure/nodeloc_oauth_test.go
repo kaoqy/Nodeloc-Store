@@ -16,6 +16,18 @@ import (
 // `picture` and the handle is `preferred_username`. Reading only the forum-shaped
 // names made the round trip succeed for some accounts and fail for the rest with
 // a message about a missing user id.
+func TestProfileSyncKeepsExistingRefreshToken(t *testing.T) {
+	identity := &domain.OAuthIdentity{}
+	identity.ApplyProfile(domain.OAuthProfile{AccessToken: "access-1", RefreshToken: "refresh-1"})
+	identity.ApplyProfile(domain.OAuthProfile{AccessToken: "access-2"})
+	if identity.RefreshToken == nil || *identity.RefreshToken != "refresh-1" {
+		t.Fatalf("refresh token = %v, want existing token preserved", identity.RefreshToken)
+	}
+	if identity.AccessToken == nil || *identity.AccessToken != "access-2" {
+		t.Fatalf("access token = %v, want latest token", identity.AccessToken)
+	}
+}
+
 func TestLoginReadsAnOIDCShapedProfile(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

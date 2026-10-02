@@ -271,7 +271,13 @@ onMounted(async () => {
       共 <span class="text-[var(--text-dim)]">{{ total }}</span> 件商品 · 第 {{ page }} / {{ pageCount }} 页
     </p>
 
-    <p v-if="error" class="alert alert-danger mt-8" role="alert">{{ error }}</p>
+    <div v-if="error" class="card mt-8 text-center">
+      <p class="alert alert-danger text-left" role="alert">{{ error }}</p>
+      <button class="btn btn-secondary mt-5" :disabled="loading" @click="load">
+        <span v-if="loading" class="spinner" />
+        {{ loading ? '重新加载中…' : '重新加载商品' }}
+      </button>
+    </div>
 
     <!-- Loading -->
     <div v-else-if="loading" class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">

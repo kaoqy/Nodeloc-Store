@@ -206,7 +206,9 @@ func (i *OAuthIdentity) ApplyProfile(profile OAuthProfile) {
 	i.AvatarURL = stringPointer(profile.AvatarURL)
 	i.Scope = stringPointer(profile.Scope)
 	i.AccessToken = stringPointer(profile.AccessToken)
-	i.RefreshToken = stringPointer(profile.RefreshToken)
+	if strings.TrimSpace(profile.RefreshToken) != "" {
+		i.RefreshToken = stringPointer(profile.RefreshToken)
+	}
 }
 
 func (u *User) ApplyOAuthProfile(profile OAuthProfile) {

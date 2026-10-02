@@ -20,8 +20,8 @@ import (
 
 const (
 	claimsKey        = "identity_claims"
-	oauthStateCookie = "nodeloc_oauth_state"
-	oauthBindCookie  = "nodeloc_oauth_bind"
+	oauthStatePrefix = "nodeloc_oauth_state_"
+	oauthBindPrefix  = "nodeloc_oauth_bind_"
 	// oauthCookiePath is scoped to the auth routes: the round trip only ever
 	// lands back on /api/v1/auth/oauth/callback, and a path this narrow is what
 	// clearing the cookie has to name for the browser to actually drop it.
@@ -455,7 +455,7 @@ func (h *Handler) Logout(c *gin.Context) {
 	// A cookie is only dropped when the clearing names the same Path it was set
 	// with; the round trip's pair lives under /api/v1/auth, so clearing at "/"
 	// left a half-finished 登录 able to be picked up by the next buyer's browser.
-	for _, name := range []string{oauthStateCookie, oauthBindCookie} {
+	for _, name := range oauthCookieNames(c) {
 		c.SetCookie(name, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
@@ -483,13 +483,13 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 		Binding:  binding,
 	})
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(oauthStateCookie, state, int((10 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
+	c.SetCookie(oauthStateCookie(state), state, int((10 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
 	// A bind intent tells the callback to hand the code back to the signed-in
 	// SPA instead of logging the NodeLoc identity in.
 	if binding {
-		c.SetCookie(oauthBindCookie, "1", int((10 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
+		c.SetCookie(oauthBindCookie(state), "1", int((10 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
 	} else {
-		c.SetCookie(oauthBindCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
+		c.SetCookie(oauthBindCookie(state), "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
 	}
 	if c.Query("redirect") == "true" {
 		c.Redirect(http.StatusFound, redirectURL)
@@ -499,16 +499,23 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 }
 
 func (h *Handler) OAuthCallback(c *gin.Context) {
+	state := strings.TrimSpace(c.Query("state"))
 	binding := false
-	if value, err := c.Cookie(oauthBindCookie); err == nil && value != "" {
-		binding = true
+	if state != "" {
+		if value, err := c.Cookie(oauthBindCookie(state)); err == nil && value != "" {
+			binding = true
+		}
+		c.SetCookie(oauthBindCookie(state), "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
 	}
-	c.SetCookie(oauthBindCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
 
 	// Consume and validate the one-time state before handling either success or
 	// provider error. NodeLoc includes state on denial too.
-	stateCookie, cookieErr := c.Cookie(oauthStateCookie)
-	h.clearOAuthState(c)
+	stateCookie := ""
+	var cookieErr error
+	if state != "" {
+		stateCookie, cookieErr = c.Cookie(oauthStateCookie(state))
+	}
+	h.clearOAuthState(c, state)
 	if cookieErr != nil || stateCookie == "" {
 		log.Printf("nodeloc oauth: no state cookie on the callback, so the round trip was interrupted (state_in_redirect=%v)", c.Query("state") != "")
 		h.oauthFailure(c, oauthStepCallback, "expired", domain.ErrInvalidCredentials,
@@ -537,7 +544,7 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	if binding {
 		// The SPA redeems the code against POST /auth/bind-oauth with its own
 		// bearer token; fragments never reach a server or log.
-		c.SetCookie(oauthStateCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
+		h.clearOAuthState(c, state)
 		h.service.LogOAuthAttempt(c.Request.Context(), application.OAuthAttemptLog{
 			Step: oauthStepCallback, Outcome: "started", Reason: "bind", Binding: true,
 		})
@@ -554,7 +561,7 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 		h.oauthFailure(c, oauthStepCallback, oauthFailReason(err), err, err.Error(), false)
 		return
 	}
-	c.SetCookie(oauthStateCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
+	h.clearOAuthState(c, state)
 	h.service.LogOAuthAttempt(c.Request.Context(), application.OAuthAttemptLog{
 		Step:     oauthStepCallback,
 		Outcome:  "success",
@@ -602,8 +609,29 @@ func oauthFailReason(err error) string {
 // It is also the shop's record of the attempt. A buyer sees one sentence and is
 // gone; the owner is left with 「登录不了」 and no way to tell a wrong setting from a
 // dead network, because the answer only ever sat in the container log.
-func (h *Handler) clearOAuthState(c *gin.Context) {
-	c.SetCookie(oauthStateCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
+func oauthStateCookie(state string) string {
+	return oauthStatePrefix + state
+}
+
+func oauthBindCookie(state string) string {
+	return oauthBindPrefix + state
+}
+
+func (h *Handler) clearOAuthState(c *gin.Context, state string) {
+	if state == "" {
+		return
+	}
+	c.SetCookie(oauthStateCookie(state), "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
+}
+
+func oauthCookieNames(c *gin.Context) []string {
+	cookieNames := []string{}
+	for _, cookie := range c.Request.Cookies() {
+		if strings.HasPrefix(cookie.Name, oauthStatePrefix) || strings.HasPrefix(cookie.Name, oauthBindPrefix) {
+			cookieNames = append(cookieNames, cookie.Name)
+		}
+	}
+	return cookieNames
 }
 
 func (h *Handler) oauthFailure(c *gin.Context, step, reason string, err error, detail string, binding bool) {
