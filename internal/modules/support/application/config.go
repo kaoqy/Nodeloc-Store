@@ -609,13 +609,20 @@ func (s *Service) DeleteNotificationTemplate(ctx context.Context, id uint) error
 	return s.repo.DeleteNotificationTemplate(ctx, id)
 }
 
-// seedNotificationTemplates 只在模板表为空时写入默认模板。
+// seedNotificationTemplates 补齐缺失的默认模板，但不覆盖店家改过的模板。
 func (s *Service) seedNotificationTemplates(ctx context.Context) error {
 	existing, err := s.repo.ListNotificationTemplates(ctx, "")
-	if err != nil || len(existing) > 0 {
+	if err != nil {
 		return err
 	}
+	known := make(map[string]bool, len(existing))
+	for _, template := range existing {
+		known[template.Key] = true
+	}
 	for i, template := range defaultNotificationTemplates() {
+		if known[template.Key] {
+			continue
+		}
 		template.SortOrder = i
 		if err := s.repo.SaveNotificationTemplate(ctx, &template); err != nil {
 			return err
@@ -689,12 +696,21 @@ func (s *Service) SaveSystemConfig(ctx context.Context, config domain.SystemConf
 	return &config, nil
 }
 
+// seedSystemConfigs 保证默认配置项都存在：升级后新增的键会被补上，
+// 店家已经改过的值不会被覆盖。所以这里不能只在表为空时执行一次。
 func (s *Service) seedSystemConfigs(ctx context.Context) error {
 	existing, err := s.repo.ListSystemConfigs(ctx, "")
-	if err != nil || len(existing) > 0 {
+	if err != nil {
 		return err
 	}
+	known := make(map[string]bool, len(existing))
+	for _, config := range existing {
+		known[config.Group+"/"+config.Key] = true
+	}
 	for _, config := range defaultSystemConfigs() {
+		if known[config.Group+"/"+config.Key] {
+			continue
+		}
 		if err := s.repo.SaveSystemConfig(ctx, &config); err != nil {
 			return err
 		}
@@ -720,6 +736,17 @@ func defaultSystemConfigs() []domain.SystemConfig {
 		{Group: "retention", Key: "ai_conversation_days", Value: "90", ValueType: "int", Label: "AI 对话保留天数", SortOrder: 1},
 		{Group: "retention", Key: "ticket_days", Value: "365", ValueType: "int", Label: "工单保留天数", SortOrder: 2},
 		{Group: "upload", Key: "max_image_mb", Value: "8", ValueType: "int", Label: "图片上传上限（MB）", SortOrder: 0},
+		// 订单与商品：这些开关影响买家下单与库存提醒，不再只存在于代码里。
+		{Group: "order", Key: "unpaid_cancel_hours", Value: "2", ValueType: "int", Label: "待支付订单保留小时数", SortOrder: 0},
+		{Group: "order", Key: "allow_guest_checkout", Value: "false", ValueType: "bool", Label: "允许未登录下单", SortOrder: 1},
+		{Group: "order", Key: "auto_deliver_retry", Value: "true", ValueType: "bool", Label: "交付失败自动重试", SortOrder: 2},
+		{Group: "product", Key: "default_stock_alert", Value: "5", ValueType: "int", Label: "默认库存预警阈值", SortOrder: 0},
+		{Group: "product", Key: "show_sold_count", Value: "true", ValueType: "bool", Label: "前台显示销量", SortOrder: 1},
+		{Group: "product", Key: "allow_restock_notify", Value: "true", ValueType: "bool", Label: "缺货时通知补货人", SortOrder: 2},
+		{Group: "activity", Key: "default_per_user_limit", Value: "1", ValueType: "int", Label: "活动默认每人限次", SortOrder: 0},
+		{Group: "activity", Key: "block_activity_stacking", Value: "true", ValueType: "bool", Label: "默认禁止活动叠加", SortOrder: 1},
+		{Group: "site", Key: "announcement_position", Value: "home", ValueType: "string", Label: "公告展示位置", SortOrder: 0},
+		{Group: "site", Key: "footer_show_version", Value: "true", ValueType: "bool", Label: "页脚显示版本号", SortOrder: 1},
 	}
 }
 

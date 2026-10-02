@@ -26,6 +26,7 @@ import (
 	paymentcontract "github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/plugin"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/support"
+	supportapplication "github.com/kaoqy/Nodeloc-Store/internal/modules/support/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/system"
 	"github.com/kaoqy/Nodeloc-Store/internal/platform/database/gormdb"
 )
@@ -159,6 +160,8 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 	pluginMod := plugin.Wire(db)
 	// 活动定价挂到支付模块上：下单金额仍由后端计算，活动只贡献结构化规则。
 	paymentMod.Service.SetActivityPricing(activityMod.Service)
+	// 活动的默认限次与叠加策略来自配置中心。
+	activityMod.Handler.SetDefaults(activityDefaults{support: supportMod.Service})
 	// The money side delivers a plugin-bound order through the plugin runtime;
 	// every other product keeps the shop's own card/manual queue.
 	paymentMod.Service.SetPluginDeliverer(plugin.NewDeliveryBridge(pluginMod.Service))
@@ -181,6 +184,12 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 	// The back office can also ask for one pass instead of waiting for the
 	// background sweep, so the catalogue's route needs the same watcher.
 	catalogMod.Handler.SetRestockWarner(stockWatch)
+	// 前台展示开关读配置中心：销量是否展示、库存预警阈值都由店家决定。
+	catalogMod.Handler.SetStorefrontFlags(func(ctx context.Context) map[string]bool {
+		return map[string]bool{
+			"show_sold_count": supportMod.Service.SystemConfigBool(ctx, "product", "show_sold_count", true),
+		}
+	})
 
 	// The loop closes in the other direction here: a card import tells the money
 	// side that the stock a waiting order was short of has arrived, so the buyer
@@ -232,6 +241,21 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		Support:      supportMod,
 		Stock:        stockWatch,
 	}, nil
+}
+
+// activityDefaults adapts the configuration centre to the activity handler's
+// default-value port.
+type activityDefaults struct {
+	support *supportapplication.Service
+}
+
+func (a activityDefaults) PerUserLimit(ctx context.Context) int {
+	return a.support.SystemConfigInt(ctx, "activity", "default_per_user_limit", 1)
+}
+
+func (a activityDefaults) AllowStacking(ctx context.Context) bool {
+	blocked := a.support.SystemConfigBool(ctx, "activity", "block_activity_stacking", true)
+	return !blocked
 }
 
 // mailAddresses resolves the inbox address for one account. It goes through the

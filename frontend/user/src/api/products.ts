@@ -60,6 +60,8 @@ export async function listCategories(): Promise<Category[]> {
 export interface StoreStatsResult {
   stats: StoreStats
   coupons_enabled: boolean
+  /** 配置中心的前台展示开关：为 false 时商品卡片不显示销量。 */
+  show_sold_count?: boolean
 }
 
 export async function storeStats(): Promise<StoreStatsResult> {

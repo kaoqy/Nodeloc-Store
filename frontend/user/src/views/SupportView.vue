@@ -2,10 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  claimCoupon,
   createTicket,
   getTicket,
-  listActivities,
   listMyTickets,
   rateTicket,
   reopenTicket,
@@ -13,7 +11,6 @@ import {
   transferTicket,
   ticketStatusLabels,
   ticketTypeOptions,
-  type Activity,
   type Ticket,
   type TicketDetail,
 } from '../api/support'
@@ -24,12 +21,7 @@ import { when } from '../utils/format'
 // 买家用一个入口就能找到全部售后路径，不再需要在菜单里分辨三处入口。
 const route = useRoute()
 
-const tab = ref<'help' | 'tickets' | 'activities'>('help')
-
-const activities = ref<Activity[]>([])
-const activityError = ref('')
-const activityLoading = ref(true)
-const claiming = ref('')
+const tab = ref<'help' | 'tickets'>('help')
 
 const tickets = ref<Ticket[]>([])
 const ticketLoading = ref(true)
@@ -53,7 +45,6 @@ const helpSections = [
   { id: 'card-issue', title: '卡密无效或已被使用', body: '带着订单号提交工单，智能客服会先核对交付记录。核实为无效卡后会按售后规则重新发货或退款。' },
   { id: 'refund', title: '退款与售后规则', body: '数字商品具有一次性交付属性，已交付且可正常使用的卡密原则上不支持退款。未交付、卡密无效或重复交付的情况可以申请售后。' },
   { id: 'oauth', title: 'NodeLoc 登录失败', body: '请从登录页重新发起一次授权。若持续失败，请把登录时间与页面提示提供给客服，不要提供 Client Secret、授权码或 Token。' },
-  { id: 'activity', title: '活动与优惠码怎么用', body: '活动优惠在结算时由服务端自动计算，优惠码在商品详情页或结算页填写。同一个订单默认取优惠力度最大的一项。' },
   { id: 'human', title: '需要人工客服', body: '在右下角打开智能客服窗口，或在本页提交工单后点击「转人工客服」。你的完整对话会一起交给人工同事。' },
 ]
 
@@ -80,18 +71,6 @@ const statusTone: Record<string, string> = {
 const typeLabel = (value: string) =>
   ticketTypeOptions.find((option) => option.value === value)?.label ?? value
 
-async function loadActivities() {
-  activityLoading.value = true
-  activityError.value = ''
-  try {
-    activities.value = await listActivities()
-  } catch (err) {
-    activityError.value = errorMessage(err, '加载活动失败')
-  } finally {
-    activityLoading.value = false
-  }
-}
-
 async function loadTickets() {
   ticketLoading.value = true
   ticketError.value = ''
@@ -102,19 +81,6 @@ async function loadTickets() {
     ticketError.value = errorMessage(err, '加载工单失败')
   } finally {
     ticketLoading.value = false
-  }
-}
-
-async function claim(activity: Activity) {
-  claiming.value = String(activity.id)
-  try {
-    await claimCoupon(activity.id)
-    activityError.value = ''
-    window.alert('优惠券已领取，可在下单时使用。')
-  } catch (err) {
-    activityError.value = errorMessage(err, '领取失败')
-  } finally {
-    claiming.value = ''
   }
 }
 
@@ -210,8 +176,6 @@ function openWidget() {
 
 onMounted(() => {
   if (route.query.tab === 'tickets') tab.value = 'tickets'
-  if (route.query.tab === 'activities') tab.value = 'activities'
-  void loadActivities()
   void loadTickets()
   const order = typeof route.query.order === 'string' ? route.query.order : ''
   if (order) {
@@ -229,7 +193,7 @@ onMounted(() => {
         <p class="eyebrow">客服中心</p>
         <h1 class="mt-2 text-2xl font-bold sm:text-3xl">有问题，从这里开始</h1>
         <p class="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--text-dim)]">
-          智能客服会先接待并查询订单、活动与规则；需要人工时点一下就转接，对话记录会一起带过去。
+          智能客服会先接待并查询订单与规则；需要人工时点一下就转接，对话记录会一起带过去。
         </p>
       </div>
       <button class="btn btn-primary" @click="openWidget">
@@ -249,13 +213,11 @@ onMounted(() => {
         <p class="font-semibold">提交工单</p>
         <p class="quiet mt-1 text-xs">复杂问题留档，客服按顺序跟进</p>
       </button>
-      <button
-        class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]"
-        @click="tab = 'activities'"
-      >
-        <p class="font-semibold">活动与优惠</p>
+      <!-- 活动是独立页面：这里只给一个指路卡片，不再把促销内容混进客服页。 -->
+      <RouterLink to="/activities" class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]">
+        <p class="font-semibold">活动中心</p>
         <p class="quiet mt-1 text-xs">查看正在进行的促销与领券活动</p>
-      </button>
+      </RouterLink>
     </div>
 
     <div class="mt-8 flex flex-wrap gap-1.5" role="tablist" aria-label="客服中心板块">
@@ -264,9 +226,6 @@ onMounted(() => {
       </button>
       <button class="chip" :class="tab === 'tickets' ? 'chip-active' : ''" role="tab" :aria-selected="tab === 'tickets'" @click="tab = 'tickets'">
         我的工单 <span v-if="tickets.length" class="nums opacity-70">{{ tickets.length }}</span>
-      </button>
-      <button class="chip" :class="tab === 'activities' ? 'chip-active' : ''" role="tab" :aria-selected="tab === 'activities'" @click="tab = 'activities'">
-        活动中心
       </button>
     </div>
 
@@ -289,44 +248,6 @@ onMounted(() => {
       <div class="card flex flex-wrap items-center gap-3">
         <p class="text-sm text-[var(--text-dim)]">没有找到答案？智能客服会读这些文档并帮你查订单。</p>
         <button class="btn btn-secondary btn-sm ml-auto" @click="openWidget">问智能客服</button>
-      </div>
-    </section>
-
-    <!-- 活动中心 -->
-    <section v-else-if="tab === 'activities'" class="mt-5">
-      <p v-if="activityError" class="alert alert-danger" role="alert">{{ activityError }}</p>
-      <div v-if="activityLoading" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div v-for="i in 3" :key="i" class="card space-y-3">
-          <div class="skeleton h-5 w-2/3" />
-          <div class="skeleton h-4 w-full" />
-        </div>
-      </div>
-      <div v-else-if="!activities.length" class="card py-16 text-center">
-        <p class="font-semibold">暂时没有进行中的活动</p>
-        <p class="mt-1.5 text-sm text-[var(--text-quiet)]">有新的促销活动时会显示在这里。</p>
-      </div>
-      <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <article v-for="activity in activities" :key="activity.id" class="card space-y-3">
-          <img v-if="activity.cover_image" :src="activity.cover_image" :alt="activity.name" class="aspect-[16/9] w-full rounded-[var(--radius-sm)] object-cover" />
-          <div>
-            <h2 class="font-semibold">{{ activity.name }}</h2>
-            <p v-if="activity.subtitle" class="quiet mt-1 text-sm">{{ activity.subtitle }}</p>
-          </div>
-          <p v-if="activity.description" class="line-clamp-3 text-sm text-[var(--text-dim)]">{{ activity.description }}</p>
-          <p class="quiet text-xs">
-            <span v-if="activity.start_at">开始 {{ when(activity.start_at) }}</span>
-            <span v-if="activity.end_at"> · 结束 {{ when(activity.end_at) }}</span>
-          </p>
-          <button
-            v-if="activity.type === 'coupon_claim'"
-            class="btn btn-primary btn-sm"
-            :disabled="claiming === String(activity.id)"
-            @click="claim(activity)"
-          >
-            {{ claiming === String(activity.id) ? '领取中…' : '领取优惠券' }}
-          </button>
-          <RouterLink v-else to="/" class="btn btn-secondary btn-sm">去逛逛</RouterLink>
-        </article>
       </div>
     </section>
 

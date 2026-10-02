@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { siteStatus } from '../api/system'
+import { storeStats } from '../api/products'
 import { applyBrand } from '../utils/brand'
 import { applyShopIdentity } from '../utils/identity'
 import type { FooterLink } from '../types'
@@ -23,6 +24,8 @@ export const useSiteStore = defineStore('site', () => {
   const couponsEnabled = ref(true)
   const oauthEnabled = ref(true)
   const paymentsEnabled = ref(true)
+  // 配置中心控制的前台展示开关；默认展示，读不到时保持原样。
+  const showSoldCount = ref(true)
 
   async function load() {
     try {
@@ -53,6 +56,11 @@ export const useSiteStore = defineStore('site', () => {
       // The name and the summary are what the browser tab and a search result
       // show, so they travel with the site identity rather than the page body.
       applyShopIdentity(status.app?.name, status.app?.description, status.app?.logo)
+      // 展示开关来自 /store/stats：它已经在前台加载，不必再开一个公开接口。
+      const stats = await storeStats().catch(() => null)
+      if (stats && typeof stats.show_sold_count === 'boolean') {
+        showSoldCount.value = stats.show_sold_count
+      }
     } catch {
       // The status endpoint is optional; the storefront still works without it.
     }
@@ -78,6 +86,7 @@ export const useSiteStore = defineStore('site', () => {
     couponsEnabled,
     oauthEnabled,
     paymentsEnabled,
+    showSoldCount,
     initials,
     hasFooter,
     load,

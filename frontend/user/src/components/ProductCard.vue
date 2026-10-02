@@ -2,8 +2,11 @@
 import { ref } from 'vue'
 import type { Product } from '../types'
 import { money } from '../utils/format'
+import { useSiteStore } from '../stores/site'
 
 defineProps<{ product: Product }>()
+// 店家可以在配置中心关掉前台销量展示，卡片要跟着走。
+const site = useSiteStore()
 const imageFailed = ref(false)
 </script>
 
@@ -57,7 +60,7 @@ const imageFailed = ref(false)
       <!-- 销量 is delivered volume from the server, so it counts goods that
            actually left the shop rather than orders that were abandoned. -->
       <p class="hint mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span>
+        <span v-if="site.showSoldCount">
           已售 <span class="nums">{{ product.sold_count ?? 0 }}</span> 件
         </span>
         <span v-if="product.stock_visible && product.stock_count > 0">

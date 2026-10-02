@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -18,9 +19,19 @@ import (
 )
 
 // Handler 是活动模块的 HTTP 边界：后台管理、买家活动中心、优惠券领取。
-type Handler struct {
-	service *application.Service
+// Defaults 提供配置中心里的活动默认值；未接线时使用保守默认。
+type Defaults interface {
+	PerUserLimit(ctx context.Context) int
+	AllowStacking(ctx context.Context) bool
 }
+
+type Handler struct {
+	service  *application.Service
+	defaults Defaults
+}
+
+// SetDefaults attaches the configuration-centre defaults.
+func (h *Handler) SetDefaults(defaults Defaults) { h.defaults = defaults }
 
 func NewHandler(service *application.Service) *Handler {
 	if service == nil {
@@ -108,6 +119,14 @@ func (h *Handler) create(c *gin.Context) {
 	if err := c.ShouldBindJSON(&request); err != nil {
 		respondError(c, requestError(err))
 		return
+	}
+	// 配置中心的活动默认值：新建时没填的项按店铺策略补齐，
+	// 这样「默认每人限次」「默认禁止叠加」在后台改一次就对后续活动生效。
+	if h.defaults != nil {
+		if request.Activity.PerUserLimit <= 0 {
+			request.Activity.PerUserLimit = h.defaults.PerUserLimit(c.Request.Context())
+		}
+		request.Activity.AllowStacking = request.Activity.AllowStacking && h.defaults.AllowStacking(c.Request.Context())
 	}
 	activity, err := h.service.Create(c.Request.Context(), application.SaveOptions{
 		Activity:  request.Activity,

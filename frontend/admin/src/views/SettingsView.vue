@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { getOAuthAttempts, getRuntimeSettings, saveRuntimeSettings, testMail, testOAuth, testPayment, type OAuthAttempt } from '../api/system'
 import type { FooterLink, RuntimeSettings } from '../types'
@@ -15,6 +15,53 @@ type Probe = { ok: boolean; text: string }
 const MaxFooterLinks = 8
 
 const auth = useAuthStore()
+
+// 设置分组：站点与品牌、NodeLoc 登录、支付、邮件、公告、功能开关、外观、运行时。
+// 每一组都是同一份表单的一部分，切换分组不会丢改动，保存仍然是一次提交。
+const SETTINGS_TABS = [
+  { key: 'site', label: '站点与品牌', hint: '站名、域名与 Logo' },
+  { key: 'oauth', label: 'NodeLoc 登录', hint: 'OAuth 凭据与登录记录' },
+  { key: 'payment', label: '支付设置', hint: 'Nodeloc Payments 凭据' },
+  { key: 'smtp', label: '邮件通知', hint: 'SMTP 与发信测试' },
+  { key: 'content', label: '公告与页脚', hint: '首页横幅与页脚文案' },
+  { key: 'features', label: '功能开关', hint: '注册、签到、优惠码' },
+  { key: 'theme', label: '外观主题', hint: '品牌色与语言' },
+  { key: 'runtime', label: '运行时信息', hint: '版本与存储说明' },
+] as const
+
+const settingsTab = ref<(typeof SETTINGS_TABS)[number]['key']>('site')
+
+// 打开页面时若地址带 ?tab=payment，就直接落到那一组，方便从别处跳过来。
+const initialTab = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') : ''
+if (initialTab && SETTINGS_TABS.some((item) => item.key === initialTab)) {
+  settingsTab.value = initialTab as (typeof SETTINGS_TABS)[number]['key']
+}
+
+const activeTabHint = computed(() => {
+  const found = SETTINGS_TABS.find((item) => item.key === settingsTab.value)
+  return found ? found.hint : '保存后运行时配置立即重建，无需重启容器'
+})
+
+// 放弃更改：把表单恢复成上一次成功保存的快照。
+function discard() {
+  if (!snapshot.value) return
+  try {
+    const saved = JSON.parse(snapshot.value) as RuntimeSettings
+    Object.assign(settings.app, saved.app)
+    Object.assign(settings.oauth, saved.oauth)
+    Object.assign(settings.payment, saved.payment)
+    Object.assign(settings.smtp, saved.smtp)
+    Object.assign(settings.features, saved.features)
+    Object.assign(settings.theme, saved.theme)
+    applyBrand(savedBrand.value, false)
+    message.value = '已放弃未保存的更改'
+    messageType.value = 'ok'
+  } catch {
+    message.value = '恢复上一次保存的内容失败，请刷新页面'
+    messageType.value = 'err'
+  }
+}
+
 const loading = ref(true)
 const saving = ref(false)
 const message = ref('')
@@ -232,6 +279,7 @@ async function load() {
     settings.app.footer_links = (result.app.footer_links ?? []).map((link) => ({ ...link }))
     Object.assign(settings.oauth, result.oauth)
     Object.assign(settings.payment, result.payment)
+    if (result.smtp) Object.assign(settings.smtp, result.smtp)
     Object.assign(settings.features, result.features)
     Object.assign(settings.theme, result.theme)
     stockThreshold.value = String(settings.features.stock_alert_threshold ?? 5)
@@ -362,9 +410,21 @@ async function runPaymentTest() {
   }
 }
 
+// 有未保存改动时离开页面会先问一句，避免长表单白填。
+function guardUnload(event: BeforeUnloadEvent) {
+  if (!dirty.value || saving.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
 onMounted(() => {
+  window.addEventListener('beforeunload', guardUnload)
   void load()
   void loadOAuthAttempts()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', guardUnload)
 })
 </script>
 
@@ -386,7 +446,9 @@ onMounted(() => {
       <div>
         <p class="eyebrow">运行时配置</p>
         <h2 class="mt-1 text-xl font-bold">系统设置</h2>
-        <p class="mt-1 text-sm text-[var(--text-quiet)]">保存后运行时配置立即重建，无需重启容器</p>
+        <p class="mt-1 text-sm text-[var(--text-quiet)]">
+          {{ activeTabHint }}
+        </p>
       </div>
       <div class="flex items-center gap-3">
         <span v-if="!canManage" class="badge badge-neutral">只读</span>
@@ -396,6 +458,19 @@ onMounted(() => {
           {{ saving ? '正在保存…' : '保存设置' }}
         </button>
       </div>
+    </div>
+
+    <!-- 保存栏固定在顶部：在长表单里滚到下半页也不必回到页首才能保存。 -->
+    <div
+      v-if="canManage && dirty"
+      class="sticky top-[76px] z-20 flex flex-wrap items-center gap-3 rounded-[var(--radius-sm)] border border-[var(--accent-line)] bg-[var(--glass)] px-4 py-2.5 backdrop-blur"
+      role="status"
+    >
+      <span class="text-sm">有你改过但还没保存的设置</span>
+      <button class="btn btn-quiet btn-sm" :disabled="saving" @click="discard">放弃更改</button>
+      <button class="btn btn-primary btn-sm ml-auto" :disabled="saving" @click="save">
+        {{ saving ? '正在保存…' : '立即保存' }}
+      </button>
     </div>
 
     <p
@@ -410,12 +485,45 @@ onMounted(() => {
       当前账号只有查看系统设置的权限，所有字段均为只读。需要改动时请联系超级管理员授予「设置 · 管理」。
     </p>
 
+    <!-- 设置分组：左侧是分区导航，右侧只显示当前分区。
+         所有分区仍在同一份表单里，保存一次会整体生效。 -->
+    <div class="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <nav class="card hidden !p-2.5 lg:block" aria-label="设置分组">
+        <ul class="space-y-0.5">
+          <li v-for="item in SETTINGS_TABS" :key="item.key">
+            <button
+              class="settings-nav-item w-full text-left"
+              :class="settingsTab === item.key ? 'settings-nav-active' : ''"
+              :aria-current="settingsTab === item.key ? 'page' : undefined"
+              @click="settingsTab = item.key"
+            >
+              <span class="block text-[13px]">{{ item.label }}</span>
+              <span class="quiet block text-[11px]">{{ item.hint }}</span>
+            </button>
+          </li>
+        </ul>
+      </nav>
+
+      <div class="min-w-0 space-y-5">
+        <!-- 移动端：分区变成一排横向 chips，避免长页面来回滚动。 -->
+        <div class="flex flex-wrap gap-1.5 lg:hidden">
+          <button
+            v-for="item in SETTINGS_TABS"
+            :key="item.key"
+            class="chip"
+            :class="settingsTab === item.key ? 'chip-active' : ''"
+            @click="settingsTab = item.key"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+
     <div class="grid gap-6 lg:grid-cols-3">
       <!-- A disabled fieldset turns off every control inside it at once, so the
            read-only view cannot be edited even where an input has no :disabled. -->
       <fieldset class="m-0 min-w-0 space-y-5 border-0 p-0 lg:col-span-2" :disabled="!canManage">
         <!-- 站点信息 -->
-        <div class="card">
+        <div v-show="settingsTab === 'site'" class="card">
           <div class="mb-5 flex items-baseline justify-between gap-4">
             <h3 class="font-semibold">站点信息</h3>
             <span class="hint">展示在商店前台与管理后台</span>
@@ -464,7 +572,7 @@ onMounted(() => {
         </div>
 
         <!-- OAuth -->
-        <div class="card">
+        <div v-show="settingsTab === 'oauth'" class="card">
           <div class="mb-5 flex items-center justify-between gap-4">
             <div>
               <h3 class="font-semibold">NodeLoc OAuth 登录</h3>
@@ -537,7 +645,7 @@ onMounted(() => {
         </div>
 
         <!-- Payments -->
-        <div class="card">
+        <div v-show="settingsTab === 'payment'" class="card">
           <div class="mb-5 flex items-center justify-between gap-4">
             <div>
               <h3 class="font-semibold">NodeLoc Payments 支付</h3>
@@ -617,7 +725,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="card">
+        <div v-show="settingsTab === 'smtp'" class="card">
           <div class="mb-5">
             <h3 class="font-semibold">SMTP 邮件设置</h3>
             <p class="hint mt-0.5">配置保存到应用运行时设置，仅管理员可测试；密码只显示掩码。</p>
@@ -660,7 +768,7 @@ onMounted(() => {
         </div>
 
         <!-- 公告与页脚 -->
-        <div class="card">
+        <div v-show="settingsTab === 'content'" class="card">
           <div class="mb-5 flex items-baseline justify-between gap-4">
             <div>
               <h3 class="font-semibold">公告与页脚</h3>
@@ -744,7 +852,7 @@ onMounted(() => {
 
       <!-- 右侧栏 -->
       <fieldset class="m-0 min-w-0 space-y-5 border-0 p-0" :disabled="!canManage">
-        <div class="card">
+        <div v-show="settingsTab === 'features'" class="card">
           <h3 class="mb-4 font-semibold">功能开关</h3>
           <div class="space-y-4">
             <div class="flex items-center justify-between gap-4">
@@ -809,7 +917,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="card">
+        <div v-show="settingsTab === 'theme'" class="card">
           <h3 class="mb-4 font-semibold">外观</h3>
           <div class="space-y-4">
             <div class="flex items-center justify-between gap-4">
@@ -836,7 +944,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="card card-quiet">
+        <div v-show="settingsTab === 'runtime'" class="card card-quiet">
           <h3 class="mb-4 font-semibold">运行时</h3>
           <dl class="space-y-2.5 text-sm">
             <div class="flex items-center justify-between gap-3">
@@ -860,7 +968,7 @@ onMounted(() => {
     </div>
 
     <!-- 登录记录 -->
-    <div v-if="canViewAttempts" class="card">
+    <div v-show="canViewAttempts && settingsTab === 'oauth'" class="card">
       <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 class="font-semibold">最近 NodeLoc 登录记录</h3>
@@ -899,5 +1007,34 @@ onMounted(() => {
         </li>
       </ul>
     </div>
+      </div>
+    </div>
   </section>
 </template>
+
+<style scoped>
+/* 设置分组导航：和配置中心使用同一套视觉语言，后台看起来是一个系统。 */
+.settings-nav-item {
+  position: relative;
+  display: block;
+  padding: 8px 10px 8px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  transition: background var(--fast), color var(--fast);
+}
+.settings-nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  transform: translateY(-50%);
+  transition: height var(--normal) var(--spring);
+}
+.settings-nav-item:hover { background: var(--surface-hi); color: var(--text); }
+.settings-nav-active { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+.settings-nav-active::before { height: 20px; }
+</style>

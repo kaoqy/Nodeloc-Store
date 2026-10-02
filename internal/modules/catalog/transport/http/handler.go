@@ -26,6 +26,8 @@ type Handler struct {
 	// on demand; who gets warned is decided outside the catalogue, so this layer
 	// only asks for a pass and reports what it counted.
 	restockWarner restockWarner
+	// storefrontFlags carries 配置中心 的前台展示开关到公开接口。
+	storefrontFlags StorefrontFlags
 }
 
 // restockWarner is the shape that sweep needs, declared here rather than
@@ -38,6 +40,13 @@ type restockWarner interface {
 // calls it while wiring, and a catalogue without one answers 503 instead of
 // pretending a warning went out.
 func (h *Handler) SetRestockWarner(warner restockWarner) { h.restockWarner = warner }
+
+// StorefrontFlags 是配置中心里影响前台展示的几个开关。catalogue 不认识
+// 配置中心，所以由容器注入这个只读函数，nil 时使用保守默认值。
+type StorefrontFlags func(ctx context.Context) map[string]bool
+
+// SetStorefrontFlags attaches the display switches read from 配置中心.
+func (h *Handler) SetStorefrontFlags(flags StorefrontFlags) { h.storefrontFlags = flags }
 
 func NewHandler(service *application.Service) *Handler {
 	return &Handler{service: service}
@@ -153,7 +162,16 @@ func (h *Handler) storeStats(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"stats": stats, "coupons_enabled": h.service.CouponsEnabled()})
+	flags := map[string]bool{}
+	if h.storefrontFlags != nil {
+		flags = h.storefrontFlags(c.Request.Context())
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"stats":           stats,
+		"coupons_enabled": h.service.CouponsEnabled(),
+		"show_sold_count": flags["show_sold_count"],
+		"show_stock":      true,
+	})
 }
 
 // listStoreCoupons is the storefront's promo shelf: the codes the shop chose to

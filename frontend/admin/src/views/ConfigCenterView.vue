@@ -29,7 +29,9 @@ const auth = useAuthStore()
 
 type TabKey =
   | 'ai' | 'tools' | 'knowledge' | 'service'
-  | 'ticket' | 'notify' | 'risk' | 'retention' | 'upload'
+  | 'ticket' | 'notify' | 'risk'
+  | 'order' | 'product' | 'activity' | 'site'
+  | 'retention' | 'upload'
 
 interface TabDef {
   key: TabKey
@@ -45,6 +47,10 @@ const TABS: TabDef[] = [
   { key: 'service', label: '客服与快捷回复', hint: '坐席、分配与回复模板', resources: ['agents'] },
   { key: 'ticket', label: '工单配置', hint: '编号、超时与关闭策略', resources: ['config_center'] },
   { key: 'notify', label: '通知模板', hint: '站内与邮件的文案与渠道', resources: ['notification_templates'] },
+  { key: 'order', label: '订单配置', hint: '待支付保留与自动重试', resources: ['config_center'] },
+  { key: 'product', label: '商品配置', hint: '库存预警与销量展示', resources: ['config_center'] },
+  { key: 'activity', label: '活动配置', hint: '默认限次与叠加策略', resources: ['config_center'] },
+  { key: 'site', label: '站点展示', hint: '公告位置与页脚版本号', resources: ['config_center'] },
   { key: 'risk', label: '风控配置', hint: '限频与二次确认', resources: ['config_center'] },
   { key: 'retention', label: '数据保留', hint: '日志与对话保留天数', resources: ['config_center'] },
   { key: 'upload', label: '文件上传', hint: '图片与附件上限', resources: ['config_center'] },
@@ -76,6 +82,10 @@ const groupLabels: Record<string, string> = {
   risk: '风控配置',
   retention: '数据保留策略',
   upload: '文件上传配置',
+  order: '订单配置',
+  product: '商品配置',
+  activity: '活动配置',
+  site: '站点展示',
 }
 
 const canManageTemplates = computed(() => auth.allows('notification_templates', 'manage'))
@@ -91,10 +101,10 @@ const grouped = computed(() => {
   return Array.from(map.entries()).filter(([group]) => {
     if (groupFilter.value) return group === groupFilter.value
     // 选项卡与配置分组一一对应，避免一个页面里堆所有配置。
-    if (tab.value === 'ticket') return group === 'ticket'
-    if (tab.value === 'risk') return group === 'risk'
-    if (tab.value === 'retention') return group === 'retention'
-    if (tab.value === 'upload') return group === 'upload'
+    // 除 AI/知识库/客服这些专用面板外，其余分组都直接映射同名配置组。
+    if (['ticket', 'risk', 'retention', 'upload', 'order', 'product', 'activity', 'site'].includes(tab.value)) {
+      return group === tab.value
+    }
     return false
   })
 })
