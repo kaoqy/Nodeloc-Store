@@ -32,6 +32,7 @@ const route = useRoute()
 const router = useRouter()
 
 const busy = ref(false)
+const oauthStarting = ref(false)
 const message = ref('')
 const error = ref('')
 
@@ -336,6 +337,12 @@ async function readNotification(item: AppNotification) {
   }
 }
 
+function startOAuthBinding() {
+  if (oauthStarting.value) return
+  oauthStarting.value = true
+  oauthInitiate(true)
+}
+
 async function consumeBindCode() {
   const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const code = fragment.get('bind_code') || ''
@@ -544,7 +551,10 @@ onMounted(async () => {
         <div class="flex shrink-0 flex-wrap gap-2">
           <button v-if="bound" class="btn btn-secondary btn-sm" :disabled="busy" @click="syncProfile">同步资料</button>
           <button v-if="bound" class="btn btn-danger btn-sm" :disabled="busy" @click="unbind">解除绑定</button>
-          <button v-else class="btn btn-primary btn-sm" @click="oauthInitiate(true)">绑定 NodeLoc</button>
+          <button v-else class="btn btn-primary btn-sm" :disabled="oauthStarting" @click="startOAuthBinding">
+            <span v-if="oauthStarting" class="spinner spinner-light" />
+            {{ oauthStarting ? '正在连接 NodeLoc…' : '绑定 NodeLoc' }}
+          </button>
         </div>
       </div>
       <p v-if="!bound" class="alert alert-info mt-5" role="status">

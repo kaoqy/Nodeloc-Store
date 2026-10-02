@@ -387,6 +387,9 @@ watch(
             <h1 class="mt-4 break-words text-3xl font-bold">{{ product.name }}</h1>
             <p v-if="product.summary" class="mt-2 text-[15px] text-[var(--text-dim)]">{{ product.summary }}</p>
             <p class="hint mt-2 nums">已售 {{ product.sold_count ?? 0 }} 件</p>
+            <p v-if="product.delivery_instructions" class="card-quiet mt-5 break-words whitespace-pre-line text-sm leading-relaxed text-[var(--text-dim)]">
+              {{ product.delivery_instructions }}
+            </p>
 
             <div v-if="product.description" class="my-6 divider" />
 
@@ -429,7 +432,9 @@ watch(
           </div>
 
           <div v-if="cardStock !== null" class="hint -mt-1">
-            现货 <span class="nums">{{ cardStock }}</span> 件{{ soldOut ? '，暂时缺货' : '' }}
+            <span v-if="soldOut" class="text-[var(--warning)]">暂时缺货，补货后可购买</span>
+            <span v-else-if="cardStock <= 3" class="text-[var(--warning)]">库存紧张，仅剩 <span class="nums">{{ cardStock }}</span> 件</span>
+            <span v-else>现货 <span class="nums">{{ cardStock }}</span> 件</span>
           </div>
 
           <div v-if="product.require_contact">

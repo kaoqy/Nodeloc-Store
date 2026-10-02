@@ -58,7 +58,9 @@ export interface Product {
   sort_order?: number
   category_id?: number | null
   category?: Category | null
+  delivery_instructions?: string | null
   created_at?: string
+  updated_at?: string
 }
 
 export interface StoreStats {

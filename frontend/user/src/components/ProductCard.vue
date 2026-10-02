@@ -23,7 +23,7 @@ defineProps<{ product: Product }>()
         </span>
       </div>
       <span
-        v-if="product.stock_visible && product.stock_count <= 0"
+        v-if="product.stock_visible && product.product_type === 'card' && product.auto_deliver && product.stock_count <= 0"
         class="badge badge-neutral absolute left-3 top-3"
       >暂时缺货</span>
       <span v-if="product.is_featured" class="badge badge-accent absolute right-3 top-3">推荐</span>
@@ -42,7 +42,7 @@ defineProps<{ product: Product }>()
       <div class="mt-auto flex items-end justify-between gap-3 pt-4">
         <div class="flex items-baseline gap-2">
           <span class="nums text-lg font-bold accent-text">{{ money(product.price) }}</span>
-          <span v-if="product.original_price" class="nums text-xs text-[var(--text-quiet)] line-through">
+          <span v-if="product.original_price && product.original_price > product.price" class="nums text-xs text-[var(--text-quiet)] line-through">
             {{ money(product.original_price) }}
           </span>
         </div>
@@ -60,6 +60,7 @@ defineProps<{ product: Product }>()
         <span v-if="product.stock_visible && product.stock_count > 0">
           现货 <span class="nums">{{ product.stock_count }}</span> 件
         </span>
+        <span v-else-if="product.stock_visible && product.product_type === 'card'" class="text-[var(--warning)]">库存紧张或暂时缺货</span>
       </p>
     </div>
   </RouterLink>

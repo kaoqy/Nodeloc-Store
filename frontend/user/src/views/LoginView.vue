@@ -57,7 +57,7 @@ async function submit() {
       <p class="eyebrow">{{ site.name }}</p>
       <h1 class="mt-2 text-2xl font-bold">登录</h1>
       <p class="mt-2 text-sm text-[var(--text-dim)]">
-        {{ site.oauthEnabled ? '使用 NodeLoc 账号即可下单，无需重复注册。' : '用店里的账号密码登录即可下单。' }}
+        {{ site.oauthEnabled ? '使用 NodeLoc 账号登录或注册，首次授权会自动创建本站账号。' : '用店里的账号密码登录即可下单。' }}
       </p>
 
       <div v-if="oauthError" class="alert alert-warning mt-6" role="alert">
