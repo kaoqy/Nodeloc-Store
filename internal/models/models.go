@@ -325,6 +325,11 @@ type Order struct {
 	// same unit the storefront prices and charges in, not a rescaled one.
 	DiscountAmount int   `gorm:"default:0;not null" json:"discount_amount"`
 	CouponID       *uint `json:"coupon_id,omitempty"`
+	// 活动快照：历史订单必须保留当时参与的活动与优惠金额，后续改价不影响它。
+	ActivityID       *uint  `gorm:"index" json:"activity_id,omitempty"`
+	ActivityName     string `gorm:"size:160" json:"activity_name,omitempty"`
+	ActivityDiscount int    `gorm:"default:0;not null" json:"activity_discount"`
+	ActivitySnapshot string `gorm:"type:text" json:"activity_snapshot,omitempty"`
 	// CouponCode is the code as the buyer typed it, kept on the order so a
 	// discount explains itself in the back office without a join.
 	CouponCode        string     `gorm:"size:64" json:"coupon_code,omitempty"`
@@ -535,6 +540,38 @@ func Migrate(db *gorm.DB) error {
 		&Notification{},
 		&AuditLog{},
 		&AppSetting{},
+
+		// 活动营销
+		&Activity{},
+		&ActivityRule{},
+		&ActivityRecord{},
+		&ActivityLog{},
+		&CouponRecord{},
+
+		// 工单与 AI 客服
+		&Ticket{},
+		&TicketMessage{},
+		&TicketLog{},
+		&TicketAttachment{},
+		&TicketAISession{},
+		&AIConversation{},
+		&AIMessage{},
+		&AIToolDefinition{},
+		&AIToolPermission{},
+		&AIToolCall{},
+		&AIKnowledgeCategory{},
+		&AIKnowledge{},
+		&AIFeedback{},
+		&AIConfig{},
+		&AIWorkflowConfig{},
+		&AIQuickQuestion{},
+		&CustomerServiceAgent{},
+		&CustomerServiceAssignment{},
+		&QuickReply{},
+		&NotificationTemplate{},
+		&NotificationLog{},
+		&SystemConfig{},
+		&OperationLog{},
 	)
 }
 

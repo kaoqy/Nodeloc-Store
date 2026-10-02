@@ -211,6 +211,21 @@ type CouponPricing interface {
 	DiscountFor(ctx context.Context, userID, productID uint, quantity, unitPrice int, code string) (discount int, couponID uint, err error)
 }
 
+// ActivityPricing is the activity module as the money side sees it.
+//
+// It mirrors the activity module's own contract without importing it: modules
+// only depend on each other's contract packages. The money side computes the
+// price through Price before anything is charged, records the participation with
+// Reserve once the order exists, and marks the record settled / refunded so a
+// refund gives the activity quota back instead of holding it forever.
+type ActivityPricing interface {
+	Price(ctx context.Context, input models.ActivityMatchInput) (*models.ActivityPricing, error)
+	Reserve(ctx context.Context, orderID uint, record *models.ActivityRecord) error
+	MarkOrderSettled(ctx context.Context, orderID uint) error
+	MarkOrderRefunded(ctx context.Context, orderID uint) error
+	MarkOrderCancelled(ctx context.Context, orderID uint) error
+}
+
 // BuyerEvent is one of an order's moments worth telling the buyer about: the
 // payment landed, the goods were delivered, the shop refunded. Payment writes the
 // copy because it is the module that knows what actually happened; whoever

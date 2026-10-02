@@ -5,6 +5,7 @@ import { listAuditLogs } from '../api/logs'
 import { alertLowStock } from '../api/products'
 import { getStats } from '../api/system'
 import { errorMessage, fulfillmentStatus, money, orderStatus, when, dayLabel } from '../utils/format'
+import { readDashboardCards, writeDashboardCards, type DashboardCardPref } from '../api/configCenter'
 import { useAuthStore } from '../stores/auth'
 import { useInboxStore } from '../stores/inbox'
 import type { AuditLog, DashboardStats } from '../types'
@@ -63,6 +64,8 @@ const days = ref(prefs.days)
 const metric = ref<Metric>(prefs.metric)
 const auto = ref(prefs.auto)
 const stats = ref<DashboardStats | null>(null)
+const cardPrefs = ref<DashboardCardPref[]>(readDashboardCards())
+const showCardSettings = ref(false)
 const logs = ref<AuditLog[]>([])
 const updatedAt = ref('')
 let refreshTimer: number | undefined
@@ -240,6 +243,39 @@ function onVisible() {
   if (!document.hidden && auto.value && !loading.value) void load(true)
 }
 
+// 卡片偏好保存在本地：拖拽顺序与显示开关都是这台机器的个人偏好，
+// 不写进店铺的共享设置，也不会影响其他管理员。
+function cardVisible(key: string) {
+  return cardPrefs.value.find((item) => item.key === key)?.visible !== false
+}
+
+function toggleCard(key: string) {
+  cardPrefs.value = cardPrefs.value.map((item) =>
+    item.key === key ? { ...item, visible: !item.visible } : item,
+  )
+  writeDashboardCards(cardPrefs.value)
+}
+
+const draggingKey = ref('')
+
+function onDragStart(key: string) {
+  draggingKey.value = key
+}
+
+function onDrop(target: string) {
+  const source = draggingKey.value
+  draggingKey.value = ''
+  if (!source || source === target) return
+  const list = [...cardPrefs.value]
+  const from = list.findIndex((item) => item.key === source)
+  const to = list.findIndex((item) => item.key === target)
+  if (from < 0 || to < 0) return
+  const [moved] = list.splice(from, 1)
+  list.splice(to, 0, moved)
+  cardPrefs.value = list
+  writeDashboardCards(list)
+}
+
 onMounted(() => {
   void load()
   syncAutoRefresh()
@@ -278,9 +314,31 @@ onUnmounted(() => {
           自动刷新 · {{ auto ? '开' : '关' }}
         </button>
         <span v-if="updatedAt" class="hint mono">更新于 {{ updatedAt }}</span>
+        <button class="btn btn-quiet btn-sm" :aria-pressed="showCardSettings" @click="showCardSettings = !showCardSettings">
+          卡片
+        </button>
         <button class="btn btn-quiet btn-sm" :disabled="loading" @click="load()">
           {{ loading ? '加载中…' : '刷新' }}
         </button>
+      </div>
+    </div>
+
+    <div v-if="showCardSettings" class="card space-y-2">
+      <p class="eyebrow">总览卡片</p>
+      <p class="quiet text-xs">拖动可调整顺序，勾选控制显示。偏好保存在当前浏览器。</p>
+      <div class="flex flex-wrap gap-2">
+        <label
+          v-for="card in cardPrefs"
+          :key="card.key"
+          class="chip cursor-grab"
+          draggable="true"
+          @dragstart="onDragStart(card.key)"
+          @dragover.prevent
+          @drop="onDrop(card.key)"
+        >
+          <input type="checkbox" class="mr-1.5" :checked="card.visible" @change="toggleCard(card.key)" />
+          {{ card.label }}
+        </label>
       </div>
     </div>
 
@@ -296,6 +354,7 @@ onUnmounted(() => {
 
     <div v-else-if="stats" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
+        v-if="cardVisible('revenue')"
         label="期间收入"
         :value="money(stats?.revenue_period ?? 0)"
         :hint="`累计 ${money(stats?.revenue_total ?? 0)} · 上期 ${money(stats?.revenue_prev ?? 0)}`"
@@ -305,6 +364,7 @@ onUnmounted(() => {
         accent
       />
       <StatCard
+        v-if="cardVisible('orders')"
         label="支付订单"
         :value="stats?.paid_period ?? 0"
         :hint="`下单 ${stats?.orders_period ?? 0} 笔 · 转化率 ${Math.round(stats?.conversion ?? 0)}%`"
@@ -313,6 +373,7 @@ onUnmounted(() => {
         icon="orders"
       />
       <StatCard
+        v-if="cardVisible('avg_minutes')"
         label="客单价"
         :value="money(stats?.aov ?? 0)"
         :hint="`已交付 ${stats?.delivered_period ?? 0} 笔 · 退款 ${stats?.refunded_period ?? 0} 笔`"
@@ -320,12 +381,41 @@ onUnmounted(() => {
         icon="cards"
       />
       <StatCard
+        v-if="cardVisible('satisfaction')"
         label="期间新客"
         :value="stats?.new_users_period ?? 0"
         :hint="`购买用户 ${stats?.active_buyers_period ?? 0} 人 · 复购 ${stats?.repeat_buyers_period ?? 0} 人`"
         :delta="(stats?.new_users_prev ?? 0) > 0 ? (stats?.new_users_delta ?? null) : null"
         :spark="sparklines.users"
         icon="users"
+      />
+      <StatCard
+        v-if="cardVisible('tickets_ai')"
+        label="AI 处理中工单"
+        :value="stats?.tickets_ai_processing ?? 0"
+        :hint="`工单 ${stats?.tickets_total ?? 0} 张 · 解决率 ${Math.round((stats?.ticket_resolve_rate ?? 0) * 100)}%`"
+        icon="orders"
+      />
+      <StatCard
+        v-if="cardVisible('tickets_pending')"
+        label="待人工处理"
+        :value="stats?.tickets_pending_human ?? 0"
+        :hint="`即将超时 ${stats?.tickets_overdue ?? 0} 张 · 满意度 ${(stats?.ticket_satisfaction ?? 0).toFixed(1)}`"
+        icon="users"
+      />
+      <StatCard
+        v-if="cardVisible('activities')"
+        label="进行中活动"
+        :value="stats?.activities_running ?? 0"
+        :hint="`参与人数 ${stats?.activity_participants ?? 0} 人`"
+        icon="coupons"
+      />
+      <StatCard
+        v-if="cardVisible('ai_calls')"
+        label="AI 工具调用"
+        :value="stats?.ai_tool_calls ?? 0"
+        :hint="`转人工 ${stats?.ai_transfers ?? 0} 次 · 发货异常 ${stats?.auto_delivery_failed ?? 0} 笔`"
+        icon="plugins"
       />
     </div>
 

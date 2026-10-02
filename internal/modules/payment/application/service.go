@@ -15,6 +15,7 @@ import (
 
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
+	activitydomain "github.com/kaoqy/Nodeloc-Store/internal/modules/activity/domain"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/domain"
 )
@@ -63,6 +64,8 @@ type Service struct {
 	plugins contract.PluginDeliverer
 	users   contract.UserLookup
 	coupons contract.CouponPricing
+	// activities 是可选的活动定价端口：没有活动模块时下单照旧，只是不算活动价。
+	activities contract.ActivityPricing
 	// events is optional: a store with no inbox still has to be able to take money.
 	events    contract.BuyerNotifier
 	paymentID string
@@ -139,6 +142,13 @@ type RefundInput struct {
 // valid configuration: no plugin, the shop's own delivery.
 func (s *Service) SetPluginDeliverer(deliverer contract.PluginDeliverer) {
 	s.plugins = deliverer
+}
+
+// SetActivityPricing attaches the activity module. It is a setter because the
+// activity module is wired alongside payment; a shop with no activities leaves
+// it nil and every order simply has no activity discount.
+func (s *Service) SetActivityPricing(pricing contract.ActivityPricing) {
+	s.activities = pricing
 }
 
 func NewService(orders contract.OrderRepo, gateway contract.PaymentGateway, fulfillment contract.FulfillmentService, users contract.UserLookup, coupons contract.CouponPricing, events contract.BuyerNotifier, paymentID string, features config.FeaturesConfig) *Service {
@@ -247,6 +257,29 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 		}
 	}
 
+	// 活动优惠在优惠码之后计算，金额一律来自服务端的结构化规则，绝不采信前端
+	// 传回来的价格；活动把订单打到 0 时同样保留 1，NodeLoc 才收得到钱。
+	var activityPricing *models.ActivityPricing
+	if s.activities != nil {
+		priced, err := s.activities.Price(ctx, models.ActivityMatchInput{
+			UserID:    input.UserID,
+			ProductID: product.ID,
+			Quantity:  quantity,
+			UnitPrice: product.Price,
+		})
+		if err != nil && !errors.Is(err, activitydomain.ErrNoActivity) {
+			return nil, fmt.Errorf("activity pricing: %w", err)
+		}
+		activityPricing = priced
+	}
+	if activityPricing != nil && activityPricing.DiscountAmount > 0 {
+		if activityPricing.DiscountAmount >= total {
+			activityPricing.DiscountAmount = total - 1
+			activityPricing.Payable = 1
+		}
+		total -= activityPricing.DiscountAmount
+	}
+
 	order := &models.Order{
 		OrderNo:           newOrderNo(),
 		UserID:            input.UserID,
@@ -260,6 +293,13 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 		Status:            "pending",
 		FulfillmentStatus: "pending",
 	}
+	if activityPricing != nil {
+		activityID := activityPricing.ActivityID
+		order.ActivityID = &activityID
+		order.ActivityName = activityPricing.ActivityName
+		order.ActivityDiscount = activityPricing.DiscountAmount
+		order.ActivitySnapshot = activityPricing.Snapshot
+	}
 	if contact != "" {
 		order.CustomerContact = &contact
 	}
@@ -269,6 +309,23 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 	order.FormValues = formValuesJSON
 	if err := s.orders.CreateOrder(ctx, order); err != nil {
 		return nil, fmt.Errorf("create order: %w", err)
+	}
+	// 订单已经落地才占用活动名额：占位失败只是统计缺口，不能把订单判成失败。
+	if activityPricing != nil && s.activities != nil {
+		record := &models.ActivityRecord{
+			ActivityID:     activityPricing.ActivityID,
+			UserID:         input.UserID,
+			Quantity:       quantity,
+			OriginalAmount: product.Price * quantity,
+			DiscountAmount: activityPricing.DiscountAmount,
+			PayableAmount:  total,
+			Snapshot:       activityPricing.Snapshot,
+		}
+		productID := product.ID
+		record.ProductID = &productID
+		if err := s.activities.Reserve(ctx, order.ID, record); err != nil {
+			log.Printf("[payment] order %s: activity %d reservation failed: %v", order.OrderNo, activityPricing.ActivityID, err)
+		}
 	}
 	return order, nil
 }
@@ -660,6 +717,13 @@ func (s *Service) settle(ctx context.Context, orderNo string, paymentOrder *doma
 	order, err := s.orders.MarkOrderPaid(ctx, orderNo, transactionID, platformFee, merchantPoints)
 	if err != nil {
 		return nil, err
+	}
+	// 支付确认后把活动参与记录从「已占用」推进到「已使用」，活动统计与名额
+	// 由此只认真正收过钱的订单。失败只记日志：钱已经到账，不能被统计拖累。
+	if order != nil && s.activities != nil && order.ActivityID != nil {
+		if err := s.activities.MarkOrderSettled(ctx, order.ID); err != nil {
+			log.Printf("[payment] order %s: mark activity used: %v", order.OrderNo, err)
+		}
 	}
 	if _, err := s.deliverOrder(ctx, order); err != nil {
 		// NodeLoc has confirmed the money by now. Returning this error told the
@@ -1356,7 +1420,17 @@ func (s *Service) ExportOrders(ctx context.Context, status, search string, buyer
 }
 
 func (s *Service) AdminCancelOrder(ctx context.Context, orderNo string) (*models.Order, error) {
-	return s.orders.UpdateOrderStatus(ctx, strings.TrimSpace(orderNo), "cancelled")
+	order, err := s.orders.UpdateOrderStatus(ctx, strings.TrimSpace(orderNo), "cancelled")
+	if err != nil {
+		return nil, err
+	}
+	// 取消的订单要把活动名额还回去，否则限量活动会被弃单占满。
+	if order != nil && s.activities != nil && order.ActivityID != nil {
+		if err := s.activities.MarkOrderCancelled(ctx, order.ID); err != nil {
+			log.Printf("[payment] order %s: release activity reservation: %v", order.OrderNo, err)
+		}
+	}
+	return order, nil
 }
 
 func (s *Service) AdminDeliverOrder(ctx context.Context, orderNo string, content string) (*models.Order, error) {
@@ -1399,6 +1473,12 @@ func (s *Service) AdminRefundOrder(ctx context.Context, orderNo string) (*models
 		ToUsername: user.OAuthUsername,
 	}); err != nil {
 		return nil, err
+	}
+	// 退款成功后回退活动名额并把参与记录标成已退款，让限量活动能重新放出。
+	if order != nil && s.activities != nil && order.ActivityID != nil {
+		if err := s.activities.MarkOrderRefunded(ctx, order.ID); err != nil {
+			log.Printf("[payment] order %s: release activity after refund: %v", orderNo, err)
+		}
 	}
 	return s.orders.GetOrderByNo(ctx, orderNo)
 }

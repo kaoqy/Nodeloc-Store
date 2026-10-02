@@ -13,6 +13,7 @@ import (
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/mail"
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/activity"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity"
@@ -24,6 +25,7 @@ import (
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment"
 	paymentcontract "github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/plugin"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/support"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/system"
 	"github.com/kaoqy/Nodeloc-Store/internal/platform/database/gormdb"
 )
@@ -37,6 +39,12 @@ type Container struct {
 	Catalog      *catalog.Module
 	Notification *notification.Module
 	Audit        *audit.Module
+	// Activity is the promotion runtime: structured rules, server-side pricing
+	// and participation records. Payment prices orders through it.
+	Activity *activity.Module
+	// Support is the ticket + AI customer service runtime. Tickets default to AI
+	// handling, with a controlled tool layer and a human queue behind it.
+	Support *support.Module
 	// Plugin is the extension runtime. It carries the providers this release
 	// ships and the shop's enrollments of them; the money side calls its Fulfill
 	// hook for a product a plugin is bound to.
@@ -137,8 +145,20 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 	if err != nil {
 		return nil, err
 	}
+	activityMod := activity.Wire(db)
+	supportMod := support.Wire(db, cfg, support.Dependencies{
+		Orders:     support.OrderAdapter{DB: db},
+		Users:      support.UserAdapter{Find: func(ctx context.Context, userID uint) (*models.User, error) { return identityFind(ctx, userID) }},
+		Catalog:    support.CatalogAdapter{DB: db},
+		Activities: support.ActivityAdapter{DB: db},
+		Notifier: support.NotifierAdapter{Send: func(ctx context.Context, notification *models.Notification) error {
+			return notificationMod.Service.Send(ctx, notification)
+		}},
+	})
 	auditMod := audit.Wire(db)
 	pluginMod := plugin.Wire(db)
+	// 活动定价挂到支付模块上：下单金额仍由后端计算，活动只贡献结构化规则。
+	paymentMod.Service.SetActivityPricing(activityMod.Service)
 	// The money side delivers a plugin-bound order through the plugin runtime;
 	// every other product keeps the shop's own card/manual queue.
 	paymentMod.Service.SetPluginDeliverer(plugin.NewDeliveryBridge(pluginMod.Service))
@@ -207,7 +227,9 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		Catalog:      catalogMod,
 		Notification: notificationMod,
 		Audit:        auditMod,
+		Activity:     activityMod,
 		Plugin:       pluginMod,
+		Support:      supportMod,
 		Stock:        stockWatch,
 	}, nil
 }

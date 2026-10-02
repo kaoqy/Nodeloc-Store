@@ -63,6 +63,8 @@ func TestEveryRouteRegisters(t *testing.T) {
 	ctn.Catalog.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
 	ctn.Notification.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
 	ctn.Audit.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
+	ctn.Activity.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
+	ctn.Support.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
 	ctn.Plugin.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
 
 	if routes := router.Routes(); len(routes) == 0 {

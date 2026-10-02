@@ -35,13 +35,25 @@ const groups = [
       { path: '/cards', label: '卡密管理', icon: 'cards', permission: 'cards:view' },
       { path: '/categories', label: '分类管理', icon: 'categories', permission: 'categories:view' },
       { path: '/coupons', label: '优惠券', icon: 'coupons', permission: 'coupons:view' },
+      { path: '/activities', label: '活动营销', icon: 'coupons', permission: 'activities:view' },
       { path: '/plugins', label: '插件管理', icon: 'plugins', permission: 'plugins:view' },
+    ],
+  },
+  {
+    label: '客服与 AI',
+    items: [
+      { path: '/tickets', label: '工单中心', icon: 'orders', permission: 'tickets:view' },
+      { path: '/ai', label: 'AI 客服', icon: 'dashboard', permission: 'ai:view' },
+      { path: '/ai/tools', label: 'AI 工具', icon: 'plugins', permission: 'ai_tools:view' },
+      { path: '/knowledge', label: '知识库', icon: 'products', permission: 'knowledge:view' },
+      { path: '/service/agents', label: '客服与快捷回复', icon: 'users', permission: 'agents:view' },
     ],
   },
   { label: '客户', items: [{ path: '/users', label: '用户管理', icon: 'users', permission: 'users:view' }] },
   {
     label: '系统',
     items: [
+      { path: '/config', label: '配置中心', icon: 'settings', permission: 'config_center:view' },
       { path: '/notifications', label: '通知中心', icon: 'notifications', permission: 'notifications:view' },
       { path: '/roles', label: '角色权限', icon: 'roles', permission: 'roles:view' },
       { path: '/logs', label: '审计日志', icon: 'logs', permission: 'logs:view' },

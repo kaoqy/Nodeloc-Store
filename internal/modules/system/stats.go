@@ -169,6 +169,20 @@ type DashboardStats struct {
 	CouponsActive       int64          `json:"coupons_active"`
 	CardHealth          CardHealth     `json:"card_health"`
 	Engagement          Engagement     `json:"engagement"`
+
+	// 工单与 AI 客服的实时指标。
+	TicketsTotal         int64   `json:"tickets_total"`
+	TicketsAI            int64   `json:"tickets_ai_processing"`
+	TicketsPendingHuman  int64   `json:"tickets_pending_human"`
+	TicketsOverdue       int64   `json:"tickets_overdue"`
+	TicketResolveRate    float64 `json:"ticket_resolve_rate"`
+	TicketSatisfaction   float64 `json:"ticket_satisfaction"`
+	TicketAvgMinutes     float64 `json:"ticket_avg_minutes"`
+	AIToolCalls          int64   `json:"ai_tool_calls"`
+	AITransfers          int64   `json:"ai_transfers"`
+	ActivitiesRunning    int64   `json:"activities_running"`
+	ActivityParticipants int64   `json:"activity_participants"`
+	AutoDeliveryFailed   int64   `json:"auto_delivery_failed"`
 }
 
 // Stats aggregates the overview numbers straight from the live database, so the
@@ -232,13 +246,77 @@ func (s *Service) Stats(ctx context.Context, days int) (*DashboardStats, error) 
 
 	for _, step := range []func(context.Context, *gorm.DB, *DashboardStats, time.Time) error{
 		statTrend, statPreviousRevenue, statBestSellers, statTopBuyers, statStockAlerts, statFunnel, statRecentOrders,
-		statCategories, statCoupons, statCardHealth, statEngagement,
+		statCategories, statCoupons, statCardHealth, statEngagement, statSupport,
 	} {
 		if err := step(ctx, db, stats, cutoff); err != nil {
 			return nil, err
 		}
 	}
 	return stats, nil
+}
+
+// statSupport 汇总工单、AI 工具调用与活动的实时指标，供总览的卡片使用。
+// 任何一张表不存在时（老库尚未迁移）只跳过该段，不影响其它统计。
+func statSupport(ctx context.Context, db *gorm.DB, stats *DashboardStats, _ time.Time) error {
+	now := time.Now().UTC()
+	if err := db.WithContext(ctx).Model(&models.Ticket{}).Count(&stats.TicketsTotal).Error; err != nil {
+		return nil
+	}
+	type counts struct {
+		AI      int64
+		Pending int64
+		Overdue int64
+	}
+	var metric counts
+	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+		Where("status IN ?", []string{models.TicketStatusAIProcessing, models.TicketStatusWaitingUser, models.TicketStatusAISolved}).
+		Count(&metric.AI).Error; err == nil {
+		stats.TicketsAI = metric.AI
+	}
+	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+		Where("status IN ?", []string{models.TicketStatusPendingHuman, models.TicketStatusUserRequested}).
+		Count(&metric.Pending).Error; err == nil {
+		stats.TicketsPendingHuman = metric.Pending
+	}
+	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+		Where("due_at IS NOT NULL AND due_at < ? AND status NOT IN ?", now, []string{models.TicketStatusResolved, models.TicketStatusClosed}).
+		Count(&metric.Overdue).Error; err == nil {
+		stats.TicketsOverdue = metric.Overdue
+	}
+	var resolved int64
+	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+		Where("status IN ?", []string{models.TicketStatusResolved, models.TicketStatusClosed}).
+		Count(&resolved).Error; err == nil && stats.TicketsTotal > 0 {
+		stats.TicketResolveRate = float64(resolved) / float64(stats.TicketsTotal)
+	}
+	var satisfaction float64
+	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+		Select("COALESCE(AVG(CASE WHEN satisfaction > 0 THEN satisfaction END), 0)").
+		Scan(&satisfaction).Error; err == nil {
+		stats.TicketSatisfaction = satisfaction
+	}
+	if err := db.WithContext(ctx).Model(&models.AIToolCall{}).Count(&stats.AIToolCalls).Error; err != nil {
+		stats.AIToolCalls = 0
+	}
+	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+		Where("transfer_reason <> ''").Count(&stats.AITransfers).Error; err != nil {
+		stats.AITransfers = 0
+	}
+	if err := db.WithContext(ctx).Model(&models.Activity{}).
+		Where("status = ?", models.ActivityStatusRunning).Count(&stats.ActivitiesRunning).Error; err != nil {
+		stats.ActivitiesRunning = 0
+	}
+	if err := db.WithContext(ctx).Model(&models.ActivityRecord{}).
+		Where("status IN ?", []string{"reserved", "used"}).
+		Select("COALESCE(COUNT(DISTINCT user_id), 0)").Scan(&stats.ActivityParticipants).Error; err != nil {
+		stats.ActivityParticipants = 0
+	}
+	if err := db.WithContext(ctx).Model(&models.Order{}).
+		Where("status = ? AND fulfillment_status = ?", "paid", "failed").
+		Count(&stats.AutoDeliveryFailed).Error; err != nil {
+		stats.AutoDeliveryFailed = 0
+	}
+	return nil
 }
 
 // statTrend fills the daily series and every counter derived from the period's

@@ -294,6 +294,11 @@ html[data-theme='light'] {
   .btn-ghost:hover:not(:disabled) { color: var(--text); background: var(--surface-hi); }
   .btn-danger { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 42%, transparent); }
   .btn-danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
+  .btn-xs {
+    padding: 3px 8px;
+    font-size: 12px;
+    border-radius: var(--radius-xs);
+  }
   .btn-sm { padding: 5px 11px; font-size: 12.5px; border-radius: var(--radius-xs); min-height: 36px; }
   .scrim { background: var(--scrim); }
 

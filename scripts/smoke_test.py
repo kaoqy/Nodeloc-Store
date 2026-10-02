@@ -17,6 +17,8 @@ import hmac
 import importlib.util
 import shutil
 import sys
+import atexit
+import tempfile
 from configparser import RawConfigParser
 from pathlib import Path
 
@@ -38,6 +40,22 @@ if "requests" not in sys.modules:
 # ── import via real package path (so dataclass introspection works) ────
 from app import config, nodeloc  # noqa: E402
 
+# The smoke test temporarily replaces the local install directory. Preserve a
+# real installation and restore it even if an assertion or import fails.
+_instance_backup = Path(tempfile.mkdtemp(prefix="nodeloc-store-smoke-")) / "instance"
+if config.INSTANCE_DIR.exists():
+    shutil.copytree(config.INSTANCE_DIR, _instance_backup)
+
+
+def _restore_instance() -> None:
+    shutil.rmtree(config.INSTANCE_DIR, ignore_errors=True)
+    if _instance_backup.exists():
+        shutil.copytree(_instance_backup, config.INSTANCE_DIR)
+    shutil.rmtree(_instance_backup.parent, ignore_errors=True)
+
+
+atexit.register(_restore_instance)
+
 PASS = 0
 FAIL = 0
 
@@ -46,10 +64,10 @@ def check(label: str, got, want):
     global PASS, FAIL
     if got == want:
         PASS += 1
-        print(f"  ✓ {label}")
+        print(f"  [OK] {label}")
     else:
         FAIL += 1
-        print(f"  ✗ {label}\n      got:  {got!r}\n      want: {want!r}")
+        print(f"  [FAIL] {label}\n      got:  {got!r}\n      want: {want!r}")
 
 
 # ── 1) Config round-trip ────────────────────────────────────────────────
@@ -74,7 +92,11 @@ cp.set("payment", "id", "pay_xxx")
 cp.set("payment", "secret", "sec_xxx")
 cp.set("app", "site_name", "我的商店")
 cp.set("app", "secret_key", "k" * 32)
-with open(config.CONFIG_PATH, "w") as f:
+# The application reads config.ini as UTF-8.  Passing an explicit encoding is
+# required on Windows, where the process default is commonly a legacy code
+# page and the Chinese site name would otherwise make the smoke test create an
+# unreadable configuration file.
+with open(config.CONFIG_PATH, "w", encoding="utf-8", newline="\n") as f:
     cp.write(f)
 
 

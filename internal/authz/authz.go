@@ -95,6 +95,58 @@ func SeedDefaults() error {
 			{"stats", "view"}, {"orders", "view"}, {"orders", "manage"},
 			{"users", "view"}, {"notifications", "view"},
 		},
+		"ops_manager": {
+			{"stats", "view"}, {"stats", "export"}, {"finance", "view"},
+			{"products", "view"}, {"products", "manage"}, {"cards", "view"}, {"cards", "manage"},
+			{"orders", "view"}, {"orders", "manage"}, {"categories", "view"}, {"categories", "manage"},
+			{"coupons", "view"}, {"coupons", "manage"}, {"activities", "view"}, {"activities", "manage"},
+			{"tickets", "view"}, {"tickets", "manage"}, {"tickets", "assign"},
+			{"users", "view"}, {"users", "manage"}, {"notifications", "view"}, {"notifications", "manage"},
+			{"plugins", "view"}, {"plugins", "manage"},
+		},
+		"product_manager": {
+			{"products", "view"}, {"products", "manage"}, {"cards", "view"}, {"cards", "manage"},
+			{"categories", "view"}, {"categories", "manage"}, {"activities", "view"}, {"activities", "manage"},
+			{"coupons", "view"}, {"coupons", "manage"}, {"stats", "view"}, {"notifications", "view"},
+		},
+		"order_manager": {
+			{"orders", "view"}, {"orders", "manage"}, {"products", "view"}, {"cards", "view"},
+			{"users", "view"}, {"stats", "view"}, {"notifications", "view"}, {"notifications", "manage"},
+			{"finance", "view"}, {"activities", "view"},
+		},
+		"finance": {
+			{"stats", "view"}, {"stats", "export"}, {"finance", "view"}, {"finance", "export"},
+			{"orders", "view"}, {"orders", "manage"}, {"users", "view"}, {"activities", "view"},
+			{"operation_logs", "view"}, {"operation_logs", "export"},
+		},
+		"support_lead": {
+			{"stats", "view"}, {"orders", "view"}, {"users", "view"}, {"users", "manage"},
+			{"notifications", "view"}, {"notifications", "manage"},
+			{"tickets", "view"}, {"tickets", "manage"}, {"tickets", "assign"},
+			{"ticket_config", "view"}, {"ticket_config", "manage"},
+			{"agents", "view"}, {"agents", "manage"}, {"quick_replies", "view"}, {"quick_replies", "manage"},
+			{"knowledge", "view"}, {"knowledge", "manage"}, {"ai", "view"},
+			{"notification_templates", "view"}, {"notification_templates", "manage"},
+		},
+		"support_agent": {
+			{"orders", "view"}, {"users", "view"}, {"notifications", "view"},
+			{"tickets", "view"}, {"tickets", "manage"},
+			{"quick_replies", "view"}, {"knowledge", "view"}, {"ai", "view"},
+		},
+		"ai_admin": {
+			{"stats", "view"}, {"tickets", "view"}, {"tickets", "manage"},
+			{"ai", "view"}, {"ai", "manage"}, {"ai_tools", "view"}, {"ai_tools", "manage"},
+			{"knowledge", "view"}, {"knowledge", "manage"},
+			{"quick_replies", "view"}, {"quick_replies", "manage"},
+			{"ticket_config", "view"}, {"ticket_config", "manage"},
+			{"notification_templates", "view"}, {"notification_templates", "manage"},
+			{"config_center", "view"}, {"config_center", "manage"},
+		},
+		"data_viewer": {
+			{"stats", "view"}, {"stats", "export"}, {"finance", "view"},
+			{"products", "view"}, {"orders", "view"}, {"cards", "view"}, {"users", "view"},
+			{"activities", "view"}, {"tickets", "view"}, {"operation_logs", "view"}, {"operation_logs", "export"},
+		},
 	}
 
 	stored := readSeedVersion()
@@ -141,6 +193,49 @@ func SeedDefaults() error {
 			changed = true
 		}
 		if addMissing("operator", "plugins", "manage") {
+			changed = true
+		}
+	}
+	if stored < 5 {
+		// 活动、工单、AI 客服与配置中心是这一版新增的后台能力。已有的
+		// 管理员/运营要拿到新菜单的查看权限，新角色要按内置权限集补齐。
+		for _, role := range []string{"admin", "operator", "ops_manager"} {
+			for _, permission := range [][2]string{
+				{"activities", "view"}, {"activities", "manage"},
+				{"tickets", "view"}, {"tickets", "manage"}, {"tickets", "assign"},
+				{"ai", "view"}, {"ai", "manage"},
+				{"knowledge", "view"}, {"knowledge", "manage"},
+				{"config_center", "view"}, {"config_center", "manage"},
+			} {
+				if addMissing(role, permission[0], permission[1]) {
+					changed = true
+				}
+			}
+		}
+	}
+	if stored < 6 {
+		if addMissing("admin", "finance", "view") {
+			changed = true
+		}
+		if addMissing("admin", "ai_tools", "view") {
+			changed = true
+		}
+		if addMissing("admin", "ai_tools", "manage") {
+			changed = true
+		}
+		if addMissing("admin", "agents", "view") {
+			changed = true
+		}
+		if addMissing("admin", "quick_replies", "view") {
+			changed = true
+		}
+		if addMissing("admin", "notification_templates", "view") {
+			changed = true
+		}
+		if addMissing("admin", "operation_logs", "view") {
+			changed = true
+		}
+		if addMissing("admin", "ticket_config", "view") {
 			changed = true
 		}
 	}
@@ -236,7 +331,7 @@ const legacyStatsResource = "dashboard"
 
 const (
 	// seedVersion is the shape of the seeded policy set this build expects.
-	seedVersion        = 3
+	seedVersion        = 6
 	seedVersionKey     = "authz_seed_version"
 	settingsValueTable = "app_settings"
 )
@@ -284,7 +379,19 @@ type PermissionGroup struct {
 // this instead of letting anyone type policy strings by hand.
 func PermissionCatalog() []PermissionGroup {
 	return []PermissionGroup{
-		{Resource: "stats", Label: "概览与统计", Actions: []string{"view"}},
+		{Resource: "stats", Label: "概览与统计", Actions: []string{"view", "export"}},
+		{Resource: "finance", Label: "财务数据", Actions: []string{"view", "export"}},
+		{Resource: "activities", Label: "活动营销", Actions: []string{"view", "manage"}},
+		{Resource: "tickets", Label: "工单中心", Actions: []string{"view", "manage", "assign"}},
+		{Resource: "ticket_config", Label: "工单配置", Actions: []string{"view", "manage"}},
+		{Resource: "ai", Label: "AI 客服", Actions: []string{"view", "manage"}},
+		{Resource: "ai_tools", Label: "AI 工具", Actions: []string{"view", "manage"}},
+		{Resource: "knowledge", Label: "知识库", Actions: []string{"view", "manage"}},
+		{Resource: "agents", Label: "客服人员", Actions: []string{"view", "manage"}},
+		{Resource: "quick_replies", Label: "快捷回复", Actions: []string{"view", "manage"}},
+		{Resource: "notification_templates", Label: "通知模板", Actions: []string{"view", "manage"}},
+		{Resource: "config_center", Label: "配置中心", Actions: []string{"view", "manage"}},
+		{Resource: "operation_logs", Label: "操作日志", Actions: []string{"view", "export"}},
 		{Resource: "products", Label: "商品", Actions: []string{"view", "manage"}},
 		{Resource: "categories", Label: "分类", Actions: []string{"view", "manage"}},
 		{Resource: "cards", Label: "卡密", Actions: []string{"view", "manage"}},
@@ -313,7 +420,13 @@ func hasPolicies(role string) bool {
 // Roles are the back-office roles the application understands. They are a
 // fixed set because the storefront's navigation and the seeded policy lists
 // both assume exactly these names.
-var Roles = []string{"super_admin", "admin", "operator", "support"}
+var Roles = []string{
+	"super_admin", "admin", "operator", "support",
+	// 需求新增的角色：运营管理员、商品管理员、订单管理员、财务人员、
+	// 客服主管、普通客服、AI 管理员、数据查看员。
+	"ops_manager", "product_manager", "order_manager", "finance",
+	"support_lead", "support_agent", "ai_admin", "data_viewer",
+}
 
 // Can reports whether a role may perform act on obj. Policies are keyed by
 // role, not by user id, which is what makes a permission edit apply to everyone
