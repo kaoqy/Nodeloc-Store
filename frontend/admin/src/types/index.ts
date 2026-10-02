@@ -406,7 +406,7 @@ export interface RuntimeSettings {
 export interface PluginConfigField {
   key: string
   label: string
-  type: 'text' | 'password' | 'select' | 'number' | 'bool'
+  type: 'text' | 'textarea' | 'password' | 'select' | 'number' | 'bool'
   required: boolean
   placeholder?: string
   help?: string
@@ -448,6 +448,8 @@ export interface Plugin {
   config_schema?: string
   capabilities?: string
   installed_at?: string
+  /** Transient: the provider's complaint about the configuration just saved. */
+  validation_warning?: string
 }
 
 /** Maps one purchase-form answer to a provider-side delivery item. */

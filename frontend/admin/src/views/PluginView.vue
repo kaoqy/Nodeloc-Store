@@ -28,10 +28,16 @@ const products = ref<Product[]>([])
 const bindings = ref<PluginBinding[]>([])
 
 const activating = ref<PluginCatalogEntry | null>(null)
-const configDraft = ref<{ settings: Record<string, string>; secrets: Record<string, string> }>({
-  settings: {},
-  secrets: {},
-})
+// The draft is fully materialized from the provider's schema before the form
+// opens: every non-password field exists in one of these maps from the start.
+// A field that only appears once it is touched would be missing from the submit
+// payload, and the server would read that as 「没填」 — which is exactly how a
+// required 交付说明 used to vanish between the form and the API.
+const configDraft = ref<{
+  settings: Record<string, string>
+  secrets: Record<string, string>
+  flags: Record<string, boolean>
+}>({ settings: {}, secrets: {}, flags: {} })
 const bindingDraft = ref<{
   id?: number
   plugin_id: number
@@ -92,12 +98,29 @@ async function install(entry: PluginCatalogEntry) {
 
 function openConfig(entry: PluginCatalogEntry) {
   const settings: Record<string, string> = {}
+  const secrets: Record<string, string> = {}
+  const flags: Record<string, boolean> = {}
   for (const field of entry.manifest.config_schema) {
-    if (field.type === 'password') continue
+    if (field.type === 'password') {
+      // Never pre-filled: the stored value is write-only and an empty box means
+      // 「保持原样」.
+      secrets[field.key] = ''
+      continue
+    }
+    if (field.type === 'bool') {
+      flags[field.key] = storedFlag(entry.settings?.[field.key])
+      continue
+    }
     settings[field.key] = entry.settings?.[field.key] ?? ''
   }
-  configDraft.value = { settings, secrets: {} }
+  configDraft.value = { settings, secrets, flags }
   activating.value = entry
+}
+
+/** A stored checkbox value read back the way the server writes it. */
+function storedFlag(value: string | undefined): boolean {
+  if (value === undefined) return false
+  return ['1', 'true', 'on', 'yes', 'y'].includes(value.trim().toLowerCase())
 }
 
 async function saveConfig() {
@@ -107,8 +130,25 @@ async function saveConfig() {
   error.value = ''
   message.value = ''
   try {
-    await updatePluginConfig(entry.plugin_id, configDraft.value.settings, configDraft.value.secrets)
-    message.value = '配置已保存。'
+    // Flags are folded back into settings as the strings the API expects, and
+    // every schema key is present so an untouched field still round-trips.
+    const settings: Record<string, string> = { ...configDraft.value.settings }
+    for (const field of entry.manifest.config_schema) {
+      if (field.type === 'bool') {
+        settings[field.key] = configDraft.value.flags[field.key] ? 'true' : 'false'
+      }
+    }
+    const plugin = await updatePluginConfig(entry.plugin_id, settings, configDraft.value.secrets)
+    // The server answers with the provider's own complaint when the
+    // configuration is still incomplete. Saving is allowed so the owner can fill
+    // the form in stages, so the message has to carry the refusal forward.
+    if (plugin.validation_warning) {
+      message.value = ''
+      error.value = `已保存，但这个插件还不能启用：${plugin.validation_warning}`
+    } else {
+      error.value = ''
+      message.value = '配置已保存。'
+    }
     await load()
     const fresh = entries.value.find((item) => item.plugin_id === entry.plugin_id)
     activating.value = fresh ?? null
@@ -395,16 +435,41 @@ onMounted(load)
               <option value="">请选择…</option>
               <option v-for="option in field.options" :key="option" :value="option">{{ option }}</option>
             </select>
-            <label v-else-if="field.type === 'bool'" class="flex items-center gap-2 text-sm">
-              <input v-model="configDraft.settings[field.key]" type="checkbox" />
-              开启
+
+            <label
+              v-else-if="field.type === 'bool'"
+              class="flex cursor-pointer items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--stroke)] bg-[var(--surface-sunken)] px-3 py-2.5"
+            >
+              <span class="text-[13px] text-[var(--text-dim)]">{{ field.placeholder || '开启后生效' }}</span>
+              <span class="switch" :class="{ 'switch-on': configDraft.flags[field.key] }">
+                <input v-model="configDraft.flags[field.key]" class="sr-only" type="checkbox" />
+              </span>
             </label>
+
             <input
-              v-else
+              v-else-if="field.type === 'password'"
               :id="`cfg-${field.key}`"
               v-model="configDraft.secrets[field.key]"
               class="input"
-              :type="field.type === 'password' ? 'password' : 'text'"
+              type="password"
+              :placeholder="field.placeholder || '留空表示保持原样'"
+              autocomplete="new-password"
+            />
+
+            <textarea
+              v-else-if="field.type === 'textarea'"
+              :id="`cfg-${field.key}`"
+              v-model="configDraft.settings[field.key]"
+              class="input"
+              :placeholder="field.placeholder"
+            />
+
+            <input
+              v-else
+              :id="`cfg-${field.key}`"
+              v-model="configDraft.settings[field.key]"
+              class="input"
+              :type="field.type === 'number' ? 'number' : 'text'"
               :placeholder="field.placeholder"
               autocomplete="off"
             />

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"time"
 
@@ -15,10 +16,25 @@ var ErrInvalidNotification = errors.New("user_id, type and title are required")
 type Service struct {
 	repo     contract.NotificationRepo
 	notifier contract.Notifier
+	// mail is the 站外 half. Every piece is optional: a shop with no SMTP
+	// configured, or a buyer with no email address, still gets the 站内 message,
+	// which is the one the badge counts.
+	addresses contract.MailAddressReader
+	mailConf  contract.MailConfigReader
+	sender    contract.MailSender
 }
 
 func NewService(repo contract.NotificationRepo, notifier contract.Notifier) *Service {
 	return &Service{repo: repo, notifier: notifier}
+}
+
+// EnableMail attaches the outbound half of a notification. It is a setter rather
+// than a constructor argument because the pieces live in other modules (accounts
+// and settings) and the notification module has to stay usable without them.
+func (s *Service) EnableMail(addresses contract.MailAddressReader, config contract.MailConfigReader, sender contract.MailSender) {
+	s.addresses = addresses
+	s.mailConf = config
+	s.sender = sender
 }
 
 func (s *Service) Send(ctx context.Context, notification *models.Notification) error {
@@ -32,9 +48,98 @@ func (s *Service) Send(ctx context.Context, notification *models.Notification) e
 		return err
 	}
 	if s.notifier != nil {
-		return s.notifier.Notify(ctx, *notification)
+		if err := s.notifier.Notify(ctx, *notification); err != nil {
+			return err
+		}
 	}
+	s.sendMail(ctx, *notification)
 	return nil
+}
+
+// sendMail mirrors one written notification to the account's email address, when
+// the shop has SMTP switched on and that account has an address.
+//
+// It is deliberately best-effort and silent: the 站内 message is already stored
+// by the time this runs, so a mail server that is down must not turn a
+// successful notification into a failed one. Every outcome is logged instead.
+func (s *Service) sendMail(ctx context.Context, notification models.Notification) {
+	if s.sender == nil || s.addresses == nil || s.mailConf == nil {
+		return
+	}
+	config, on := s.mailConf.MailConfig(ctx)
+	if !on {
+		return
+	}
+	address, err := s.addresses.EmailFor(ctx, notification.UserID)
+	if err != nil {
+		log.Printf("[notification] mail: could not read the address for user %d: %v", notification.UserID, err)
+		return
+	}
+	address = strings.TrimSpace(address)
+	if address == "" {
+		// A buyer who signed in with NodeLoc without the email scope, or who never
+		// set one, simply has no 站外 inbox here.
+		return
+	}
+	if err := s.sender.SendMail(config, address, mailSubject(config, notification), mailBody(config, notification)); err != nil {
+		log.Printf("[notification] mail: user %d (%s): %v", notification.UserID, notification.Title, err)
+	}
+}
+
+// mailSubject prefixes the shop's own name so a buyer can tell at a glance which
+// store the message is from.
+func mailSubject(config contract.MailConfig, notification models.Notification) string {
+	name := strings.TrimSpace(config.SiteName)
+	if name == "" {
+		return notification.Title
+	}
+	return "【" + name + "】" + notification.Title
+}
+
+// mailBody is the plain-text version of the message. The link is written as an
+// absolute address when the shop knows its own domain, so a mail client's link
+// goes somewhere; otherwise the relative path is still readable.
+// absoluteLink turns a storefront-relative notification link into one a mail
+// client can open. The scheme is never guessed from the visitor's request: an
+// email outlives the request that produced it, so only the shop's own setting is
+// authoritative here.
+func absoluteLink(base, link string) string {
+	link = strings.TrimSpace(link)
+	if strings.HasPrefix(link, "//") {
+		// A protocol-relative address is not something this shop writes, and
+		// following it would send the buyer to whatever host it names.
+		return ""
+	}
+	if strings.HasPrefix(link, "/") {
+		base = strings.TrimRight(strings.TrimSpace(base), "/")
+		if base == "" {
+			return link
+		}
+		return base + link
+	}
+	if strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") {
+		return link
+	}
+	return ""
+}
+
+func mailBody(config contract.MailConfig, notification models.Notification) string {
+	var b strings.Builder
+	b.WriteString(notification.Title)
+	b.WriteString("\r\n\r\n")
+	if notification.Content != nil && strings.TrimSpace(*notification.Content) != "" {
+		b.WriteString(strings.TrimSpace(*notification.Content))
+		b.WriteString("\r\n\r\n")
+	}
+	if notification.Link != nil && strings.TrimSpace(*notification.Link) != "" {
+		b.WriteString("查看详情：")
+		b.WriteString(absoluteLink(config.BaseURL, *notification.Link))
+		b.WriteString("\r\n\r\n")
+	}
+	b.WriteString("这是一封由 ")
+	b.WriteString(strings.TrimSpace(config.SiteName))
+	b.WriteString(" 自动发出的通知邮件，请勿直接回复。")
+	return b.String()
 }
 
 // SendOnce writes the message only when the very same one has not reached this

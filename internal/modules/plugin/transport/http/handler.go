@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -113,15 +114,19 @@ func (h *Handler) SetEnabled(c *gin.Context) {
 }
 
 func (h *Handler) UpdateConfig(c *gin.Context) {
+	// The values are read as raw JSON first. A checkbox in the browser is a real
+	// boolean, and binding straight into map[string]string makes Gin answer 400 on
+	// {"notify_buyer": true} — which reads as 「保存失败」 on a form the owner just
+	// filled in correctly. flexibleText accepts either spelling.
 	var request struct {
-		Settings map[string]string `json:"settings"`
-		Secrets  map[string]string `json:"secrets"`
+		Settings map[string]flexibleText `json:"settings"`
+		Secrets  map[string]flexibleText `json:"secrets"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		writeError(c, domain.ErrInvalidInput)
 		return
 	}
-	plugin, err := h.service.UpdateConfig(c.Request.Context(), idParam(c), request.Settings, request.Secrets)
+	plugin, err := h.service.UpdateConfig(c.Request.Context(), idParam(c), flatten(request.Settings), flatten(request.Secrets))
 	if err != nil {
 		writeError(c, err)
 		return
@@ -193,6 +198,39 @@ func (h *Handler) DescribeProduct(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": describe})
+}
+
+// flexibleText is a JSON scalar that may arrive quoted or bare, so a plugin
+// setting can be sent as "on" or true without the request being rejected.
+type flexibleText string
+
+func (value *flexibleText) UnmarshalJSON(raw []byte) error {
+	text := strings.TrimSpace(string(raw))
+	if text == "" || text == "null" {
+		*value = ""
+		return nil
+	}
+	if text[0] == '"' {
+		var decoded string
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return err
+		}
+		*value = flexibleText(strings.TrimSpace(decoded))
+		return nil
+	}
+	*value = flexibleText(text)
+	return nil
+}
+
+func flatten(values map[string]flexibleText) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = string(value)
+	}
+	return out
 }
 
 func idParam(c *gin.Context) uint {

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/plugin/infrastructure"
+
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/plugin/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/plugin/domain"
 )
@@ -288,5 +290,90 @@ func TestCatalogNeverCarriesASecretValue(t *testing.T) {
 	encoded := fmt.Sprintf("%+v", entries[0])
 	if strings.Contains(encoded, "super-secret-value") {
 		t.Fatalf("the credential leaked into a catalog answer: %s", encoded)
+	}
+}
+
+// builtInService wires the real provider the shop actually ships, so these tests
+// fail if the shipping plugin's schema and its save path stop agreeing.
+func builtInService(t *testing.T) (*Service, *fakeRepo) {
+	t.Helper()
+	provider := infrastructure.NewManualDelivery()
+	plugin := domain.Plugin{
+		Key: provider.Key(), Name: "人工交付", IsEnabled: true, Settings: "{}", ConfigSecrets: "{}",
+	}
+	plugin.ID = 1
+	repo := &fakeRepo{
+		plugins:  []domain.Plugin{plugin},
+		bindings: []domain.PluginBinding{},
+		contexts: map[uint]*contract.OrderContext{},
+	}
+	service, err := NewService(repo, registryFor{providers: []contract.Provider{provider}})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	return service, repo
+}
+
+// The 交付说明 field and the 发货时通知买家 checkbox are the two fields the built-in
+// plugin ships with, and both used to be lost on save: the text field was bound
+// to the secrets map (so the required value never reached the server) and the
+// checkbox arrived as a bare boolean (so binding answered 400). This pins the
+// whole round trip against the real provider's schema.
+func TestSavingTheBuiltInPluginConfigStoresBothFields(t *testing.T) {
+	service, _ := builtInService(t)
+
+	stored, err := service.UpdateConfig(context.Background(), 1,
+		map[string]string{"instructions": "付款后 24 小时内发货", "notify_buyer": "true"},
+		map[string]string{},
+	)
+	if err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+	if stored.ValidationWarning != "" {
+		t.Fatalf("a complete configuration still warned: %q", stored.ValidationWarning)
+	}
+	if !strings.Contains(stored.Settings, "付款后 24 小时内发货") {
+		t.Fatalf("the instructions were not stored: %s", stored.Settings)
+	}
+	if !strings.Contains(stored.Settings, `"notify_buyer":"true"`) {
+		t.Fatalf("the checkbox was not normalised to true: %s", stored.Settings)
+	}
+
+	// Every spelling a browser checkbox can send has to land as one canonical
+	// value, so the provider never has to guess.
+	for _, spelling := range []string{"on", "1", "TRUE", "yes", "false", "0", "junk"} {
+		updated, err := service.UpdateConfig(context.Background(), 1,
+			map[string]string{"instructions": "x", "notify_buyer": spelling},
+			map[string]string{},
+		)
+		if err != nil {
+			t.Fatalf("UpdateConfig(%q): %v", spelling, err)
+		}
+		want := `"notify_buyer":"false"`
+		if strings.EqualFold(spelling, "on") || spelling == "1" || strings.EqualFold(spelling, "true") || strings.EqualFold(spelling, "yes") {
+			want = `"notify_buyer":"true"`
+		}
+		if !strings.Contains(updated.Settings, want) {
+			t.Fatalf("checkbox spelling %q stored as %s, want %s", spelling, updated.Settings, want)
+		}
+	}
+}
+
+// Saving an incomplete configuration has to succeed: a fresh install has no
+// 交付说明 yet, and refusing the save would leave the owner with a 「保存」 that can
+// never work (enabling is what Validate gates). The provider's own complaint
+// rides back as a warning instead, so the screen can say what is still missing.
+func TestSavingAnIncompleteConfigSucceedsWithAWarning(t *testing.T) {
+	service, _ := builtInService(t)
+
+	stored, err := service.UpdateConfig(context.Background(), 1, map[string]string{"instructions": "  "}, map[string]string{})
+	if err != nil {
+		t.Fatalf("an incomplete configuration was refused at save time: %v", err)
+	}
+	if stored.ValidationWarning == "" {
+		t.Fatal("an incomplete configuration came back without a warning")
+	}
+	if _, err := service.SetEnabled(context.Background(), 1, true); err == nil {
+		t.Fatal("a plugin with no 交付说明 was enabled")
 	}
 }

@@ -44,3 +44,39 @@ type InboxFacet struct {
 type Notifier interface {
 	Notify(ctx context.Context, notification models.Notification) error
 }
+
+// MailAddressReader resolves the inbox address for one account. It is a port
+// rather than a store call so the notification module never has to know how
+// accounts are kept; a missing address is not an error, it just means this
+// message has no 站外 copy to send.
+type MailAddressReader interface {
+	EmailFor(ctx context.Context, userID uint) (string, error)
+}
+
+// MailConfigReader supplies the shop's SMTP settings. The notification module
+// asks on every send so a settings change applies without a restart, and a shop
+// that has not configured SMTP simply reads as 「off」.
+type MailConfigReader interface {
+	MailConfig(ctx context.Context) (MailConfig, bool)
+}
+
+// MailConfig is the subset of the shop's SMTP settings a mail needs. It is the
+// notification module's own shape so it does not import the system module.
+type MailConfig struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	Secure   string
+	From     string
+	SiteName string
+	// BaseURL is the shop's own origin (https://shop.example.com), used to turn a
+	// relative notification link into one a mail client can open.
+	BaseURL string
+}
+
+// MailSender delivers one email. A failure is the caller's to log, never the
+// buyer's to see: the 站内 notification has already been written by then.
+type MailSender interface {
+	SendMail(config MailConfig, to, subject, body string) error
+}

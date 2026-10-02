@@ -11,13 +11,16 @@ import (
 	"github.com/kaoqy/Nodeloc-Store/internal/app/stockwatch"
 	"github.com/kaoqy/Nodeloc-Store/internal/authz"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
+	"github.com/kaoqy/Nodeloc-Store/internal/mail"
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/audit"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity"
+	identityapplication "github.com/kaoqy/Nodeloc-Store/internal/modules/identity/application"
 	identitydomain "github.com/kaoqy/Nodeloc-Store/internal/modules/identity/domain"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/notification"
 	notificationapp "github.com/kaoqy/Nodeloc-Store/internal/modules/notification/application"
+	notificationcontract "github.com/kaoqy/Nodeloc-Store/internal/modules/notification/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment"
 	paymentcontract "github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/plugin"
@@ -144,6 +147,16 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 	// itself: the catalogue already knows which shelves are short, the inbox
 	// already reaches the accounts that refill them, and only this wire joins
 	// the two.
+	// 站外提醒: every 站内 notification is mirrored to the buyer's email when the
+	// shop has SMTP switched on. The three pieces live in other modules (accounts
+	// and settings), so they are adapted here rather than reached for from inside
+	// the notification module.
+	notificationMod.Service.EnableMail(
+		mailAddresses{identity: identityMod.Service},
+		mailSettings{sys: sys, db: db},
+		mailSender{},
+	)
+
 	stockWatch := stockwatch.New(catalogMod.Service, restockOutbox{service: notificationMod.Service}, restockRoster(db))
 	// The back office can also ask for one pass instead of waiting for the
 	// background sweep, so the catalogue's route needs the same watcher.
@@ -197,4 +210,110 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		Plugin:       pluginMod,
 		Stock:        stockWatch,
 	}, nil
+}
+
+// mailAddresses resolves the inbox address for one account. It goes through the
+// identity module rather than the database so a rule about who may be mailed
+// (for example an account that was switched off) has one home.
+type mailAddresses struct {
+	identity *identityapplication.Service
+}
+
+func (a mailAddresses) EmailFor(ctx context.Context, userID uint) (string, error) {
+	user, err := a.identity.Me(ctx, userID)
+	if err != nil {
+		// A message can outlive the account it was written for. That is not a
+		// failure of the 站内 notification, so the address simply reads as absent.
+		if errors.Is(err, identitydomain.ErrUserNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	if user == nil || user.Email == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(*user.Email), nil
+}
+
+// mailSettings adapts the system module's SMTP settings to the notification
+// module's own shape. The settings are read on every send so turning SMTP on or
+// off in 设置 applies to the next message without a restart.
+type mailSettings struct {
+	sys *system.Service
+	db  *gorm.DB
+}
+
+func (m mailSettings) MailConfig(ctx context.Context) (notificationcontract.MailConfig, bool) {
+	var (
+		config   system.SMTPConfig
+		siteName string
+		scheme   string
+		domain   string
+	)
+	if m.sys != nil {
+		if smtp, err := m.sys.SMTPConfig(); err == nil {
+			config = smtp
+		}
+		// GetSettings answers {"settings": RuntimeConfig, …}: the runtime document
+		// is the value under "settings", not the map itself. Its SMTP password is
+		// masked for the screen, which is why the credential is read separately
+		// through SMTPConfig above — a masked password would fail every login.
+		if settings, err := m.sys.GetSettings(); err == nil {
+			if runtime, ok := settings["settings"].(system.RuntimeConfig); ok {
+				siteName, scheme, domain = runtime.App.Name, runtime.App.Scheme, runtime.App.Domain
+			}
+		}
+	} else if m.db != nil {
+		if rt, err := system.LoadRuntime(m.db); err == nil && rt != nil {
+			config = rt.SMTP
+			siteName, scheme, domain = rt.App.Name, rt.App.Scheme, rt.App.Domain
+		}
+	}
+	if !config.On() || strings.TrimSpace(config.Host) == "" || strings.TrimSpace(config.From) == "" {
+		return notificationcontract.MailConfig{}, false
+	}
+	return notificationcontract.MailConfig{
+		Host:     config.Host,
+		Port:     config.Port,
+		Username: config.Username,
+		Password: config.Password,
+		Secure:   config.Secure,
+		From:     config.From,
+		SiteName: strings.TrimSpace(siteName),
+		BaseURL:  siteBaseURL(scheme, domain),
+	}, true
+}
+
+// siteBaseURL is the shop's own origin, used only to make a relative
+// notification link clickable in an email. An empty answer is fine: the mail then
+// carries the path alone rather than a guessed host.
+func siteBaseURL(scheme, domain string) string {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return ""
+	}
+	if strings.HasPrefix(domain, "http://") || strings.HasPrefix(domain, "https://") {
+		return strings.TrimRight(domain, "/")
+	}
+	scheme = strings.TrimSpace(scheme)
+	if scheme != "http" {
+		scheme = "https"
+	}
+	return scheme + "://" + strings.TrimRight(domain, "/")
+}
+
+// mailSender is the one place a notification becomes an email. It reuses the
+// SMTP client the 设置 page already tests, so what the owner verifies there is
+// exactly what the fan-out uses.
+type mailSender struct{}
+
+func (mailSender) SendMail(config notificationcontract.MailConfig, to, subject, body string) error {
+	return (mail.Config{
+		Host:   config.Host,
+		Port:   config.Port,
+		User:   config.Username,
+		Pass:   config.Password,
+		Secure: config.Secure,
+		From:   config.From,
+	}).Send(mail.Message{To: to, Subject: subject, Body: body})
 }

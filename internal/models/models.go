@@ -416,6 +416,10 @@ type Plugin struct {
 	// notify). The storefront and the back office read it to decide what to show.
 	Capabilities string     `gorm:"type:text" json:"capabilities,omitempty"`
 	InstalledAt  *time.Time `json:"installed_at,omitempty"`
+	// ValidationWarning is a transient answer, not a column: it carries the
+	// provider's own complaint about the configuration that was just stored, so
+	// 插件管理 can say what is still missing without refusing the save.
+	ValidationWarning string `gorm:"-" json:"validation_warning,omitempty"`
 }
 
 // PluginBinding attaches a plugin to one product and carries the value that

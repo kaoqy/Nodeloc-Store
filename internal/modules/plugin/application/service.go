@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,7 +178,15 @@ func (s *Service) UpdateConfig(ctx context.Context, id uint, settings, secrets m
 			continue
 		}
 		if value, ok := settings[field.Key]; ok {
-			cleanSettings[field.Key] = strings.TrimSpace(value)
+			// A checkbox submits "on"/"true"/"false" depending on how the screen
+			// bound it, and Go's strconv.ParseBool is the one reader that accepts
+			// all of them. Normalising here means the stored value is always the
+			// canonical one, whatever the form sent.
+			value = strings.TrimSpace(value)
+			if field.Type == "bool" {
+				value = normalizeBool(value)
+			}
+			cleanSettings[field.Key] = value
 		}
 	}
 	storedSecrets := decodeMap(plugin.ConfigSecrets)
@@ -219,14 +228,21 @@ func (s *Service) UpdateConfig(ctx context.Context, id uint, settings, secrets m
 	}
 	plugin.Settings = string(settingsJSON)
 	plugin.ConfigSecrets = string(secretsJSON)
-	if plugin.IsEnabled {
-		if err := provider.Validate(cleanSettings, nextSecrets); err != nil {
-			return nil, fmt.Errorf("%w: %v", domain.ErrInvalidInput, err)
-		}
+	// The provider validates a candidate configuration whenever it is asked to.
+	// Refusing to store an incomplete configuration would leave 插件管理 with a
+	// 「保存」 that can never succeed on a fresh install — the owner would have to
+	// enable the plugin first, which is exactly what Validate refuses — so the
+	// save is allowed to be partial and SetEnabled is where a complete one is
+	// required. A provider with something to say about its own configuration is
+	// still heard: the message is returned as a warning for the screen to show.
+	warning := ""
+	if err := provider.Validate(cleanSettings, nextSecrets); err != nil {
+		warning = err.Error()
 	}
 	if err := s.repo.UpdatePlugin(ctx, plugin); err != nil {
 		return nil, err
 	}
+	plugin.ValidationWarning = warning
 	return plugin, nil
 }
 
@@ -241,6 +257,31 @@ func (s *Service) Uninstall(ctx context.Context, id uint) error {
 		return domain.ErrInvalidInput
 	}
 	return s.repo.DeletePlugin(ctx, id)
+}
+
+// normalizeBool folds every spelling a form may send for a checkbox into the
+// one value the provider reads back. An unrecognisable value is treated as off,
+// which is the safe reading for an opt-in switch.
+func normalizeBool(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "on", "yes", "y":
+		// A checkbox with no value attribute submits "on" — strconv.ParseBool
+		// rejects that, so it has to be read explicitly or every ticked box
+		// would be stored as off.
+		return "true"
+	case "off", "no", "n":
+		return "false"
+	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		// An unrecognisable value is treated as off, which is the safe reading
+		// for an opt-in switch.
+		return "false"
+	}
+	if parsed {
+		return "true"
+	}
+	return "false"
 }
 
 func isSecretField(field contract.ConfigField) bool {
