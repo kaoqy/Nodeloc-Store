@@ -41,6 +41,7 @@ var (
 	// versus no egress — and the login page has to say which.
 	ErrOAuthRejected    = errors.New("NodeLoc 拒绝了这次登录请求")
 	ErrOAuthUnreachable = errors.New("连不上 NodeLoc")
+	ErrOAuthTransaction = errors.New("OAuth 授权事务已过期或已处理")
 )
 
 // User is the identity module's user aggregate.
@@ -126,6 +127,8 @@ type OAuthIdentity struct {
 }
 
 func (OAuthIdentity) TableName() string { return "oauth_identities" }
+
+type OAuthTransaction = models.OAuthTransaction
 
 // OAuthAttempt is one NodeLoc 登录 round trip as the shop recorded it — the
 // step it reached, the reason it stopped, and the provider's own words. It is

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity/domain"
 	"gorm.io/gorm"
@@ -177,6 +178,30 @@ func (r *GormUserRepo) CountOAuthIdentities(ctx context.Context, userID uint) (i
 	var count int64
 	err := r.db.WithContext(ctx).Model(&domain.OAuthIdentity{}).Where("user_id = ?", userID).Count(&count).Error
 	return count, err
+}
+
+func (r *GormUserRepo) CreateOAuthTransaction(ctx context.Context, transaction *domain.OAuthTransaction) error {
+	if transaction == nil || transaction.StateHash == "" || transaction.Intent == "" {
+		return domain.ErrInvalidInput
+	}
+	return r.db.WithContext(ctx).Create(transaction).Error
+}
+
+func (r *GormUserRepo) ConsumeOAuthTransaction(ctx context.Context, stateHash string, now time.Time) (*domain.OAuthTransaction, error) {
+	var transaction domain.OAuthTransaction
+	result := r.db.WithContext(ctx).Model(&transaction).
+		Where("state_hash = ? AND consumed_at IS NULL AND expires_at > ?", stateHash, now).
+		Updates(map[string]any{"consumed_at": now})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, domain.ErrOAuthTransaction
+	}
+	if err := r.db.WithContext(ctx).Where("state_hash = ?", stateHash).First(&transaction).Error; err != nil {
+		return nil, err
+	}
+	return &transaction, nil
 }
 
 // oauthAttemptKeep is how far back the shop remembers 登录 attempts. The trail is

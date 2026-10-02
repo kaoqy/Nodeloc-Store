@@ -2,6 +2,7 @@ package contract
 
 import (
 	"context"
+	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity/domain"
 )
@@ -24,7 +25,8 @@ type UserRepo interface {
 	FindOAuthIdentityByUser(ctx context.Context, userID uint, provider string) (*domain.OAuthIdentity, error)
 	DeleteOAuthIdentity(ctx context.Context, userID uint, provider string) error
 	CountOAuthIdentities(ctx context.Context, userID uint) (int64, error)
-
+	CreateOAuthTransaction(ctx context.Context, transaction *domain.OAuthTransaction) error
+	ConsumeOAuthTransaction(ctx context.Context, stateHash string, now time.Time) (*domain.OAuthTransaction, error)
 	// RecordOAuthAttempt keeps one NodeLoc 登录 round trip readable after the
 	// fact. The shop's own log is out of reach for the owner of a Docker
 	// container, and 「登录不了」 with no step attached is not a bug report.

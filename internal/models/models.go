@@ -86,6 +86,17 @@ const legacyOAuthTable = "o_auth_identities"
 // It never holds a token, a secret or an authorization code: Detail is the
 // provider's error text, trimmed and scrubbed of anything that looks like a
 // credential before it is written.
+type OAuthTransaction struct {
+	Base
+	StateHash  string     `gorm:"size:64;uniqueIndex;not null" json:"-"`
+	Intent     string     `gorm:"size:16;not null" json:"intent"`
+	UserID     *uint      `gorm:"index" json:"user_id,omitempty"`
+	ExpiresAt  time.Time  `gorm:"index;not null" json:"expires_at"`
+	ConsumedAt *time.Time `json:"consumed_at,omitempty"`
+}
+
+func (OAuthTransaction) TableName() string { return "oauth_transactions" }
+
 type OAuthAttempt struct {
 	Base
 	// Step is initiate (the browser was sent to NodeLoc) or callback (NodeLoc
@@ -334,6 +345,7 @@ func Migrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&User{},
 		&OAuthIdentity{},
+		&OAuthTransaction{},
 		&OAuthAttempt{},
 		&PointLedger{},
 		&CheckIn{},

@@ -463,7 +463,11 @@ func (h *Handler) Logout(c *gin.Context) {
 
 func (h *Handler) InitiateOAuth(c *gin.Context) {
 	binding := c.Query("bind") == "true"
-	redirectURL, state, err := h.service.InitiateOAuth("")
+	intent := "login"
+	if binding {
+		intent = "bind"
+	}
+	redirectURL, state, err := h.service.BeginOAuth(c.Request.Context(), "", intent, nil)
 	if err != nil {
 		if c.Query("redirect") != "true" {
 			h.recordOAuthInitiateFailure(c, err)
@@ -526,6 +530,12 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 		log.Printf("nodeloc oauth: state mismatch between cookie and callback query")
 		h.oauthFailure(c, oauthStepCallback, "state", domain.ErrInvalidCredentials,
 			"回调带回的 state 与本店发出的不是同一个。", binding)
+		return
+	}
+	if _, err := h.service.ConsumeOAuth(c.Request.Context(), state); err != nil {
+		log.Printf("nodeloc oauth: transaction already consumed or expired: %v", err)
+		h.oauthFailure(c, oauthStepCallback, "transaction", domain.ErrOAuthTransaction,
+			"这次 OAuth 授权已经处理过或已过期，请重新发起登录。", binding)
 		return
 	}
 
@@ -593,6 +603,8 @@ func oauthFailReason(err error) string {
 		return "disabled"
 	case errors.Is(err, domain.ErrOAuthNotConfigured):
 		return "not_configured"
+	case errors.Is(err, domain.ErrOAuthTransaction):
+		return "transaction"
 	case errors.Is(err, domain.ErrOAuthRejected):
 		return "rejected"
 	case errors.Is(err, domain.ErrOAuthUnreachable):
@@ -847,6 +859,8 @@ func errorCopy(err error) (int, string, string) {
 		// This one names the store's own empty fields and no secret value, and the
 		// person who can fix it is usually the one testing the login.
 		return http.StatusServiceUnavailable, "oauth_not_configured", err.Error()
+	case errors.Is(err, domain.ErrOAuthTransaction):
+		return http.StatusConflict, "oauth_transaction_used", "这次 OAuth 授权已经处理过或已过期，请重新发起登录。"
 	case errors.Is(err, domain.ErrOAuthRejected):
 		// NodeLoc's own words (error_description, an HTTP body) stay in the log:
 		// they name credentials, which a buyer cannot use and a storefront should

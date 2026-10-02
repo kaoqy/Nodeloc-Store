@@ -3,7 +3,9 @@ package application
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -206,6 +208,41 @@ func clipRunes(value string, limit int) string {
 		return value
 	}
 	return string(runes[:limit])
+}
+
+func stateHash(state string) string {
+	hash := sha256.Sum256([]byte(state))
+	return hex.EncodeToString(hash[:])
+}
+
+func (s *Service) BeginOAuth(ctx context.Context, state string, intent string, userID *uint) (string, string, error) {
+	if !s.features.OAuthOn() {
+		return "", "", domain.ErrOAuthDisabled
+	}
+	state = strings.TrimSpace(state)
+	if state == "" {
+		buffer := make([]byte, 32)
+		if _, err := rand.Read(buffer); err != nil {
+			return "", "", fmt.Errorf("generate oauth state: %w", err)
+		}
+		state = base64.RawURLEncoding.EncodeToString(buffer)
+	}
+	if intent == "" {
+		intent = "login"
+	}
+	transaction := &domain.OAuthTransaction{StateHash: stateHash(state), Intent: intent, UserID: userID, ExpiresAt: s.now().Add(10 * time.Minute)}
+	if err := s.repo.CreateOAuthTransaction(ctx, transaction); err != nil {
+		return "", "", err
+	}
+	url, err := s.oauth.AuthorizationURL(state)
+	if err != nil {
+		return "", "", err
+	}
+	return url, state, nil
+}
+
+func (s *Service) ConsumeOAuth(ctx context.Context, state string) (*domain.OAuthTransaction, error) {
+	return s.repo.ConsumeOAuthTransaction(ctx, stateHash(strings.TrimSpace(state)), s.now())
 }
 
 func (s *Service) InitiateOAuth(state string) (string, string, error) {
