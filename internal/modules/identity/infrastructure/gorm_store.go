@@ -190,8 +190,8 @@ func (r *GormUserRepo) CreateOAuthTransaction(ctx context.Context, transaction *
 func (r *GormUserRepo) ConsumeOAuthTransaction(ctx context.Context, stateHash string, now time.Time) (*domain.OAuthTransaction, error) {
 	var transaction domain.OAuthTransaction
 	result := r.db.WithContext(ctx).Model(&transaction).
-		Where("state_hash = ? AND consumed_at IS NULL AND expires_at > ?", stateHash, now).
-		Updates(map[string]any{"consumed_at": now})
+		Where("state_hash = ? AND consumed_at IS NULL AND status = ? AND expires_at > ?", stateHash, "pending", now).
+		Updates(map[string]any{"consumed_at": now, "status": "consumed"})
 	if result.Error != nil {
 		return nil, result.Error
 	}

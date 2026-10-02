@@ -63,6 +63,7 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	auth.POST("/refresh", h.RefreshToken)
 	auth.GET("/oauth/initiate", h.InitiateOAuth)
 	auth.GET("/oauth/callback", h.OAuthCallback)
+	authed.GET("/oauth/bind-initiate", h.InitiateOAuth)
 	authed.POST("/bind-oauth", h.BindOAuth)
 	authed.DELETE("/unbind-oauth", h.UnbindOAuth)
 	authed.GET("/me", h.Me)
@@ -462,12 +463,22 @@ func (h *Handler) Logout(c *gin.Context) {
 }
 
 func (h *Handler) InitiateOAuth(c *gin.Context) {
-	binding := c.Query("bind") == "true"
+	binding := c.Query("bind") == "true" || c.FullPath() == "/api/v1/auth/oauth/bind-initiate"
 	intent := "login"
 	if binding {
 		intent = "bind"
 	}
-	redirectURL, state, err := h.service.BeginOAuth(c.Request.Context(), "", intent, nil)
+	var userID *uint
+	if binding {
+		id, ok := currentUserID(c)
+		if !ok {
+			h.oauthFailure(c, oauthStepInitiate, "unauthenticated", domain.ErrInvalidCredentials, "绑定 NodeLoc 前必须先登录本站账号", true)
+			return
+		}
+		userID = &id
+	}
+	returnURL := c.Query("return_url")
+	redirectURL, state, err := h.service.BeginOAuth(c.Request.Context(), "", intent, userID, returnURL)
 	if err != nil {
 		if c.Query("redirect") != "true" {
 			h.recordOAuthInitiateFailure(c, err)
@@ -505,12 +516,6 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 func (h *Handler) OAuthCallback(c *gin.Context) {
 	state := strings.TrimSpace(c.Query("state"))
 	binding := false
-	if state != "" {
-		if value, err := c.Cookie(oauthBindCookie(state)); err == nil && value != "" {
-			binding = true
-		}
-		c.SetCookie(oauthBindCookie(state), "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
-	}
 
 	// Consume and validate the one-time state before handling either success or
 	// provider error. NodeLoc includes state on denial too.
@@ -532,7 +537,8 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 			"回调带回的 state 与本店发出的不是同一个。", binding)
 		return
 	}
-	if _, err := h.service.ConsumeOAuth(c.Request.Context(), state); err != nil {
+	transaction, err := h.service.ConsumeOAuth(c.Request.Context(), state)
+	if err != nil {
 		log.Printf("nodeloc oauth: transaction already consumed or expired: %v", err)
 		h.oauthFailure(c, oauthStepCallback, "transaction", domain.ErrOAuthTransaction,
 			"这次 OAuth 授权已经处理过或已过期，请重新发起登录。", binding)
@@ -542,6 +548,7 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	// NodeLoc answers a rejected authorization with error + error_description +
 	// state and no code. Without this branch that reason only showed up as a
 	// generic "链接过期" on the login page.
+	binding = transaction.Intent == "bind"
 	if providerError := strings.TrimSpace(c.Query("error")); providerError != "" {
 		description := strings.TrimSpace(c.Query("error_description"))
 		log.Printf("nodeloc oauth: the provider refused the authorization: error=%s description=%q",
@@ -552,16 +559,16 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	}
 
 	if binding {
-		// The SPA redeems the code against POST /auth/bind-oauth with its own
-		// bearer token; fragments never reach a server or log.
-		h.clearOAuthState(c, state)
-		h.service.LogOAuthAttempt(c.Request.Context(), application.OAuthAttemptLog{
-			Step: oauthStepCallback, Outcome: "started", Reason: "bind", Binding: true,
-		})
-		fragment := url.Values{}
-		fragment.Set("bind_code", c.Query("code"))
-		fragment.Set("state", c.Query("state"))
-		c.Redirect(http.StatusFound, "/profile#"+fragment.Encode())
+		if transaction.UserID == nil {
+			h.oauthFailure(c, oauthStepCallback, "account_binding", domain.ErrInvalidCredentials, "绑定事务缺少本站用户，请重新从个人中心发起绑定。", true)
+			return
+		}
+		_, err := h.service.BindOAuth(c.Request.Context(), *transaction.UserID, c.Query("code"), queryParams(c))
+		if err != nil {
+			h.oauthFailure(c, oauthStepCallback, "account_binding", err, err.Error(), true)
+			return
+		}
+		c.Redirect(http.StatusFound, transaction.ReturnURL)
 		return
 	}
 	params := queryParams(c)

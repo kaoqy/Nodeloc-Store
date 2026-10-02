@@ -215,7 +215,7 @@ func stateHash(state string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func (s *Service) BeginOAuth(ctx context.Context, state string, intent string, userID *uint) (string, string, error) {
+func (s *Service) BeginOAuth(ctx context.Context, state string, intent string, userID *uint, returnURL string) (string, string, error) {
 	if !s.features.OAuthOn() {
 		return "", "", domain.ErrOAuthDisabled
 	}
@@ -230,7 +230,10 @@ func (s *Service) BeginOAuth(ctx context.Context, state string, intent string, u
 	if intent == "" {
 		intent = "login"
 	}
-	transaction := &domain.OAuthTransaction{StateHash: stateHash(state), Intent: intent, UserID: userID, ExpiresAt: s.now().Add(10 * time.Minute)}
+	if returnURL == "" || !strings.HasPrefix(returnURL, "/") || strings.HasPrefix(returnURL, "//") {
+		returnURL = "/"
+	}
+	transaction := &domain.OAuthTransaction{StateHash: stateHash(state), Intent: intent, UserID: userID, ReturnURL: returnURL, Status: "pending", ExpiresAt: s.now().Add(5 * time.Minute)}
 	if err := s.repo.CreateOAuthTransaction(ctx, transaction); err != nil {
 		return "", "", err
 	}

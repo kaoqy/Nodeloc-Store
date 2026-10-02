@@ -27,7 +27,9 @@ export async function refresh(refreshToken: string) {
 }
 
 export function oauthInitiate(bind = false) {
-  window.location.href = `/api/v1/auth/oauth/initiate?redirect=true${bind ? '&bind=true' : ''}`
+  const path = bind ? '/api/v1/auth/oauth/bind-initiate' : '/api/v1/auth/oauth/initiate'
+  const returnURL = bind ? '/profile' : '/oauth/callback'
+  window.location.href = `${path}?redirect=true&return_url=${encodeURIComponent(returnURL)}`
 }
 
 export async function oauthCallback(code: string, state: string) {
