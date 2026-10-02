@@ -879,6 +879,26 @@ func (s *GormStore) ListAssignments(ctx context.Context, ticketID uint) ([]domai
 
 // ── 通知模板与系统配置 ───────────────────────────────────────────────
 
+func (s *GormStore) CreateNotificationLog(ctx context.Context, entry *domain.NotificationLog) error {
+	return s.db.WithContext(ctx).Create(entry).Error
+}
+
+func (s *GormStore) ListNotificationLogs(ctx context.Context, status string, limit, offset int) ([]domain.NotificationLog, int64, error) {
+	query := s.db.WithContext(ctx).Model(&models.NotificationLog{})
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []domain.NotificationLog
+	if err := query.Order("id DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
+}
+
 func (s *GormStore) ListNotificationTemplates(ctx context.Context, category string) ([]domain.NotificationTemplate, error) {
 	query := s.db.WithContext(ctx).Model(&models.NotificationTemplate{})
 	if category != "" {

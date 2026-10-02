@@ -2,10 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import {
   deleteTemplate,
+  listNotificationLogs,
   listSystemConfigs,
   listTemplates,
   saveSystemConfig,
   saveTemplate,
+  type NotificationLogRow,
   type NotificationTemplate,
   type SystemConfig,
 } from '../api/configCenter'
@@ -20,9 +22,12 @@ const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
-const tab = ref<'templates' | 'system'>('templates')
+const tab = ref<'templates' | 'system' | 'logs'>('templates')
 const templates = ref<NotificationTemplate[]>([])
 const configs = ref<SystemConfig[]>([])
+const logs = ref<NotificationLogRow[]>([])
+const logTotal = ref(0)
+const logStatus = ref('')
 const groupFilter = ref('')
 
 const templateDraft = ref<Partial<NotificationTemplate>>({
@@ -60,12 +65,15 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [templateList, configList] = await Promise.all([
+    const [templateList, configList, logPage] = await Promise.all([
       listTemplates(),
       listSystemConfigs(),
+      listNotificationLogs({ status: logStatus.value || undefined, limit: 50 }).catch(() => ({ data: [], total: 0 })),
     ])
     templates.value = templateList
     configs.value = configList
+    logs.value = logPage.data
+    logTotal.value = logPage.total
   } catch (err) {
     error.value = errorMessage(err, '加载配置中心失败')
   } finally {
@@ -140,6 +148,7 @@ onMounted(load)
       <div class="flex gap-1.5">
         <button class="chip" :class="tab === 'templates' ? 'chip-active' : ''" @click="tab = 'templates'">通知模板</button>
         <button class="chip" :class="tab === 'system' ? 'chip-active' : ''" @click="tab = 'system'">系统配置</button>
+        <button class="chip" :class="tab === 'logs' ? 'chip-active' : ''" @click="tab = 'logs'">发送日志</button>
       </div>
     </div>
 
@@ -210,6 +219,40 @@ onMounted(load)
           <input v-model.number="templateDraft.retry_limit" class="input nums !w-32" type="number" placeholder="重试次数" />
           <button class="btn btn-primary btn-sm ml-auto" :disabled="busy" @click="saveTemplateDraft">保存模板</button>
         </div>
+      </div>
+    </template>
+
+    <template v-else-if="tab === 'logs'">
+      <div class="flex flex-wrap items-center gap-2">
+        <select v-model="logStatus" class="input !w-auto" @change="load">
+          <option value="">全部结果</option>
+          <option value="sent">已发送</option>
+          <option value="failed">发送失败</option>
+        </select>
+        <span class="quiet text-xs">共 {{ logTotal }} 条</span>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr><th>模板</th><th>渠道</th><th>收件人</th><th>标题</th><th>状态</th><th>时间</th></tr>
+          </thead>
+          <tbody>
+            <tr v-if="!logs.length">
+              <td colspan="6" class="py-10 text-center text-[var(--text-quiet)]">还没有发送记录</td>
+            </tr>
+            <tr v-for="row in logs" :key="row.id">
+              <td class="mono text-xs">{{ row.template_key }}</td>
+              <td class="text-xs">{{ row.channel === 'mail' ? '邮件' : '站内' }}</td>
+              <td class="mono text-xs">{{ row.user_id ? '#' + row.user_id : '—' }}</td>
+              <td class="quiet max-w-[260px] truncate text-xs">{{ row.title }}</td>
+              <td>
+                <span :class="row.status === 'sent' ? 'badge-success' : 'badge-danger'">{{ row.status === 'sent' ? '已发送' : '失败' }}</span>
+                <p v-if="row.error" class="quiet mt-0.5 max-w-[220px] truncate text-[11px]">{{ row.error }}</p>
+              </td>
+              <td class="quiet text-xs">{{ row.created_at }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </template>
 

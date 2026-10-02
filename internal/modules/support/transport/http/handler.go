@@ -123,6 +123,7 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	config.POST("/templates", guard("notification_templates", "manage"), h.saveTemplate)
 	config.PUT("/templates/:id", guard("notification_templates", "manage"), h.updateTemplate)
 	config.DELETE("/templates/:id", guard("notification_templates", "manage"), h.deleteTemplate)
+	config.GET("/logs", guard("notification_templates", "view"), h.listNotificationLogs)
 	config.GET("/system", guard("config_center", "view"), h.listSystemConfigs)
 	config.PUT("/system", guard("config_center", "manage"), h.saveSystemConfig)
 
@@ -1225,6 +1226,16 @@ func (h *Handler) deleteTemplate(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) listNotificationLogs(c *gin.Context) {
+	logs, total, err := h.service.NotificationLogs(c.Request.Context(),
+		strings.TrimSpace(c.Query("status")), positiveInt(c.Query("limit"), 50), positiveInt(c.Query("offset"), 0))
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": logs, "total": total})
 }
 
 func (h *Handler) listSystemConfigs(c *gin.Context) {

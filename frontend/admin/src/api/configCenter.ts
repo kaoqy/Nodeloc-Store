@@ -45,6 +45,26 @@ export const saveTemplate = (template: Partial<NotificationTemplate>) =>
 
 export const deleteTemplate = (id: number) => client.delete('/admin/config-center/templates/' + id)
 
+export interface NotificationLogRow {
+  id: number
+  template_key: string
+  channel: string
+  user_id?: number
+  ticket_id?: number
+  order_id?: number
+  title?: string
+  content?: string
+  status: string
+  error?: string
+  attempts: number
+  created_at?: string
+}
+
+export const listNotificationLogs = (params: { status?: string; limit?: number; offset?: number } = {}) =>
+  client
+    .get<{ data: NotificationLogRow[]; total: number }>('/admin/config-center/logs', { params })
+    .then((r) => ({ data: r.data.data ?? [], total: r.data.total ?? 0 }))
+
 export const listSystemConfigs = (group = '') =>
   client
     .get<{ data: SystemConfig[] }>('/admin/config-center/system', { params: { group: group || undefined } })

@@ -89,6 +89,8 @@ type Repository interface {
 	ListAssignments(ctx context.Context, ticketID uint) ([]domain.CustomerServiceAssignment, error)
 
 	// ── 通知模板与系统配置（统一配置中心）──
+	CreateNotificationLog(ctx context.Context, entry *domain.NotificationLog) error
+	ListNotificationLogs(ctx context.Context, status string, limit, offset int) ([]domain.NotificationLog, int64, error)
 	ListNotificationTemplates(ctx context.Context, category string) ([]domain.NotificationTemplate, error)
 	SaveNotificationTemplate(ctx context.Context, template *domain.NotificationTemplate) error
 	DeleteNotificationTemplate(ctx context.Context, id uint) error

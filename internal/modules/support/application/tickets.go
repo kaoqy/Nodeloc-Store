@@ -267,14 +267,13 @@ func (s *Service) CreateTicket(ctx context.Context, input CreateTicketInput) (*d
 			}
 		}
 	}
-	if s.notifier != nil {
-		if err := s.notifier.NotifyUser(ctx, input.UserID, "ticket_created",
-			"工单 "+ticket.TicketNo+" 已创建",
-			"智能客服已经开始处理你的问题，你也可以随时点「转人工客服」。",
-			"/tickets/"+ticket.TicketNo); err != nil {
-			logf("ticket %s: notify create failed: %v", ticket.TicketNo, err)
-		}
-	}
+	s.notify(ctx, "ticket.created", map[string]string{
+		"ticket_no": ticket.TicketNo, "subject": ticket.Subject, "user_name": fmt.Sprintf("用户 #%d", input.UserID),
+	}, Notification{
+		UserID: input.UserID, TicketID: ticket.ID,
+		Title:   "工单 " + ticket.TicketNo + " 已创建",
+		Content: "智能客服已经开始处理你的问题，你也可以随时点「转人工客服」。",
+	})
 	return s.repo.GetTicket(ctx, ticket.ID)
 }
 
@@ -522,14 +521,13 @@ func (s *Service) TransferToHuman(ctx context.Context, input domain.TransferInpu
 			result.WorkingHours = workflow.WorkingHours
 		}
 	}
-	if s.notifier != nil {
-		if err := s.notifier.NotifyUser(ctx, input.UserID, "ticket_transfer",
-			"工单 "+ticket.TicketNo+" 已转人工",
-			"客服会尽快跟进，你的 AI 对话记录已经一并转过去了。",
-			"/tickets/"+ticket.TicketNo); err != nil {
-			logf("ticket %s: notify transfer failed: %v", ticket.TicketNo, err)
-		}
-	}
+	s.notify(ctx, "ticket.transferred", map[string]string{
+		"ticket_no": ticket.TicketNo, "agent_name": "人工客服",
+	}, Notification{
+		UserID: input.UserID, TicketID: ticket.ID,
+		Title:   "工单 " + ticket.TicketNo + " 已转人工",
+		Content: "客服会尽快跟进，你的 AI 对话记录已经一并转过去了。",
+	})
 	fresh, err := s.repo.GetTicket(ctx, ticket.ID)
 	if err == nil {
 		ticket = fresh

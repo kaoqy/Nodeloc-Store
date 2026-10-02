@@ -155,6 +155,12 @@ func (s *stubRepo) ListQuickReplies(context.Context, bool, string, string) ([]do
 func (s *stubRepo) SaveQuickReply(context.Context, *domain.QuickReply) error { return nil }
 func (s *stubRepo) DeleteQuickReply(context.Context, uint) error             { return nil }
 func (s *stubRepo) IncrementQuickReplyUse(context.Context, uint) error       { return nil }
+func (s *stubRepo) CreateNotificationLog(context.Context, *domain.NotificationLog) error {
+	return nil
+}
+func (s *stubRepo) ListNotificationLogs(context.Context, string, int, int) ([]domain.NotificationLog, int64, error) {
+	return nil, 0, nil
+}
 func (s *stubRepo) ListNotificationTemplates(context.Context, string) ([]domain.NotificationTemplate, error) {
 	return nil, nil
 }
