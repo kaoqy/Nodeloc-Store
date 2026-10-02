@@ -39,9 +39,11 @@ var (
 	// ErrOAuthRejected means NodeLoc answered and refused; ErrOAuthUnreachable
 	// means it never answered. They are two different fixes — wrong credentials
 	// versus no egress — and the login page has to say which.
-	ErrOAuthRejected    = errors.New("NodeLoc 拒绝了这次登录请求")
-	ErrOAuthUnreachable = errors.New("连不上 NodeLoc")
-	ErrOAuthTransaction = errors.New("OAuth 授权事务已过期或已处理")
+	ErrOAuthRejected           = errors.New("NodeLoc 拒绝了这次登录请求")
+	ErrOAuthUnreachable        = errors.New("连不上 NodeLoc")
+	ErrOAuthTransaction        = errors.New("OAuth 授权事务已过期或已处理")
+	ErrOAuthTransactionUsed    = errors.New("OAuth 授权事务已处理")
+	ErrOAuthTransactionExpired = errors.New("OAuth 授权事务已过期")
 )
 
 // User is the identity module's user aggregate.

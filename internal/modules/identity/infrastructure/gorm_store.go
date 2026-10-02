@@ -196,7 +196,14 @@ func (r *GormUserRepo) ConsumeOAuthTransaction(ctx context.Context, stateHash st
 		return nil, result.Error
 	}
 	if result.RowsAffected == 0 {
-		return nil, domain.ErrOAuthTransaction
+		var existing domain.OAuthTransaction
+		if err := r.db.WithContext(ctx).Where("state_hash = ?", stateHash).First(&existing).Error; err != nil {
+			return nil, domain.ErrOAuthTransactionExpired
+		}
+		if existing.ConsumedAt != nil || existing.Status != "pending" {
+			return nil, domain.ErrOAuthTransactionUsed
+		}
+		return nil, domain.ErrOAuthTransactionExpired
 	}
 	if err := r.db.WithContext(ctx).Where("state_hash = ?", stateHash).First(&transaction).Error; err != nil {
 		return nil, err

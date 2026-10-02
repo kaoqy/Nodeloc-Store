@@ -507,7 +507,7 @@ func (h *Handler) InitiateOAuth(c *gin.Context) {
 	// A bind intent tells the callback to hand the code back to the signed-in
 	// SPA instead of logging the NodeLoc identity in.
 	if binding {
-		c.SetCookie(oauthBindCookie(state), "1", int((10 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
+		c.SetCookie(oauthBindCookie(state), "1", int((5 * time.Minute).Seconds()), oauthCookiePath, "", h.cookieSecure(c), true)
 	} else {
 		c.SetCookie(oauthBindCookie(state), "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
 	}
@@ -531,23 +531,34 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 		stateCookie, cookieErr = c.Cookie(oauthStateCookie(state))
 	}
 	h.clearOAuthState(c, state)
-	if cookieErr != nil || stateCookie == "" {
-		log.Printf("nodeloc oauth: callback state cookie missing state_received=%t cookie_found=%t host=%q forwarded_proto=%q secure=%t elapsed=%s", state != "", cookieErr == nil && stateCookie != "", c.Request.Host, c.GetHeader("X-Forwarded-Proto"), h.cookieSecure(c), time.Since(startedAt))
-		h.oauthFailure(c, oauthStepCallback, "expired", domain.ErrInvalidCredentials,
-			"回调没有带回 state cookie；浏览器没存住、跨了域名回来、或登录超过 10 分钟都会这样。", binding)
+	if state == "" {
+		log.Printf("nodeloc oauth: callback state missing host=%q forwarded_proto=%q secure=%t elapsed=%s", c.Request.Host, c.GetHeader("X-Forwarded-Proto"), h.cookieSecure(c), time.Since(startedAt))
+		h.oauthFailure(c, oauthStepCallback, "state_missing", domain.ErrInvalidCredentials, "回调没有带回 state，请重新发起登录。", binding)
 		return
 	}
-	if c.Query("state") == "" || stateCookie != c.Query("state") {
-		log.Printf("nodeloc oauth: state mismatch state_received=%t cookie_found=%t host=%q forwarded_proto=%q secure=%t elapsed=%s", state != "", stateCookie != "", c.Request.Host, c.GetHeader("X-Forwarded-Proto"), h.cookieSecure(c), time.Since(startedAt))
-		h.oauthFailure(c, oauthStepCallback, "state", domain.ErrInvalidCredentials,
-			"回调带回的 state 与本店发出的不是同一个。", binding)
+	if cookieErr != nil || stateCookie == "" {
+		log.Printf("nodeloc oauth: callback state cookie missing state_fp=%s host=%q forwarded_proto=%q secure=%t elapsed=%s", application.StateFingerprint(state), c.Request.Host, c.GetHeader("X-Forwarded-Proto"), h.cookieSecure(c), time.Since(startedAt))
+		h.oauthFailure(c, oauthStepCallback, "state_cookie_missing", domain.ErrInvalidCredentials,
+			"浏览器没有带回 OAuth 状态 Cookie，请检查 HTTPS、域名和浏览器隐私设置后重试。", binding)
+		return
+	}
+	if stateCookie != state {
+		log.Printf("nodeloc oauth: state mismatch state_fp=%s cookie_fp=%s host=%q forwarded_proto=%q secure=%t elapsed=%s", application.StateFingerprint(state), application.StateFingerprint(stateCookie), c.Request.Host, c.GetHeader("X-Forwarded-Proto"), h.cookieSecure(c), time.Since(startedAt))
+		h.oauthFailure(c, oauthStepCallback, "state_mismatch", domain.ErrInvalidCredentials,
+			"回调带回的 state 与本次登录不匹配，请重新发起登录。", binding)
 		return
 	}
 	transaction, err := h.service.ConsumeOAuth(c.Request.Context(), state)
 	if err != nil {
-		log.Printf("nodeloc oauth: transaction already consumed or expired: %v", err)
-		h.oauthFailure(c, oauthStepCallback, "transaction", domain.ErrOAuthTransaction,
-			"这次 OAuth 授权已经处理过或已过期，请重新发起登录。", binding)
+		reason := "transaction_expired"
+		message := "这次 OAuth 授权已过期，请重新发起登录。"
+		if errors.Is(err, domain.ErrOAuthTransactionUsed) {
+			reason = "transaction_used"
+			message = "这次 OAuth 授权已经处理过，请返回网站继续操作。"
+		}
+		log.Printf("nodeloc oauth: transaction rejected state_fp=%s reason=%s host=%q elapsed=%s", application.StateFingerprint(state), reason, c.Request.Host, time.Since(startedAt))
+		h.oauthFailure(c, oauthStepCallback, reason, err,
+			message, binding)
 		return
 	}
 
@@ -616,6 +627,10 @@ func oauthFailReason(err error) string {
 		return "disabled"
 	case errors.Is(err, domain.ErrOAuthNotConfigured):
 		return "not_configured"
+	case errors.Is(err, domain.ErrOAuthTransactionUsed):
+		return "transaction_used"
+	case errors.Is(err, domain.ErrOAuthTransactionExpired):
+		return "transaction_expired"
 	case errors.Is(err, domain.ErrOAuthTransaction):
 		return "transaction"
 	case errors.Is(err, domain.ErrOAuthRejected):
@@ -872,6 +887,10 @@ func errorCopy(err error) (int, string, string) {
 		// This one names the store's own empty fields and no secret value, and the
 		// person who can fix it is usually the one testing the login.
 		return http.StatusServiceUnavailable, "oauth_not_configured", err.Error()
+	case errors.Is(err, domain.ErrOAuthTransactionUsed):
+		return http.StatusConflict, "oauth_transaction_used", "这次 OAuth 授权已经处理过，请返回网站继续操作。"
+	case errors.Is(err, domain.ErrOAuthTransactionExpired):
+		return http.StatusConflict, "oauth_transaction_expired", "这次 OAuth 授权已过期，请重新发起登录。"
 	case errors.Is(err, domain.ErrOAuthTransaction):
 		return http.StatusConflict, "oauth_transaction_used", "这次 OAuth 授权已经处理过或已过期，请重新发起登录。"
 	case errors.Is(err, domain.ErrOAuthRejected):

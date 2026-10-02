@@ -215,6 +215,11 @@ func stateHash(state string) string {
 	return hex.EncodeToString(hash[:])
 }
 
+func StateFingerprint(state string) string {
+	hash := sha256.Sum256([]byte(state))
+	return hex.EncodeToString(hash[:])[:12]
+}
+
 func (s *Service) BeginOAuth(ctx context.Context, state string, intent string, userID *uint, returnURL string) (string, string, error) {
 	if !s.features.OAuthOn() {
 		return "", "", domain.ErrOAuthDisabled

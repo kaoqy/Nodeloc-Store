@@ -48,14 +48,14 @@ func TestConsumeOAuthTransactionIsOneTimeAndExpires(t *testing.T) {
 	if _, err := repo.ConsumeOAuthTransaction(ctx, "state-a", now); err != nil {
 		t.Fatalf("first consume: %v", err)
 	}
-	if _, err := repo.ConsumeOAuthTransaction(ctx, "state-a", now); !errors.Is(err, domain.ErrOAuthTransaction) {
+	if _, err := repo.ConsumeOAuthTransaction(ctx, "state-a", now); !errors.Is(err, domain.ErrOAuthTransactionUsed) {
 		t.Fatalf("second consume = %v, want transaction error", err)
 	}
 	expired := &domain.OAuthTransaction{StateHash: "state-b", Intent: "login", ReturnURL: "/", Status: "pending", ExpiresAt: now.Add(-time.Second)}
 	if err := repo.CreateOAuthTransaction(ctx, expired); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.ConsumeOAuthTransaction(ctx, "state-b", now); !errors.Is(err, domain.ErrOAuthTransaction) {
+	if _, err := repo.ConsumeOAuthTransaction(ctx, "state-b", now); !errors.Is(err, domain.ErrOAuthTransactionExpired) {
 		t.Fatalf("expired consume = %v, want transaction error", err)
 	}
 }
