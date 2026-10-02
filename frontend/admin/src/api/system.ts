@@ -136,6 +136,9 @@ export const getOAuthAttempts = (limit = 20) =>
     .get<{ data: OAuthAttempt[] }>('/admin/oauth-attempts', { params: { limit } })
     .then((r) => r.data.data ?? [])
 
+export const testMail = (to: string) =>
+  client.post<{ ok: boolean; message?: string }>('/admin/settings/mail-test', { to }).then((r) => r.data)
+
 export const testPayment = () =>
   client.post<{ ok: boolean; msg: string }>('/admin/settings/payment-test').then((r) => r.data)
 

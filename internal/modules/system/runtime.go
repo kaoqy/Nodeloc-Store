@@ -19,6 +19,7 @@ type RuntimeConfig struct {
 	App      AppConfig      `json:"app"`
 	OAuth    OAuthConfig    `json:"oauth"`
 	Payment  PaymentConfig  `json:"payment"`
+	SMTP     SMTPConfig     `json:"smtp"`
 	Features FeaturesConfig `json:"features"`
 	Theme    ThemeConfig    `json:"theme"`
 }
@@ -61,6 +62,18 @@ type OAuthConfig struct {
 }
 
 func (o OAuthConfig) On() bool { return o.Enabled == nil || *o.Enabled }
+
+type SMTPConfig struct {
+	Enabled  *bool  `json:"enabled"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Secure   string `json:"secure"`
+	From     string `json:"from"`
+}
+
+func (s SMTPConfig) On() bool { return s.Enabled != nil && *s.Enabled }
 
 type PaymentConfig struct {
 	Enabled   *bool  `json:"enabled"`
@@ -274,6 +287,7 @@ func Default() *RuntimeConfig {
 			Scopes:  "openid profile",
 		},
 		Payment:  PaymentConfig{Enabled: &yes},
+		SMTP:     SMTPConfig{Enabled: new(bool), Port: 587, Secure: "starttls"},
 		Features: FeaturesConfig{Checkin: &yes, Coupons: &yes, StockAlertThreshold: &threshold},
 		Theme:    ThemeConfig{Primary: defaultAccent, Locale: defaultLocale},
 	}
@@ -362,6 +376,18 @@ func (r *RuntimeConfig) Normalize() {
 	// breaks every payment call with an error that reads like a wrong key. The
 	// paired wrappers come off here, on load and on save alike, so a hand-edited
 	// settings row cannot smuggle one in either.
+	r.SMTP.Host = strings.TrimSpace(r.SMTP.Host)
+	r.SMTP.Username = strings.TrimSpace(r.SMTP.Username)
+	r.SMTP.Secure = strings.ToLower(strings.TrimSpace(r.SMTP.Secure))
+	if r.SMTP.Port == 0 {
+		r.SMTP.Port = 587
+	}
+	if r.SMTP.Secure == "" {
+		r.SMTP.Secure = "starttls"
+	}
+	if r.SMTP.From != "" {
+		r.SMTP.From = strings.TrimSpace(r.SMTP.From)
+	}
 	r.Payment.PaymentID = shared.TrimCredential(r.Payment.PaymentID)
 	r.Payment.Token = shared.TrimCredential(r.Payment.Token)
 	r.Payment.SecretKey = shared.TrimCredential(r.Payment.SecretKey)

@@ -8,7 +8,7 @@
 
 ## ✨ 功能特性
 
-> 功能边界说明：当前 Go/Vue 主应用没有 SMTP transport、SMTP 配置项或发信 API；用户邮箱用于账号资料/NodeLoc profile，站内通知通过应用内收件箱完成。README 不把客服邮箱或站内通知描述成 SMTP。
+> SMTP 说明：当前 Go/Vue 主应用提供管理员受保护的 SMTP 测试发信接口，配置从环境变量读取；订单、验证码、找回密码等邮件事件尚未接通。用户邮箱用于账号资料/NodeLoc profile，站内通知仍通过应用内收件箱完成。不要把客服邮箱或站内通知描述成 SMTP。
 
 - 🚀 **首次访问即安装** — 引导式配置数据库 + Admin 账号 + NodeLoc OAuth + 支付凭据
 - 🔐 **双通道登录** — NodeLoc OAuth2 一键登录 / 邮箱注册登录，Scope 感知（`email` 未授权时自动隐藏）

@@ -532,6 +532,14 @@ func (s *Service) currentRuntime() (*RuntimeConfig, error) {
 	return rt, nil
 }
 
+func (s *Service) SMTPConfig() (SMTPConfig, error) {
+	rt, err := s.currentRuntime()
+	if err != nil {
+		return SMTPConfig{}, err
+	}
+	return rt.SMTP, nil
+}
+
 // GetSettings returns the runtime config with secrets redacted.
 func (s *Service) GetSettings() (map[string]any, error) {
 	rt, err := s.currentRuntime()
@@ -542,6 +550,7 @@ func (s *Service) GetSettings() (map[string]any, error) {
 	view.OAuth.ClientSecret = maskSecret(view.OAuth.ClientSecret)
 	view.Payment.Token = maskSecret(view.Payment.Token)
 	view.Payment.SecretKey = maskSecret(view.Payment.SecretKey)
+	view.SMTP.Password = maskSecret(view.SMTP.Password)
 	// An absent switch means 「开」, but the settings form needs a real checkbox:
 	// resolving it here keeps a store that never touched 注册 from saving the
 	// missing key back as 「关」 and locking its own registration page.
@@ -612,6 +621,9 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	}
 	if next.Payment.SecretKey == Redacted {
 		next.Payment.SecretKey = existing.Payment.SecretKey
+	}
+	if next.SMTP.Password == Redacted {
+		next.SMTP.Password = existing.SMTP.Password
 	}
 	// The switch is the owner's words, not a fact to recompute: 「凭据还没填齐」 is
 	// already said by the 还收不了款 badge and by the gateway's own 「还没有配置 NodeLoc

@@ -362,6 +362,15 @@ export interface RuntimeSettings {
     redirect_uri: string
     scopes: string
   }
+  smtp: {
+    enabled: boolean
+    host: string
+    port: number
+    username: string
+    password: string
+    secure: string
+    from: string
+  }
   payment: {
     enabled: boolean
     payment_id: string

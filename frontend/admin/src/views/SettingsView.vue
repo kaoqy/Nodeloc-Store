@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
-import { getOAuthAttempts, getRuntimeSettings, saveRuntimeSettings, testOAuth, testPayment, type OAuthAttempt } from '../api/system'
+import { getOAuthAttempts, getRuntimeSettings, saveRuntimeSettings, testMail, testOAuth, testPayment, type OAuthAttempt } from '../api/system'
 import type { FooterLink, RuntimeSettings } from '../types'
 import ImageField from '../components/ImageField.vue'
 import { errorMessage, oauthOutcome, oauthReason, oauthStep, when } from '../utils/format'
@@ -25,6 +25,9 @@ const oauth = ref<Probe | null>(null)
 const payment = ref<Probe | null>(null)
 const testingOAuth = ref(false)
 const testingPayment = ref(false)
+const mailRecipient = ref('')
+const testingMail = ref(false)
+const mailMessage = ref('')
 const snapshot = ref('')
 const attempts = ref<OAuthAttempt[]>([])
 const loadingAttempts = ref(false)
@@ -44,6 +47,7 @@ const settings = reactive<RuntimeSettings>({
     announcement: '',
   },
   oauth: { enabled: true, base_url: '', client_id: '', client_secret: '', redirect_uri: '', scopes: '' },
+  smtp: { enabled: false, host: '', port: 587, username: '', password: '', secure: 'starttls', from: '' },
   payment: { enabled: true, payment_id: '', token: '', secret_key: '', base_url: '' },
   features: { enabled_registration: true, enabled_checkin: true, enabled_coupons: true, stock_alert_threshold: 5 },
   theme: { theme_primary: '#f2704a', default_locale: 'zh-CN' },
@@ -317,6 +321,19 @@ async function loadOAuthAttempts() {
     attemptsError.value = errorMessage(err, '无法读取登录记录')
   } finally {
     loadingAttempts.value = false
+  }
+}
+
+async function runMailTest() {
+  testingMail.value = true
+  mailMessage.value = ''
+  try {
+    const result = await testMail(mailRecipient.value.trim())
+    mailMessage.value = result.message || 'SMTP 测试邮件已发送'
+  } catch (err) {
+    mailMessage.value = `失败：${errorMessage(err, 'SMTP 测试发送失败')}`
+  } finally {
+    testingMail.value = false
   }
 }
 
@@ -598,6 +615,48 @@ onMounted(() => {
             </div>
             <p v-if="paymentProbeNote" class="codebox text-xs">{{ paymentProbeNote.text }}</p>
           </div>
+        </div>
+
+        <div class="card">
+          <div class="mb-5">
+            <h3 class="font-semibold">SMTP 邮件设置</h3>
+            <p class="hint mt-0.5">配置保存到应用运行时设置，仅管理员可测试；密码只显示掩码。</p>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="flex items-center gap-3 text-sm font-semibold"><input v-model="settings.smtp.enabled" type="checkbox" class="size-4 accent-[var(--accent)]" />启用 SMTP 发信</label>
+            <div>
+              <label class="label" for="smtp-port">端口</label>
+              <input id="smtp-port" v-model.number="settings.smtp.port" class="input mono" type="number" min="1" max="65535" />
+            </div>
+            <div>
+              <label class="label" for="smtp-host">SMTP Host</label>
+              <input id="smtp-host" v-model="settings.smtp.host" class="input mono" placeholder="smtp.example.com" />
+            </div>
+            <div>
+              <label class="label" for="smtp-secure">加密</label>
+              <select id="smtp-secure" v-model="settings.smtp.secure" class="input"><option value="ssl">SSL（465）</option><option value="starttls">STARTTLS（587）</option></select>
+            </div>
+            <div>
+              <label class="label" for="smtp-user">用户名</label>
+              <input id="smtp-user" v-model="settings.smtp.username" class="input" autocomplete="username" />
+            </div>
+            <div>
+              <label class="label" for="smtp-pass">密码</label>
+              <input id="smtp-pass" v-model="settings.smtp.password" class="input" type="password" placeholder="保持 ******** 则不修改" autocomplete="new-password" />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="smtp-from">发件人（名称 + 地址）</label>
+              <input id="smtp-from" v-model="settings.smtp.from" class="input" placeholder="Kaoqy Shop <mailer@example.com>" />
+            </div>
+          </div>
+          <div class="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input v-model="mailRecipient" class="input min-w-0 flex-1" type="email" placeholder="测试收件人邮箱" autocomplete="email" />
+            <button class="btn btn-secondary shrink-0" type="button" :disabled="testingMail || !mailRecipient.trim()" @click="runMailTest">
+              {{ testingMail ? '发送中…' : '发送测试邮件' }}
+            </button>
+          </div>
+          <p v-if="mailMessage" class="alert mt-3" :class="mailMessage.startsWith('失败') ? 'alert-danger' : 'alert-success'" role="status">{{ mailMessage }}</p>
+          <p class="hint mt-3">支持 SMTP 465 SSL 或 SMTP 587 STARTTLS。当前没有订单邮件模板或验证码业务，测试邮件只验证连接、TLS、认证和发信。</p>
         </div>
 
         <!-- 公告与页脚 -->

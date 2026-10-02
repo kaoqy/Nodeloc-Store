@@ -11,6 +11,7 @@ import (
 	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
 	"github.com/kaoqy/Nodeloc-Store/internal/authz"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
+	"github.com/kaoqy/Nodeloc-Store/internal/mail"
 )
 
 type Handler struct {
@@ -40,6 +41,7 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	admin.POST("/settings", guard("settings", "manage"), h.SaveSettings)
 	admin.POST("/settings/oauth-test", guard("settings", "manage"), h.TestOAuth)
 	admin.POST("/settings/payment-test", guard("settings", "manage"), h.TestPayment)
+	admin.POST("/settings/mail-test", guard("settings", "manage"), h.TestMail)
 	admin.GET("/stats", guard("stats", "view"), h.Stats)
 	admin.GET("/permissions", guard("roles", "view"), h.ListPermissions)
 	admin.GET("/roles", guard("roles", "view"), h.ListRoles)
@@ -174,6 +176,32 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "restart_pending": false})
+}
+
+func (h *Handler) TestMail(c *gin.Context) {
+	var body struct {
+		To string `json:"to"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.To) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请填写测试收件人邮箱", "code": "mail_recipient_required"})
+		return
+	}
+	settings, err := h.service.SMTPConfig()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "无法读取邮件设置", "code": "mail_settings_unavailable"})
+		return
+	}
+	if !settings.On() {
+		c.JSON(http.StatusConflict, gin.H{"error": "SMTP 发信未启用", "code": "mail_disabled"})
+		return
+	}
+	cfg := mail.Config{Host: settings.Host, Port: settings.Port, User: settings.Username, Pass: settings.Password, Secure: settings.Secure, From: settings.From}
+	if err := mail.SendTestWithConfig(cfg, strings.TrimSpace(body.To)); err != nil {
+		log.Printf("[mail] test send failed: %v", err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "SMTP 测试发送失败：" + err.Error(), "code": "mail_send_failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "SMTP 测试邮件已发送"})
 }
 
 func (h *Handler) TestOAuth(c *gin.Context) {
