@@ -124,7 +124,7 @@ sudo mysql -e "
 >
 > 买家那边到底卡在哪一步，后台 **设置 → 最近 NodeLoc 登录记录**（`GET /api/v1/admin/oauth-attempts`）按时间倒序摊开：发起授权 / 回调两步各自的成败、中文原因（`not_configured` / `rejected` / `unreachable` / `denied` / `expired` / `state` / `bind`）、当时报出去的回调地址，以及服务商原文。**授权码、`state`、Client Secret 和换回来的会话 token 一律不写进这张表**（入库前按正则洗一遍，长正文裁到 500 字），所以店家可以放心截图发给任何人排查。这张表只留最近 500 条——它记下的是「谁来过」，不是店家的永久访客名册。
 >
-> 登录失败不再是一句「服务器开小差了」：`oauth_not_configured`（503，本店参数没配齐）/ `oauth_rejected`（502，NodeLoc 拒绝，如授权码已用过、Client ID/Secret 或回调白名单不匹配）/ `oauth_unreachable`（502，连不上 NodeLoc）三种原因分别给文案，服务商返回原文只写进服务端日志。userinfo 认 `id`/`uid`/`user_id`/`sub`，用户名认 `username`/`preferred_username`/`nickname`/`display_name`，头像认 `avatar_url`/`picture`，也认 `{"data": …}` 外层包装和 HTTP 200 下的 `{"success": false,…}` 业务拒绝。
+> 登录失败不再是一句「服务器开小差了」：`oauth_not_configured`（503，本店参数没配齐）/`oauth_rejected`（502，NodeLoc 拒绝，如授权码已用过、Client ID/Secret 或回调白名单不匹配）/`oauth_unreachable`（502，连不上 NodeLoc）/`oauth_transaction_used`（授权事务已过期或已处理）分别给文案。服务端使用 `oauth_transactions` 保存 state hash、intent、回跳地址、过期时间和一次性消费状态；重复 callback 在 Token Exchange 前直接拒绝，不会再次兑换 authorization code。登录 callback 在服务端完成 Token/UserInfo 后才把本站 Session 交给前端，绑定流程也由服务端完成。服务商返回原文只进入脱敏后的 OAuth 诊断记录与服务端日志：会保留 `error`/`error_description`，但不会记录 code、state、secret 或 token。userinfo 认 `id`/`uid`/`user_id`/`sub`，用户名认 `username`/`preferred_username`/`nickname`/`display_name`，头像认 `avatar_url`/`picture`，也认 `{"data": …}` 外层包装和 HTTP 200 下的 `{"success": false,…}` 业务拒绝。
 
 商店侧的 Scope 在后台设置里填（默认 `openid profile`）：留空或漏写 `openid` 时商店会自动补上，因为 NodeLoc 要求授权请求必须带它；只有申请到 `email` 审核后才把它加进去，否则拿不到邮箱。
 

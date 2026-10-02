@@ -2,13 +2,27 @@ package infrastructure
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/identity/domain"
 )
+
+func newOAuthTransactionDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&domain.OAuthTransaction{}); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
 
 func newAttemptStoreDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -20,6 +34,30 @@ func newAttemptStoreDB(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	return db
+}
+
+func TestConsumeOAuthTransactionIsOneTimeAndExpires(t *testing.T) {
+	db := newOAuthTransactionDB(t)
+	repo := NewGormUserRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	active := &domain.OAuthTransaction{StateHash: "state-a", Intent: "login", ReturnURL: "/oauth/callback", Status: "pending", ExpiresAt: now.Add(time.Minute)}
+	if err := repo.CreateOAuthTransaction(ctx, active); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ConsumeOAuthTransaction(ctx, "state-a", now); err != nil {
+		t.Fatalf("first consume: %v", err)
+	}
+	if _, err := repo.ConsumeOAuthTransaction(ctx, "state-a", now); !errors.Is(err, domain.ErrOAuthTransaction) {
+		t.Fatalf("second consume = %v, want transaction error", err)
+	}
+	expired := &domain.OAuthTransaction{StateHash: "state-b", Intent: "login", ReturnURL: "/", Status: "pending", ExpiresAt: now.Add(-time.Second)}
+	if err := repo.CreateOAuthTransaction(ctx, expired); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ConsumeOAuthTransaction(ctx, "state-b", now); !errors.Is(err, domain.ErrOAuthTransaction) {
+		t.Fatalf("expired consume = %v, want transaction error", err)
+	}
 }
 
 // The trail names buyers, so it cannot be the shop's permanent record of who
