@@ -22,7 +22,33 @@ export interface GeneratedCards {
 }
 
 export const listProducts = () =>
-  client.get<{ data: Product[] }>('/admin/products').then((r) => r.data.data ?? [])
+  client.get<{ data: Product[]; total?: number }>('/admin/products').then((r) => r.data.data ?? [])
+
+export interface AdminProductQuery {
+  q?: string
+  type?: string
+  status?: string
+  sort?: string
+  category?: number
+  limit?: number
+  offset?: number
+}
+
+// 后台商品列表走服务端筛选与分页，超过一页时不会漏数据。
+export const listAdminProducts = (query: AdminProductQuery = {}) =>
+  client
+    .get<{ data: Product[]; total: number }>('/admin/products', {
+      params: {
+        q: query.q?.trim() || undefined,
+        type: query.type && query.type !== 'all' ? query.type : undefined,
+        status: query.status && query.status !== 'all' ? query.status : undefined,
+        sort: query.sort || undefined,
+        category: query.category || undefined,
+        limit: query.limit,
+        offset: query.offset || undefined,
+      },
+    })
+    .then((r) => ({ data: r.data.data ?? [], total: r.data.total ?? 0 }))
 
 export const getProduct = (id: number) =>
   client.get<{ data: Product }>(`/admin/products/${id}`).then((r) => r.data.data)

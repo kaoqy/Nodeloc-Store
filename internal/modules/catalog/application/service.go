@@ -192,7 +192,19 @@ func (s *Service) CreateProduct(ctx context.Context, product *domain.Product) er
 	return s.products.Create(ctx, product)
 }
 
+// UpdateProduct applies a patch: fields left zero are treated as "unchanged"
+// unless the caller explicitly asks for them.
+//
+// 两个入口共用这一个方法：商品编辑页提交完整表单，列表页的上下架/推荐只
+// 发一个布尔值。早期版本把请求体整对象覆盖到记录上，于是列表页点一下
+// 「下架」就会把未提交的字段清零——那正是这套 _Set 标记要解决的问题。
 func (s *Service) UpdateProduct(ctx context.Context, id uint, input *domain.Product) (*domain.Product, error) {
+	return s.UpdateProductPatch(ctx, id, input, nil)
+}
+
+// UpdateProductPatch 允许调用方指明这次请求真正携带了哪些字段。
+// changed 为 nil 时按完整表单处理（编辑页），否则只覆盖列出的字段（列表页）。
+func (s *Service) UpdateProductPatch(ctx context.Context, id uint, input *domain.Product, changed map[string]bool) (*domain.Product, error) {
 	if input == nil {
 		return nil, errors.New("product is required")
 	}
@@ -204,7 +216,65 @@ func (s *Service) UpdateProduct(ctx context.Context, id uint, input *domain.Prod
 	soldCount := product.SoldCount
 	createdAt := product.CreatedAt
 	deletedAt := product.DeletedAt
-	*product = *input
+	if changed == nil {
+		*product = *input
+	} else {
+		// 补丁模式：只把请求里明确出现的字段写回记录。
+		if changed["name"] {
+			product.Name = input.Name
+		}
+		if changed["slug"] {
+			product.Slug = input.Slug
+		}
+		if changed["summary"] {
+			product.Summary = input.Summary
+		}
+		if changed["description"] {
+			product.Description = input.Description
+		}
+		if changed["image_path"] {
+			product.ImagePath = input.ImagePath
+		}
+		if changed["product_type"] {
+			product.ProductType = input.ProductType
+		}
+		if changed["delivery_instructions"] {
+			product.DeliveryInstructions = input.DeliveryInstructions
+		}
+		if changed["require_contact"] {
+			product.RequireContact = input.RequireContact
+		}
+		if changed["price"] {
+			product.Price = input.Price
+		}
+		if changed["original_price"] {
+			product.OriginalPrice = input.OriginalPrice
+		}
+		if changed["stock_visible"] {
+			product.StockVisible = input.StockVisible
+		}
+		if changed["is_featured"] {
+			product.IsFeatured = input.IsFeatured
+		}
+		if changed["auto_deliver"] {
+			product.AutoDeliver = input.AutoDeliver
+		}
+		if changed["is_published"] {
+			product.IsPublished = input.IsPublished
+		}
+		if changed["is_archived"] {
+			product.IsArchived = input.IsArchived
+		}
+		if changed["sort_order"] {
+			product.SortOrder = input.SortOrder
+		}
+		if changed["category_id"] {
+			product.CategoryID = input.CategoryID
+		}
+		if changed["form_schema"] {
+			product.FormSchema = input.FormSchema
+		}
+	}
 	product.ID = id
 	product.CreatedAt = createdAt
 	product.DeletedAt = deletedAt

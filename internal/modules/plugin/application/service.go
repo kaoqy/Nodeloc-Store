@@ -147,7 +147,9 @@ func (s *Service) SetEnabled(ctx context.Context, id uint, enabled bool) (*domai
 			return nil, fmt.Errorf("%w: 这个插件的提供者已不在本版本里", domain.ErrInvalidInput)
 		}
 		if err := provider.Validate(decodeMap(plugin.Settings), decodeMap(plugin.ConfigSecrets)); err != nil {
-			return nil, fmt.Errorf("%w: %v", domain.ErrInvalidInput, err)
+			// 校验失败的是「这个插件还没配置好」，所以要告诉店主去哪一格改，
+			// 而不是只回一句“请先填写交付说明”让人找不到位置。
+			return nil, fmt.Errorf("%w: 先点开「配置」把必填项补齐再启用：%v", domain.ErrInvalidInput, err)
 		}
 	}
 	plugin.IsEnabled = enabled

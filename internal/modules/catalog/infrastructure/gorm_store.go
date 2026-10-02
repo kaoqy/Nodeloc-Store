@@ -11,6 +11,11 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// lowStockThreshold marks a card product whose remaining stock is nearly gone.
+// It mirrors the catalogue service's default so the 库存告急 filter in the back
+// office list agrees with the dashboard's own alert list.
+const lowStockThreshold = 3
+
 type GormProductRepo struct{ db *gorm.DB }
 type GormCardRepo struct{ db *gorm.DB }
 type GormCategoryRepo struct{ db *gorm.DB }
@@ -68,6 +73,23 @@ func (r *GormProductRepo) ListQuery(ctx context.Context, query domain.ProductQue
 		if pattern := strings.ToLower(strings.TrimSpace(query.Search)); pattern != "" {
 			like := "%" + pattern + "%"
 			db = db.Where("LOWER(name) LIKE ? OR LOWER(COALESCE(summary, '')) LIKE ? OR LOWER(COALESCE(description, '')) LIKE ?", like, like, like)
+		}
+		// 后台列表按商品类型筛选；前台不传就不生效。
+		if productType := strings.TrimSpace(query.ProductType); productType != "" && productType != "all" {
+			if productType == "card" || productType == "manual" {
+				db = db.Where("product_type = ?", productType)
+			}
+		}
+		// 后台列表按状态筛选：上架/下架/归档/库存告急。
+		switch strings.TrimSpace(query.Status) {
+		case "published":
+			db = db.Where("is_published = ? AND is_archived = ?", true, false)
+		case "hidden":
+			db = db.Where("is_published = ? AND is_archived = ?", false, false)
+		case "archived":
+			db = db.Where("is_archived = ?", true)
+		case "low_stock":
+			db = db.Where("is_archived = ? AND product_type = ? AND stock_count <= ?", false, domain.ProductTypeCard, lowStockThreshold)
 		}
 		return db
 	}

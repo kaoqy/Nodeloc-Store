@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -121,8 +122,10 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 // that quietly did nothing is worse to debug than a 400 that says so.
 func productQuery(c *gin.Context) domain.ProductQuery {
 	query := domain.ProductQuery{
-		Search: strings.TrimSpace(c.Query("q")),
-		Sort:   strings.TrimSpace(c.Query("sort")),
+		Search:      strings.TrimSpace(c.Query("q")),
+		Sort:        strings.TrimSpace(c.Query("sort")),
+		ProductType: strings.TrimSpace(c.Query("type")),
+		Status:      strings.TrimSpace(c.Query("status")),
 	}
 	if value, err := strconv.ParseUint(strings.TrimSpace(c.Query("category")), 10, 32); err == nil && value > 0 {
 		id := uint(value)
@@ -369,16 +372,48 @@ func (h *Handler) createProduct(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": input.Product})
 }
 
+// updateProduct 同时服务两种调用：编辑页提交完整表单，列表页只发一个要翻转
+// 的布尔值。先读原始 JSON 的键集合，再决定是整体替换还是按字段补丁更新。
 func (h *Handler) updateProduct(c *gin.Context) {
 	id, ok := parseID(c, "id")
 	if !ok {
 		return
 	}
-	var input domain.Product
-	if !bindJSON(c, &input) {
+	raw, err := c.GetRawData()
+	if err != nil {
+		respondError(c, err)
 		return
 	}
-	product, err := h.service.UpdateProduct(c.Request.Context(), id, &input)
+	var input domain.Product
+	if err := json.Unmarshal(raw, &input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  "提交的内容无法解析，请检查表单后重试。",
+			"code":   "invalid_request",
+			"detail": err.Error(),
+		})
+		return
+	}
+	var keys map[string]any
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		respondError(c, err)
+		return
+	}
+	// 只包含少数几个开关字段时按补丁处理；完整表单仍然整体保存。
+	patchOnly := true
+	for _, field := range []string{"name", "slug", "price", "product_type", "description", "form_schema"} {
+		if _, present := keys[field]; present {
+			patchOnly = false
+			break
+		}
+	}
+	var changed map[string]bool
+	if patchOnly {
+		changed = make(map[string]bool, len(keys))
+		for key := range keys {
+			changed[key] = true
+		}
+	}
+	product, err := h.service.UpdateProductPatch(c.Request.Context(), id, &input, changed)
 	if err != nil {
 		respondError(c, err)
 		return

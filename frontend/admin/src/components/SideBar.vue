@@ -42,19 +42,17 @@ const groups = [
   {
     label: '客服与 AI',
     items: [
-      // 工单与 AI 客服是同一套接待流程，合并成一个一级入口总览。
+      // 工单与 AI 客服是同一套接待流程，只留一个一级入口。
       { path: '/service', label: '客服中心', icon: 'support', permission: 'tickets:view', altPermission: 'ai:view' },
-      // AI 与客服配置统一收进配置中心，这里是直达该分组的快捷入口。
-      { path: '/config', label: 'AI 与客服配置', icon: 'plugins', permission: 'ai:view', altPermission: 'knowledge:view' },
-      { path: '/config?tab=knowledge', label: '知识库', icon: 'products', permission: 'knowledge:view' },
-      { path: '/config?tab=service', label: '客服与快捷回复', icon: 'users', permission: 'agents:view' },
     ],
   },
   { label: '客户', items: [{ path: '/users', label: '用户管理', icon: 'users', permission: 'users:view' }] },
   {
     label: '系统',
     items: [
-      { path: '/config', label: '配置中心', icon: 'settings', permission: 'config_center:view' },
+      // 配置中心内部已有分组导航，侧栏不再为每个分组各开一个入口，
+      // 否则同一个页面会在侧栏出现四次，点哪一次都到同一处。
+      { path: '/config', label: '配置中心', icon: 'settings', permission: 'config_center:view', altPermission: 'ai:view' },
       { path: '/notifications', label: '通知中心', icon: 'notifications', permission: 'notifications:view' },
       { path: '/roles', label: '角色权限', icon: 'roles', permission: 'roles:view' },
       { path: '/logs', label: '审计日志', icon: 'logs', permission: 'logs:view' },

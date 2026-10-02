@@ -13,6 +13,10 @@ type ProductQuery struct {
 	Sort          string
 	Limit         int
 	Offset        int
+	// ProductType narrows the back office list to 卡密 or 人工交付.
+	ProductType string
+	// Status narrows the back office list: published / hidden / archived / low_stock.
+	Status string
 }
 
 // Sort orders the storefront understands. Leaving it empty keeps the shop

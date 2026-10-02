@@ -85,7 +85,7 @@ function landing(permissions: string[], isSuper: boolean): string {
     ['users:view', '/users'],
     ['activities:view', '/activities'],
     ['tickets:view', '/service'],
-    ['ai:view', '/service?tab=config'],
+    ['ai:view', '/config?tab=ai'],
     ['knowledge:view', '/knowledge'],
     ['agents:view', '/service/agents'],
     ['config_center:view', '/config'],
