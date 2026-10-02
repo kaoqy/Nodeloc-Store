@@ -45,11 +45,8 @@ onMounted(async () => {
 
     <footer class="mt-20 border-t border-[var(--stroke)] py-9">
       <div class="mx-auto flex w-full max-w-6xl flex-col items-center gap-3 px-4 text-center sm:px-6">
-        <nav
-          v-if="site.footerLinks.length"
-          class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13px]"
-          aria-label="页脚链接"
-        >
+        <nav class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13px]" aria-label="帮助与页脚链接">
+          <RouterLink to="/help" class="text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]">帮助中心</RouterLink>
           <a
             v-for="link in site.footerLinks"
             :key="link.url + link.label"
@@ -60,6 +57,18 @@ onMounted(async () => {
           >
             {{ link.label }}
           </a>
+          <template v-if="site.footerLinks.length">
+            <a
+              v-for="link in site.footerLinks"
+              :key="link.url + link.label"
+              :href="link.url"
+              class="text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {{ link.label }}
+            </a>
+          </template>
         </nav>
 
         <p class="max-w-2xl text-[13px] leading-relaxed text-[var(--text-dim)]">
