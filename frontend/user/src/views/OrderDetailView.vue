@@ -357,6 +357,7 @@ async function refreshDelivery() {
           <p class="flex-1 text-sm text-[var(--text-dim)]">
             <span v-if="order.fulfillment_status === 'waiting_stock'">卡密库存已临时售罄，补货后商店会自动为你交付。</span>
             <span v-else-if="order.fulfillment_status === 'manual_pending'">商家正在人工交付，完成后这里会显示结果与说明。</span>
+            <span v-else-if="order.fulfillment_status === 'plugin_pending'">商店正在通过插件为你交付，完成后这里会自动显示结果。</span>
             <span v-else>支付已完成，交付通常几秒内到达，本页会自动刷新。</span>
           </p>
           <button class="btn btn-quiet btn-sm" :disabled="loading" @click="refreshDelivery">

@@ -32,6 +32,9 @@ const fulfilment = computed(() => fulfillmentStatus(order.value?.fulfillment_sta
 const isPaid = computed(() => ['paid', 'completed'].includes(order.value?.status || ''))
 const delivered = computed(() => ['delivered', 'completed'].includes(order.value?.fulfillment_status || ''))
 const waitingStock = computed(() => order.value?.fulfillment_status === 'waiting_stock')
+// 插件交付中: the goods are being delivered by an installed plugin, which is a
+// different queue from 等待补货 and from 等待人工发货.
+const pluginPending = computed(() => order.value?.fulfillment_status === 'plugin_pending')
 const canDeliver = computed(() => isPaid.value && !delivered.value)
 
 const steps = computed(() => {
@@ -183,12 +186,12 @@ onMounted(load)
           取消订单
         </button>
         <button
-          v-if="canManage && waitingStock"
+          v-if="canManage && (waitingStock || pluginPending)"
           class="btn btn-primary btn-sm"
           :disabled="busy"
-          @click="run(() => fulfillOrder(orderNo), '已重试自动交付')"
+          @click="run(() => fulfillOrder(orderNo), pluginPending ? '已重试插件交付' : '已重试自动交付')"
         >
-          重试自动交付
+          {{ pluginPending ? '重试插件交付' : '重试自动交付' }}
         </button>
         <button v-if="canManage && canDeliver" class="btn btn-primary btn-sm" :disabled="busy" @click="showDeliver = true">
           人工发货

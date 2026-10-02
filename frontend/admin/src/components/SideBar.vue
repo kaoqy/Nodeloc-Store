@@ -31,6 +31,7 @@ const groups = [
       { path: '/cards', label: '卡密管理', permission: 'cards:view' },
       { path: '/categories', label: '分类管理', permission: 'categories:view' },
       { path: '/coupons', label: '优惠券', permission: 'coupons:view' },
+      { path: '/plugins', label: '插件管理', permission: 'plugins:view' },
     ],
   },
   { label: '用户', items: [{ path: '/users', label: '用户管理', permission: 'users:view' }] },

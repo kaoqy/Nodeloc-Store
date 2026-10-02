@@ -399,3 +399,71 @@ export interface RuntimeSettings {
   }
   theme: { theme_primary: string; default_locale: string }
 }
+
+// ── Plugins ──────────────────────────────────────────────────────────
+
+/** One input on a plugin's configuration form; password fields are write-only. */
+export interface PluginConfigField {
+  key: string
+  label: string
+  type: 'text' | 'password' | 'select' | 'number' | 'bool'
+  required: boolean
+  placeholder?: string
+  help?: string
+  options?: string[]
+}
+
+export interface PluginManifest {
+  key: string
+  name: string
+  description: string
+  version: string
+  author: string
+  capabilities: string[]
+  config_schema: PluginConfigField[]
+}
+
+/** A provider the shop may enroll, with its current enrollment state. */
+export interface PluginCatalogEntry {
+  manifest: PluginManifest
+  installed: boolean
+  enabled: boolean
+  plugin_id?: number
+  settings?: Record<string, string>
+  /** Keys whose value is already stored, so the form can say 「已保存」. */
+  secret_fields?: string[]
+  binding_count: number
+  installed_at?: string
+}
+
+export interface Plugin {
+  id: number
+  key: string
+  name: string
+  description?: string
+  version: string
+  author?: string
+  is_enabled: boolean
+  settings?: string
+  config_schema?: string
+  capabilities?: string
+  installed_at?: string
+}
+
+/** Maps one purchase-form answer to a provider-side delivery item. */
+export interface PluginBinding {
+  id: number
+  plugin_id: number
+  product_id: number
+  value: string
+  match_field?: string
+  remote_name?: string
+  remote_ref: string
+  extra?: string
+  is_enabled: boolean
+  sort_order: number
+  plugin_name?: string
+  plugin_key?: string
+  product_name?: string
+  product_slug?: string
+}
