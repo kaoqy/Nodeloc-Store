@@ -26,6 +26,7 @@ const paths: Record<string, string> = {
   external: '<path d="M7 17 17 7M9 7h8v8" />',
   logout: '<path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3" /><path d="M10 8l-4 4 4 4M6 12h9" />',
   chevron: '<path d="M9 6l6 6-6 6" />',
+  support: '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H12l-4.5 3.4V16H6.5A2.5 2.5 0 0 1 4 13.5z" /><path d="M8.5 9.5h7M8.5 12.5h4.5" />',
 }
 </script>
 

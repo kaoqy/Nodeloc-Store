@@ -164,6 +164,10 @@ const backlog = computed(() => {
     { to: '/orders?status=paid', label: '等待人工发货', count: s.orders_manual_pending, tone: 'info', permission: ['orders', 'view'] },
     { to: '/cards', label: '等待补货', count: s.orders_waiting, tone: 'danger', permission: ['cards', 'view'] },
     { to: '/orders', label: '期间退款', count: s.refunded_period, tone: 'neutral', permission: ['orders', 'view'] },
+    // 新增待办：工单和发货异常比「已经卖出去多少」更值得第一眼看到。
+    { to: '/service', label: '待人工工单', count: s.tickets_pending_human, tone: 'danger', permission: ['tickets', 'view'] },
+    { to: '/service?attention=overdue', label: '即将超时工单', count: s.tickets_overdue, tone: 'warning', permission: ['tickets', 'view'] },
+    { to: '/orders?attention=undelivered', label: '自动发货异常', count: s.auto_delivery_failed, tone: 'danger', permission: ['orders', 'view'] },
   ].filter((item) => item.count > 0 && auth.allows(item.permission[0], item.permission[1]))
 })
 
@@ -343,6 +347,39 @@ onUnmounted(() => {
     </div>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+
+    <!-- 快捷入口：把「今天最可能要去处理的事」放在一张卡片里，
+         管理员不必先记住新功能分别在哪一个菜单下。 -->
+    <div class="quick-entries grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <RouterLink to="/service" class="card-hover flex items-center gap-3 !p-4">
+        <span class="brand-mark">客</span>
+        <span class="min-w-0">
+          <span class="block text-sm font-semibold">客服中心</span>
+          <span class="quiet block truncate text-xs">工单队列与 AI 接待</span>
+        </span>
+      </RouterLink>
+      <RouterLink to="/activities" class="card-hover flex items-center gap-3 !p-4">
+        <span class="brand-mark">活</span>
+        <span class="min-w-0">
+          <span class="block text-sm font-semibold">活动营销</span>
+          <span class="quiet block truncate text-xs">折扣、满减与领券</span>
+        </span>
+      </RouterLink>
+      <RouterLink to="/config" class="card-hover flex items-center gap-3 !p-4">
+        <span class="brand-mark">配</span>
+        <span class="min-w-0">
+          <span class="block text-sm font-semibold">配置中心</span>
+          <span class="quiet block truncate text-xs">AI、通知、风控与保留策略</span>
+        </span>
+      </RouterLink>
+      <RouterLink to="/cards" class="card-hover flex items-center gap-3 !p-4">
+        <span class="brand-mark">卡</span>
+        <span class="min-w-0">
+          <span class="block text-sm font-semibold">卡密库存</span>
+          <span class="quiet block truncate text-xs">补货与等待发货</span>
+        </span>
+      </RouterLink>
+    </div>
 
     <div v-if="loading && !stats" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <div v-for="i in 4" :key="i" class="card !p-5">

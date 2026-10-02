@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   getQuickQuestions,
@@ -128,6 +128,21 @@ function reset() {
 
 watch(open, (value) => {
   if (value) void scrollToBottom()
+})
+
+// 客服中心页面的按钮通过事件打开这个窗口：买家用一个入口就能找到对话框，
+// 不用在页面上再放一个位置不同、样式不同的聊天面板。
+function onOpenRequest() {
+  open.value = true
+  void scrollToBottom()
+}
+
+onMounted(() => {
+  window.addEventListener('nodeloc:open-support', onOpenRequest)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('nodeloc:open-support', onOpenRequest)
 })
 
 onMounted(load)

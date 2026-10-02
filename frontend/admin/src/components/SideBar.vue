@@ -42,11 +42,12 @@ const groups = [
   {
     label: '客服与 AI',
     items: [
-      { path: '/tickets', label: '工单中心', icon: 'orders', permission: 'tickets:view' },
-      { path: '/ai', label: 'AI 客服', icon: 'dashboard', permission: 'ai:view' },
-      { path: '/ai/tools', label: 'AI 工具', icon: 'plugins', permission: 'ai_tools:view' },
-      { path: '/knowledge', label: '知识库', icon: 'products', permission: 'knowledge:view' },
-      { path: '/service/agents', label: '客服与快捷回复', icon: 'users', permission: 'agents:view' },
+      // 工单与 AI 客服是同一套接待流程，合并成一个一级入口总览。
+      { path: '/service', label: '客服中心', icon: 'support', permission: 'tickets:view', altPermission: 'ai:view' },
+      // AI 与客服配置统一收进配置中心，这里是直达该分组的快捷入口。
+      { path: '/config', label: 'AI 与客服配置', icon: 'plugins', permission: 'ai:view', altPermission: 'knowledge:view' },
+      { path: '/config?tab=knowledge', label: '知识库', icon: 'products', permission: 'knowledge:view' },
+      { path: '/config?tab=service', label: '客服与快捷回复', icon: 'users', permission: 'agents:view' },
     ],
   },
   { label: '客户', items: [{ path: '/users', label: '用户管理', icon: 'users', permission: 'users:view' }] },
@@ -71,7 +72,15 @@ const numbered = computed(() => {
     .map((group) => ({
       label: group.label,
       items: group.items
-        .filter((item) => auth.allows(item.permission.split(':')[0], item.permission.split(':')[1]))
+        .filter((item) => {
+          if (auth.allows(item.permission.split(':')[0], item.permission.split(':')[1])) return true
+          // 客服中心同时承载工单与 AI 配置，任一项权限都可以进入。
+          if (item.altPermission) {
+            const [resource, action] = item.altPermission.split(':')
+            return auth.allows(resource, action)
+          }
+          return false
+        })
         .map((item) => {
           index += 1
           return {

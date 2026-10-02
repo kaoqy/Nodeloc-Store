@@ -51,8 +51,7 @@ async function logout() {
         <RouterLink to="/activities" class="nav-item">活动</RouterLink>
         <template v-if="auth.isAuthenticated">
           <RouterLink to="/orders" class="nav-item">我的订单</RouterLink>
-          <RouterLink to="/tickets" class="nav-item">我的工单</RouterLink>
-          <RouterLink to="/help" class="nav-item">帮助</RouterLink>
+          <RouterLink to="/support" class="nav-item">客服中心</RouterLink>
           <RouterLink to="/profile" class="nav-item relative">
             个人中心
             <span
@@ -121,8 +120,7 @@ async function logout() {
       <RouterLink to="/activities" class="nav-item w-full">活动中心</RouterLink>
       <template v-if="auth.isAuthenticated">
         <RouterLink to="/orders" class="nav-item w-full">我的订单</RouterLink>
-        <RouterLink to="/tickets" class="nav-item w-full">我的工单</RouterLink>
-        <RouterLink to="/help" class="nav-item w-full">帮助中心</RouterLink>
+        <RouterLink to="/support" class="nav-item w-full">客服中心</RouterLink>
         <RouterLink to="/profile" class="nav-item w-full">
           个人中心<span v-if="inbox.unread" class="nums ml-2 text-[var(--accent)]">{{ badge }} 未读</span>
         </RouterLink>

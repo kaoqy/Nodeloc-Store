@@ -11,9 +11,9 @@ import {
   testKnowledge,
   type KnowledgeArticle,
   type KnowledgeCategory,
-} from '../api/support'
-import { errorMessage, when } from '../utils/format'
-import { useAuthStore } from '../stores/auth'
+} from '../../api/support'
+import { errorMessage, when } from '../../utils/format'
+import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
 const canManage = auth.allows('knowledge', 'manage')
@@ -157,10 +157,10 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="space-y-4">
+  <div class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h2 class="text-lg font-bold">知识库</h2>
+        <p class="text-sm font-semibold">知识库文章</p>
         <p class="quiet mt-1 text-xs">共 {{ total }} 篇。AI 回答时优先引用这里已发布的文章。</p>
       </div>
       <div class="flex flex-wrap gap-2">
@@ -272,5 +272,5 @@ onMounted(load)
         </div>
       </aside>
     </div>
-  </section>
+  </div>
 </template>

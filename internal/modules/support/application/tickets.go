@@ -197,14 +197,18 @@ func (s *Service) CreateTicket(ctx context.Context, input CreateTicketInput) (*d
 	if !validPriority(priority) {
 		return nil, fmt.Errorf("%w: 工单优先级无效。", domain.ErrInvalidInput)
 	}
-	prefix := "TK"
+	// 工单编号前缀由配置中心管理，店家可以改成自己的习惯（例如 SHOP）。
+	prefix := s.SystemConfigValue(ctx, "ticket", "ticket_no_prefix", "TK")
 	no, err := s.repo.NextTicketNo(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
 	workflow, _ := s.Workflow(ctx)
 	due := s.now().UTC()
-	if workflow != nil && workflow.EstimateReplyMinutes > 0 {
+	estimate := s.SystemConfigInt(ctx, "ticket", "human_timeout_hours", 0)
+	if estimate > 0 {
+		due = due.Add(time.Duration(estimate) * time.Hour)
+	} else if workflow != nil && workflow.EstimateReplyMinutes > 0 {
 		due = due.Add(time.Duration(workflow.EstimateReplyMinutes) * time.Minute)
 	}
 	ticket := &domain.Ticket{

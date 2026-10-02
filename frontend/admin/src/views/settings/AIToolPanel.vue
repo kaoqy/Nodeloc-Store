@@ -8,9 +8,9 @@ import {
   setAIToolPermission,
   type AIToolCall,
   type AIToolRow,
-} from '../api/support'
-import { errorMessage, when } from '../utils/format'
-import { useAuthStore } from '../stores/auth'
+} from '../../api/support'
+import { errorMessage, when } from '../../utils/format'
+import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
 const canManage = auth.allows('ai_tools', 'manage')
@@ -150,22 +150,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 class="text-lg font-bold">AI 工具</h2>
-        <p class="quiet mt-1 text-xs">
-          AI 只能调用这里启用的工具；每次调用都会校验身份、参数与数据范围，并写入审计日志。
-        </p>
-      </div>
-      <div class="flex gap-1.5">
-        <button class="chip" :class="tab === 'tools' ? 'chip-active' : ''" @click="tab = 'tools'">工具清单</button>
-        <button class="chip" :class="tab === 'calls' ? 'chip-active' : ''" @click="tab = 'calls'">
-          调用日志 <span class="nums">{{ callTotal }}</span>
-        </button>
-      </div>
-    </div>
-
+  <div class="space-y-4">
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
     <p v-if="!canManage" class="alert" role="status">当前角色只能查看工具配置，修改需要「AI 工具」管理权限。</p>
@@ -269,5 +254,5 @@ onMounted(load)
         </table>
       </div>
     </template>
-  </section>
+  </div>
 </template>

@@ -436,6 +436,10 @@ func (h *Handler) rateTicket(c *gin.Context) {
 		respondError(c, fmt.Errorf("%w: 评价内容无法解析。", domain.ErrInvalidInput))
 		return
 	}
+	if !h.ratingEnabled(c) {
+		respondError(c, fmt.Errorf("%w: 当前未启用工单评价。", domain.ErrInvalidInput))
+		return
+	}
 	if request.Satisfaction < 1 || request.Satisfaction > 5 {
 		respondError(c, fmt.Errorf("%w: 满意度请在 1 到 5 分之间。", domain.ErrInvalidInput))
 		return
@@ -451,7 +455,25 @@ func (h *Handler) rateTicket(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// allowReopen / allowCancel / ratingEnabled 读取配置中心的开关，
+// 让「后台配置页上的选项」真的决定接口行为，而不是只存进数据库。
+func (h *Handler) allowReopen(c *gin.Context) bool {
+	return h.service.SystemConfigBool(c.Request.Context(), "ticket", "allow_reopen", true)
+}
+
+func (h *Handler) allowCancel(c *gin.Context) bool {
+	return h.service.SystemConfigBool(c.Request.Context(), "ticket", "allow_cancel", true)
+}
+
+func (h *Handler) ratingEnabled(c *gin.Context) bool {
+	return h.service.SystemConfigBool(c.Request.Context(), "ticket", "enable_rating", true)
+}
+
 func (h *Handler) reopenTicket(c *gin.Context) {
+	if !h.allowReopen(c) {
+		respondError(c, fmt.Errorf("%w: 当前配置不允许用户重新打开工单。", domain.ErrInvalidInput))
+		return
+	}
 	userID, ok := currentUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录。", "code": "unauthenticated"})
@@ -474,6 +496,10 @@ func (h *Handler) reopenTicket(c *gin.Context) {
 }
 
 func (h *Handler) cancelTicket(c *gin.Context) {
+	if !h.allowCancel(c) {
+		respondError(c, fmt.Errorf("%w: 当前配置不允许用户撤销工单。", domain.ErrInvalidInput))
+		return
+	}
 	userID, ok := currentUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录。", "code": "unauthenticated"})

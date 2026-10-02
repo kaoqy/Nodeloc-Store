@@ -10,7 +10,6 @@ import OrderDetailView from '../views/OrderDetailView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import OAuthCallbackView from '../views/OAuthCallbackView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
-import HelpView from '../views/HelpView.vue'
 import SupportView from '../views/SupportView.vue'
 
 // meta.title is the words this page puts in front of the shop's name on the
@@ -26,9 +25,12 @@ const router = createRouter({
     { path: '/orders', name: 'orders', component: OrderListView, meta: { requiresAuth: true, title: '我的订单' } },
     { path: '/orders/:orderNo', name: 'order-detail', component: OrderDetailView, meta: { requiresAuth: true } },
     { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true, title: '个人中心' } },
+    // 客服中心把帮助文档、我的工单、活动中心收在一个页面，买家只认一个入口。
+    { path: '/support', name: 'support', component: SupportView, meta: { title: '客服中心' } },
     { path: '/activities', name: 'activities', component: SupportView, meta: { title: '活动中心' } },
     { path: '/tickets', name: 'tickets', component: SupportView, meta: { requiresAuth: true, title: '我的工单' } },
-    { path: '/help', name: 'help', component: HelpView, meta: { title: '帮助中心' } },
+    // 旧地址保留为跳转，已发出的链接和收藏不会变成 404。
+    { path: '/help', redirect: '/support' },
     { path: '/oauth/callback', name: 'oauth-callback', component: OAuthCallbackView, meta: { title: '登录中' } },
     // Last, so a named route never loses to it. Without this an address the shop
     // does not have leaves the page body empty, which reads as a broken store.

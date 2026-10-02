@@ -10,9 +10,9 @@ import {
   type AIConfig,
   type AIWorkflow,
   type AIQuickQuestion,
-} from '../api/support'
-import { errorMessage } from '../utils/format'
-import { useAuthStore } from '../stores/auth'
+} from '../../api/support'
+import { errorMessage } from '../../utils/format'
+import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
 const canManage = auth.allows('ai', 'manage')
@@ -133,22 +133,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 class="text-lg font-bold">AI 客服</h2>
-        <p class="quiet mt-1 text-xs">工单默认由 AI 接待；API Key 加密存储，读取接口只返回是否已配置。</p>
-      </div>
-      <div class="flex gap-2">
-        <button v-if="canManage && tab !== 'workflow' && tab !== 'quick'" class="btn btn-primary btn-sm" :disabled="saving" @click="saveBasic">
-          {{ saving ? '保存中…' : '保存配置' }}
-        </button>
-        <button v-if="canManage && tab === 'workflow'" class="btn btn-primary btn-sm" :disabled="saving" @click="saveFlow">
-          {{ saving ? '保存中…' : '保存工作流' }}
-        </button>
-      </div>
-    </div>
-
+  <div class="space-y-4">
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
     <p v-if="!canManage" class="alert" role="status">当前角色只能查看 AI 配置，修改需要「AI 客服」管理权限。</p>
@@ -398,5 +383,5 @@ onMounted(load)
         </table>
       </div>
     </div>
-  </section>
+  </div>
 </template>

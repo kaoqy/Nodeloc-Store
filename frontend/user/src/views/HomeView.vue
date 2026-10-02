@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProductCard from '../components/ProductCard.vue'
+import PromoStrip from '../components/PromoStrip.vue'
 import { listCategories, listProducts, storeStats } from '../api/products'
 import { errorMessage } from '../api/client'
 import { useSiteStore } from '../stores/site'
@@ -229,6 +230,8 @@ onMounted(async () => {
         </div>
       </dl>
     </section>
+
+    <PromoStrip />
 
     <!-- Search + category filter -->
     <section class="catalog-toolbar mt-12 flex flex-col gap-3 lg:flex-row lg:items-center">

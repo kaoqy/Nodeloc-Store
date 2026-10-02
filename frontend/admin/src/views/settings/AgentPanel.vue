@@ -10,9 +10,9 @@ import {
   renderQuickReply,
   type CustomerServiceAgent,
   type QuickReply,
-} from '../api/support'
-import { errorMessage } from '../utils/format'
-import { useAuthStore } from '../stores/auth'
+} from '../../api/support'
+import { errorMessage } from '../../utils/format'
+import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
 const canManage = auth.allows('agents', 'manage')
@@ -143,18 +143,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 class="text-lg font-bold">客服人员与快捷回复</h2>
-        <p class="quiet mt-1 text-xs">人工工单按在线状态与并发量自动分配；没有空闲客服时留在待人工队列。</p>
-      </div>
-      <div class="flex gap-1.5">
-        <button class="chip" :class="tab === 'agents' ? 'chip-active' : ''" @click="tab = 'agents'">客服人员</button>
-        <button class="chip" :class="tab === 'replies' ? 'chip-active' : ''" @click="tab = 'replies'">快捷回复</button>
-      </div>
-    </div>
-
+  <div class="space-y-4">
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 
@@ -270,5 +259,5 @@ onMounted(load)
         </aside>
       </div>
     </template>
-  </section>
+  </div>
 </template>

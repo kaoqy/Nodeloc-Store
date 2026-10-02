@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import {
   claimCoupon,
   createTicket,
@@ -10,9 +10,9 @@ import {
   rateTicket,
   reopenTicket,
   replyTicket,
+  transferTicket,
   ticketStatusLabels,
   ticketTypeOptions,
-  transferTicket,
   type Activity,
   type Ticket,
   type TicketDetail,
@@ -20,9 +20,11 @@ import {
 import { errorMessage } from '../api/client'
 import { when } from '../utils/format'
 
+// 客服中心：把「AI 客服 / 我的工单 / 帮助文档」收进一个页面，
+// 买家用一个入口就能找到全部售后路径，不再需要在菜单里分辨三处入口。
 const route = useRoute()
-const router = useRouter()
-const tab = ref<'activities' | 'tickets'>('activities')
+
+const tab = ref<'help' | 'tickets' | 'activities'>('help')
 
 const activities = ref<Activity[]>([])
 const activityError = ref('')
@@ -43,6 +45,19 @@ const rating = ref(5)
 const ratingComment = ref('')
 
 const form = ref({ type: 'order', subject: '', content: '', order_no: '' })
+
+const helpSections = [
+  { id: 'buy', title: '如何购买商品', body: '在首页搜索或选择分类，打开商品详情页确认价格、库存和交付方式，填写必要信息后点击立即购买。未登录时会先进入登录流程。' },
+  { id: 'payment', title: '支付完成后在哪里查看', body: '支付完成后回到订单详情页。商店以服务端确认结果为准自动核实支付状态；请不要因为页面暂未更新而重复付款。' },
+  { id: 'delivery', title: '卡密什么时候发放', body: '自动发货商品在支付确认且有可用库存后交付。若库存暂时不足，订单会显示等待补货；人工交付商品由商家在订单中完成发货。' },
+  { id: 'card-issue', title: '卡密无效或已被使用', body: '带着订单号提交工单，智能客服会先核对交付记录。核实为无效卡后会按售后规则重新发货或退款。' },
+  { id: 'refund', title: '退款与售后规则', body: '数字商品具有一次性交付属性，已交付且可正常使用的卡密原则上不支持退款。未交付、卡密无效或重复交付的情况可以申请售后。' },
+  { id: 'oauth', title: 'NodeLoc 登录失败', body: '请从登录页重新发起一次授权。若持续失败，请把登录时间与页面提示提供给客服，不要提供 Client Secret、授权码或 Token。' },
+  { id: 'activity', title: '活动与优惠码怎么用', body: '活动优惠在结算时由服务端自动计算，优惠码在商品详情页或结算页填写。同一个订单默认取优惠力度最大的一项。' },
+  { id: 'human', title: '需要人工客服', body: '在右下角打开智能客服窗口，或在本页提交工单后点击「转人工客服」。你的完整对话会一起交给人工同事。' },
+]
+
+const openHelp = ref('buy')
 
 const filteredTickets = computed(() =>
   statusFilter.value === 'all' ? tickets.value : tickets.value.filter((item) => item.status === statusFilter.value),
@@ -95,7 +110,7 @@ async function claim(activity: Activity) {
   try {
     await claimCoupon(activity.id)
     activityError.value = ''
-    alert('优惠券已领取，可在下单时使用。')
+    window.alert('优惠券已领取，可在下单时使用。')
   } catch (err) {
     activityError.value = errorMessage(err, '领取失败')
   } finally {
@@ -160,7 +175,7 @@ async function sendReply() {
 async function askHuman() {
   if (!detail.value) return
   try {
-    await transferTicket(detail.value.ticket.id, '用户在小程序页申请转人工')
+    await transferTicket(detail.value.ticket.id, '用户在客服中心申请转人工')
     await openTicket(detail.value.ticket.id)
     await loadTickets()
   } catch (err) {
@@ -189,8 +204,13 @@ async function reopen() {
   }
 }
 
+function openWidget() {
+  window.dispatchEvent(new CustomEvent('nodeloc:open-support'))
+}
+
 onMounted(() => {
   if (route.query.tab === 'tickets') tab.value = 'tickets'
+  if (route.query.tab === 'activities') tab.value = 'activities'
   void loadActivities()
   void loadTickets()
   const order = typeof route.query.order === 'string' ? route.query.order : ''
@@ -204,27 +224,88 @@ onMounted(() => {
 
 <template>
   <div class="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
-    <header class="flex flex-wrap items-center justify-between gap-3">
+    <header class="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <p class="eyebrow">活动与客服</p>
-        <h1 class="mt-2 text-2xl font-bold">活动中心 · 我的工单</h1>
+        <p class="eyebrow">客服中心</p>
+        <h1 class="mt-2 text-2xl font-bold sm:text-3xl">有问题，从这里开始</h1>
+        <p class="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--text-dim)]">
+          智能客服会先接待并查询订单、活动与规则；需要人工时点一下就转接，对话记录会一起带过去。
+        </p>
       </div>
-      <div class="flex gap-1.5">
-        <button class="chip" :class="tab === 'activities' ? 'chip-active' : ''" @click="tab = 'activities'">活动中心</button>
-        <button class="chip" :class="tab === 'tickets' ? 'chip-active' : ''" @click="tab = 'tickets'">我的工单</button>
-      </div>
+      <button class="btn btn-primary" @click="openWidget">
+        打开智能客服
+      </button>
     </header>
 
-    <template v-if="tab === 'activities'">
-      <p v-if="activityError" class="alert alert-danger mt-6" role="alert">{{ activityError }}</p>
-      <div v-if="activityLoading" class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div v-for="i in 3" :key="i" class="card space-y-3"><div class="skeleton h-5 w-2/3" /><div class="skeleton h-4 w-full" /></div>
+    <div class="mt-6 grid gap-3 sm:grid-cols-3">
+      <button class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]" @click="openWidget">
+        <p class="font-semibold">智能客服</p>
+        <p class="quiet mt-1 text-xs">先查订单与规则，随时可转人工</p>
+      </button>
+      <button
+        class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]"
+        @click="tab = 'tickets'; showCreate = true"
+      >
+        <p class="font-semibold">提交工单</p>
+        <p class="quiet mt-1 text-xs">复杂问题留档，客服按顺序跟进</p>
+      </button>
+      <button
+        class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]"
+        @click="tab = 'activities'"
+      >
+        <p class="font-semibold">活动与优惠</p>
+        <p class="quiet mt-1 text-xs">查看正在进行的促销与领券活动</p>
+      </button>
+    </div>
+
+    <div class="mt-8 flex flex-wrap gap-1.5" role="tablist" aria-label="客服中心板块">
+      <button class="chip" :class="tab === 'help' ? 'chip-active' : ''" role="tab" :aria-selected="tab === 'help'" @click="tab = 'help'">
+        帮助文档
+      </button>
+      <button class="chip" :class="tab === 'tickets' ? 'chip-active' : ''" role="tab" :aria-selected="tab === 'tickets'" @click="tab = 'tickets'">
+        我的工单 <span v-if="tickets.length" class="nums opacity-70">{{ tickets.length }}</span>
+      </button>
+      <button class="chip" :class="tab === 'activities' ? 'chip-active' : ''" role="tab" :aria-selected="tab === 'activities'" @click="tab = 'activities'">
+        活动中心
+      </button>
+    </div>
+
+    <!-- 帮助文档 -->
+    <section v-if="tab === 'help'" class="mt-5 grid gap-3">
+      <article v-for="item in helpSections" :key="item.id" class="card overflow-hidden !p-0">
+        <button
+          class="flex min-h-14 w-full items-center justify-between gap-4 px-5 py-4 text-left font-semibold transition-colors hover:bg-[var(--surface-hi)]"
+          type="button"
+          :aria-expanded="openHelp === item.id"
+          @click="openHelp = openHelp === item.id ? '' : item.id"
+        >
+          <span>{{ item.title }}</span>
+          <span class="mono text-lg text-[var(--text-quiet)]" aria-hidden="true">{{ openHelp === item.id ? '−' : '+' }}</span>
+        </button>
+        <p v-if="openHelp === item.id" class="border-t border-[var(--stroke-quiet)] px-5 py-4 text-sm leading-7 text-[var(--text-dim)]">
+          {{ item.body }}
+        </p>
+      </article>
+      <div class="card flex flex-wrap items-center gap-3">
+        <p class="text-sm text-[var(--text-dim)]">没有找到答案？智能客服会读这些文档并帮你查订单。</p>
+        <button class="btn btn-secondary btn-sm ml-auto" @click="openWidget">问智能客服</button>
       </div>
-      <div v-else-if="!activities.length" class="card mt-6 py-16 text-center">
+    </section>
+
+    <!-- 活动中心 -->
+    <section v-else-if="tab === 'activities'" class="mt-5">
+      <p v-if="activityError" class="alert alert-danger" role="alert">{{ activityError }}</p>
+      <div v-if="activityLoading" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div v-for="i in 3" :key="i" class="card space-y-3">
+          <div class="skeleton h-5 w-2/3" />
+          <div class="skeleton h-4 w-full" />
+        </div>
+      </div>
+      <div v-else-if="!activities.length" class="card py-16 text-center">
         <p class="font-semibold">暂时没有进行中的活动</p>
         <p class="mt-1.5 text-sm text-[var(--text-quiet)]">有新的促销活动时会显示在这里。</p>
       </div>
-      <div v-else class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <article v-for="activity in activities" :key="activity.id" class="card space-y-3">
           <img v-if="activity.cover_image" :src="activity.cover_image" :alt="activity.name" class="aspect-[16/9] w-full rounded-[var(--radius-sm)] object-cover" />
           <div>
@@ -247,10 +328,11 @@ onMounted(() => {
           <RouterLink v-else to="/" class="btn btn-secondary btn-sm">去逛逛</RouterLink>
         </article>
       </div>
-    </template>
+    </section>
 
-    <template v-else>
-      <div class="mt-6 flex flex-wrap items-center gap-2">
+    <!-- 我的工单 -->
+    <section v-else class="mt-5">
+      <div class="flex flex-wrap items-center gap-2">
         <select v-model="statusFilter" class="input !w-auto" aria-label="工单状态">
           <option value="all">全部状态</option>
           <option v-for="(label, value) in ticketStatusLabels" :key="value" :value="value">{{ label }}</option>
@@ -263,8 +345,12 @@ onMounted(() => {
 
       <div class="mt-4 grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <div class="space-y-2">
-          <div v-if="ticketLoading" class="card space-y-2"><div v-for="i in 3" :key="i" class="skeleton h-8 w-full" /></div>
-          <div v-else-if="!filteredTickets.length" class="card py-10 text-center text-sm text-[var(--text-quiet)]">还没有工单</div>
+          <div v-if="ticketLoading" class="card space-y-2">
+            <div v-for="i in 3" :key="i" class="skeleton h-8 w-full" />
+          </div>
+          <div v-else-if="!filteredTickets.length" class="card py-10 text-center text-sm text-[var(--text-quiet)]">
+            还没有工单
+          </div>
           <button
             v-for="item in filteredTickets"
             :key="item.id"
@@ -282,8 +368,12 @@ onMounted(() => {
         </div>
 
         <div>
-          <div v-if="detailLoading" class="card space-y-3"><div v-for="i in 4" :key="i" class="skeleton h-8 w-full" /></div>
-          <div v-else-if="!detail" class="card py-16 text-center text-sm text-[var(--text-quiet)]">选择左侧工单查看对话</div>
+          <div v-if="detailLoading" class="card space-y-3">
+            <div v-for="i in 4" :key="i" class="skeleton h-8 w-full" />
+          </div>
+          <div v-else-if="!detail" class="card py-16 text-center text-sm text-[var(--text-quiet)]">
+            选择左侧工单查看对话
+          </div>
           <div v-else class="space-y-4">
             <div class="card space-y-2">
               <div class="flex flex-wrap items-center gap-2">
@@ -298,7 +388,9 @@ onMounted(() => {
               <p v-if="detail.ticket.summary" class="quiet text-xs">{{ detail.ticket.summary }}</p>
               <div class="flex flex-wrap gap-2">
                 <button class="btn btn-secondary btn-sm" @click="askHuman">转人工客服</button>
-                <button v-if="['resolved','closed'].includes(detail.ticket.status)" class="btn btn-secondary btn-sm" @click="reopen">重新打开</button>
+                <button v-if="['resolved','closed'].includes(detail.ticket.status)" class="btn btn-secondary btn-sm" @click="reopen">
+                  重新打开
+                </button>
               </div>
             </div>
 
@@ -321,7 +413,13 @@ onMounted(() => {
             <div v-if="['resolved','closed'].includes(detail.ticket.status)" class="card space-y-3">
               <p class="eyebrow">满意度评价</p>
               <div class="flex gap-1.5">
-                <button v-for="score in 5" :key="score" class="chip" :class="rating === score ? 'chip-active' : ''" @click="rating = score">
+                <button
+                  v-for="score in 5"
+                  :key="score"
+                  class="chip"
+                  :class="rating === score ? 'chip-active' : ''"
+                  @click="rating = score"
+                >
                   {{ score }} 分
                 </button>
               </div>
@@ -331,7 +429,7 @@ onMounted(() => {
           </div>
         </div>
       </div>
-    </template>
+    </section>
 
     <div v-if="showCreate" class="scrim fixed inset-0 z-50 grid place-items-center p-4" @click.self="showCreate = false">
       <div class="card w-full max-w-lg space-y-3">

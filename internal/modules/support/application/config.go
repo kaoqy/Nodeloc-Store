@@ -529,6 +529,50 @@ func (s *Service) RateTicket(ctx context.Context, ticketID uint, satisfaction in
 	})
 }
 
+// SystemConfigValue 读取配置中心的一项设置；没有配置时返回兜底值。
+// 配置中心写的是同一张 system_configs 表，所以后台改完立刻生效，不用重启。
+func (s *Service) SystemConfigValue(ctx context.Context, group, key, fallback string) string {
+	configs, err := s.SystemConfigs(ctx, group)
+	if err != nil {
+		return fallback
+	}
+	for _, config := range configs {
+		if config.Key == key {
+			if strings.TrimSpace(config.Value) == "" {
+				return fallback
+			}
+			return config.Value
+		}
+	}
+	return fallback
+}
+
+// SystemConfigInt 读取一个整数配置，解析失败时退回兜底值。
+func (s *Service) SystemConfigInt(ctx context.Context, group, key string, fallback int) int {
+	value := s.SystemConfigValue(ctx, group, key, "")
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+// SystemConfigBool 读取一个开关配置。
+func (s *Service) SystemConfigBool(ctx context.Context, group, key string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(s.SystemConfigValue(ctx, group, key, "")))
+	switch value {
+	case "":
+		return fallback
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 // ── 统一配置中心 ─────────────────────────────────────────────────────
 
 // NotificationTemplates 返回通知模板；为空时写入内置模板，保证后台有可编辑项。
