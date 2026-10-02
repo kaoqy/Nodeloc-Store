@@ -98,7 +98,7 @@ async function logout() {
 
         <button
           class="btn btn-quiet btn-sm lg:hidden"
-          aria-label="打开菜单"
+          :aria-label="menuOpen ? '关闭菜单' : '打开菜单'"
           :aria-expanded="menuOpen"
           @click="menuOpen = !menuOpen"
         >
@@ -108,8 +108,10 @@ async function logout() {
     </div>
 
     <nav
-      v-if="menuOpen"
-      class="fade-in flex flex-col gap-1 border-t border-[var(--stroke)] px-4 py-3 lg:hidden"
+      class="mobile-nav flex max-h-[calc(100dvh-4rem)] flex-col gap-1 overflow-y-auto border-t border-[var(--stroke)] px-4 py-3 lg:hidden"
+      :class="menuOpen ? 'mobile-nav-open' : 'mobile-nav-closed'"
+      :aria-hidden="!menuOpen"
+      :inert="!menuOpen"
       @click="menuOpen = false"
     >
       <RouterLink to="/" class="nav-item w-full">全部商品</RouterLink>

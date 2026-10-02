@@ -506,11 +506,23 @@ html[data-theme='light'] {
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
   }
-  .site-header > nav {
+  .mobile-nav {
     max-height: calc(100dvh - 4rem);
     overflow-y: auto;
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    transition: opacity var(--normal), max-height var(--normal), transform var(--normal);
+    transform-origin: top;
   }
+  .mobile-nav-closed {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-6px);
+    overflow: hidden;
+  }
+  .mobile-nav-open { opacity: 1; transform: none; }
   .table-scroll-hint { scrollbar-color: var(--stroke-hi) transparent; }
   .order-row { align-items: flex-start; }
   .order-row > div:last-child { margin-left: auto; }

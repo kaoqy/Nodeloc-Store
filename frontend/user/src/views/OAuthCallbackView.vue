@@ -29,6 +29,10 @@ function fail(reason: string) {
 }
 
 onMounted(async () => {
+  if (sessionStorage.getItem('oauth_callback_processing') === window.location.href) {
+    fail('这次授权回调已经处理过，请返回登录页重新发起登录。')
+    return
+  }
   const serverReason = query('oauth_error')
   if (serverReason) {
     fail(oauthErrorText(serverReason))
@@ -65,13 +69,18 @@ onMounted(async () => {
     fail('回调参数不完整，请重新发起 NodeLoc 登录。')
     return
   }
+  const callbackURL = window.location.href
+  sessionStorage.setItem('oauth_callback_processing', callbackURL)
+  history.replaceState(null, '', window.location.pathname)
   try {
     const response = await oauthCallback(code, state)
     auth.saveSession(response.tokens.access_token, response.user, response.tokens.refresh_token)
+    sessionStorage.removeItem('oauth_callback_processing')
     await router.replace(target())
   } catch (e) {
     // The server already said which step failed, in Chinese; a bare 「授权未完成」
     // is what left buyers and shop owners arguing about whose fault it was.
+    sessionStorage.removeItem('oauth_callback_processing')
     fail(errorMessage(e, 'NodeLoc 授权未完成，请返回登录页重试。'))
   }
 })

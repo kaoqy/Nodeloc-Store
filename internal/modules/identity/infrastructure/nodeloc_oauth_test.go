@@ -29,7 +29,20 @@ func TestProfileSyncKeepsExistingRefreshToken(t *testing.T) {
 }
 
 func TestLoginReadsAnOIDCShapedProfile(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var tokenRequests int
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/oauth-provider/token" {
+			tokenRequests++
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse token request: %v", err)
+			}
+			if r.Form.Get("grant_type") != "authorization_code" || r.Form.Get("code") != "code_1" ||
+				r.Form.Get("redirect_uri") != server.URL+"/api/v1/auth/oauth/callback" ||
+				r.Form.Get("client_id") != "ci" || r.Form.Get("client_secret") != "cs" {
+				t.Fatalf("token form = %v", r.Form)
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/oauth-provider/token":
@@ -58,6 +71,9 @@ func TestLoginReadsAnOIDCShapedProfile(t *testing.T) {
 	}
 	if profile.Email == nil || *profile.Email != "ada@example.com" {
 		t.Fatalf("email = %+v", profile.Email)
+	}
+	if tokenRequests != 1 {
+		t.Fatalf("token requests = %d, want exactly one", tokenRequests)
 	}
 }
 
