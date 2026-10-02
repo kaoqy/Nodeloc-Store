@@ -204,7 +204,7 @@ onMounted(async () => {
     <!-- Editorial intro: what this store ships, stated plainly. -->
     <section class="rise-in mt-12 max-w-3xl">
       <p class="eyebrow">数字商品商店</p>
-      <h1 class="mt-3 text-4xl font-bold sm:text-5xl">
+      <h1 class="home-title mt-3 text-4xl font-bold sm:text-5xl">
         下单、支付、<span class="accent-text">即时到货</span>
       </h1>
       <p class="mt-4 text-[15px] leading-relaxed text-[var(--text-dim)]">
@@ -231,7 +231,7 @@ onMounted(async () => {
     </section>
 
     <!-- Search + category filter -->
-    <section class="mt-12 flex flex-col gap-3 lg:flex-row lg:items-center">
+    <section class="catalog-toolbar mt-12 flex flex-col gap-3 lg:flex-row lg:items-center">
       <div class="relative sm:max-w-xs sm:flex-1">
         <input v-model="keyword" type="search" class="input !pl-9" placeholder="搜索商品…" aria-label="搜索商品" />
         <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-quiet)]">⌕</span>

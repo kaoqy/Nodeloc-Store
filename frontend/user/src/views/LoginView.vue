@@ -16,6 +16,7 @@ const identifier = ref('')
 const password = ref('')
 const error = ref('')
 const loading = ref(false)
+const oauthLoading = ref(false)
 
 // A destination has to be a path in this shop: `//example.com` starts with a
 // slash but names a host, and pushing one after a successful login either walks
@@ -28,9 +29,11 @@ const redirect = computed(() => {
 const oauthError = computed(() => (typeof route.query.oauth_error === 'string' ? route.query.oauth_error : ''))
 
 function startOAuth() {
+  if (oauthLoading.value) return
   // The provider round-trips through the backend, so carry the destination here.
   sessionStorage.setItem('oauth_redirect', redirect.value)
   error.value = ''
+  oauthLoading.value = true
   oauthInitiate()
 }
 
@@ -62,8 +65,9 @@ async function submit() {
       </div>
 
       <template v-if="site.oauthEnabled">
-        <button class="btn btn-primary btn-lg mt-7 w-full" type="button" @click="startOAuth">
-          使用 NodeLoc 账号继续
+        <button class="btn btn-primary btn-lg mt-7 w-full" type="button" :disabled="oauthLoading" @click="startOAuth">
+          <span v-if="oauthLoading" class="spinner spinner-light" />
+          {{ oauthLoading ? '正在连接 NodeLoc…' : '使用 NodeLoc 账号继续' }}
         </button>
 
         <div class="my-6 flex items-center gap-3">

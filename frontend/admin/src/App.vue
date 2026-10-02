@@ -83,7 +83,7 @@ const breadcrumb = computed(() => {
 
     <div class="lg:pl-64">
       <header class="site-header">
-        <div class="flex h-[68px] items-center gap-3 px-5 sm:px-7">
+        <div class="admin-topbar flex h-[68px] items-center gap-3 px-5 sm:px-7">
           <button class="btn btn-quiet !px-3 lg:hidden" aria-label="打开导航菜单" @click="open = true">☰</button>
 
           <div class="min-w-0">

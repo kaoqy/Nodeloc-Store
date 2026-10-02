@@ -14,7 +14,7 @@ const emit = defineEmits<{ change: [page: number] }>()
 </script>
 
 <template>
-  <div class="flex flex-wrap items-center justify-between gap-3">
+  <div class="pagination-footer flex flex-wrap items-center justify-between gap-3">
     <p class="quiet mono text-xs">{{ summary }}</p>
     <div class="flex items-center gap-2">
       <button

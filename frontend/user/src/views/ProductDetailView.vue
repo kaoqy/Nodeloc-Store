@@ -24,6 +24,7 @@ const contact = ref('')
 const note = ref('')
 const loading = ref(true)
 const submitting = ref(false)
+const submittingPhase = ref<'order' | 'payment' | ''>('')
 const error = ref('')
 // Set once an order exists but its 下单 request was refused, so the page can
 // point at that order instead of leaving the buyer to start a second one.
@@ -58,7 +59,9 @@ const soldOut = computed(() => limit.value === 0)
 const buyLabel = computed(() => {
   if (!site.paymentsEnabled) return '本店暂停收款'
   if (soldOut.value) return '暂时缺货'
-  if (submitting.value) return '正在跳转支付…'
+  if (submittingPhase.value === 'order') return '正在创建订单…'
+  if (submittingPhase.value === 'payment') return '正在打开支付…'
+  if (submitting.value) return '处理中…'
   // 上一单还没付掉时，这颗按钮做的是把那一份重发，不是再开一张新单，标签要说实话。
   return unpaidOrderNo.value ? '继续未支付的这一单' : '立即购买'
 })
@@ -153,6 +156,7 @@ watch(quantity, () => {
  */
 async function openPayment(orderNo: string, goods: string) {
   submitting.value = true
+  submittingPhase.value = 'payment'
   error.value = ''
   payAdvice.value = ''
   try {
@@ -168,6 +172,7 @@ async function openPayment(orderNo: string, goods: string) {
     error.value = errorMessage(e, '发起支付失败')
     payAdvice.value = checkoutAdvice(e)
     submitting.value = false
+    submittingPhase.value = ''
   }
 }
 
@@ -207,21 +212,24 @@ async function purchase() {
     return
   }
   submitting.value = true
+  submittingPhase.value = 'order'
   error.value = ''
   payAdvice.value = ''
   unpaidOrderNo.value = ''
   const code = couponCode.value.trim()
+  const normalizedCode = code.toUpperCase()
   let couponForOrder: string | undefined
   if (code) {
     // A code the buyer typed has to either be priced into this order or stop the
     // click in front of them. Sending it only when an earlier quote happened to
     // land charges full price for a discount the buyer can still see on screen.
-    if (quote.value?.accepted && quote.value.code === code) {
-      couponForOrder = code
+    if (quote.value?.accepted && quote.value.code.toUpperCase() === normalizedCode) {
+      couponForOrder = quote.value.code
     } else {
       await applyQuote()
-      if (!quote.value?.accepted || quote.value.code !== code) {
+      if (!quote.value?.accepted || quote.value.code.toUpperCase() !== normalizedCode) {
         submitting.value = false
+        submittingPhase.value = ''
         error.value = couponError.value || '优惠码无法使用，请修正后再下单。'
         return
       }
@@ -240,6 +248,7 @@ async function purchase() {
   } catch (e) {
     error.value = errorMessage(e, '下单失败，请稍后重试')
     submitting.value = false
+    submittingPhase.value = ''
     return
   }
   unpaidOrderNo.value = order.order_no
@@ -281,6 +290,7 @@ async function load(slug: string) {
   quoting.value = false
   promos.value = []
   submitting.value = false
+  submittingPhase.value = ''
   // 上一件商品留下的「继续未支付的这一单」必须跟着旧商品一起清掉：只要它还挂着，
   // 主按钮点的就是旧订单的支付页，而买家眼前写的是新商品的价钱。
   unpaidOrderNo.value = ''
@@ -474,15 +484,17 @@ watch(
               <input
                 id="coupon"
                 v-model="couponCode"
-                class="input flex-1"
+                class="input min-w-0 flex-1"
                 maxlength="64"
                 placeholder="选填，例如 NEWBIE20"
                 @keyup.enter="applyQuote"
               />
               <button class="btn btn-secondary btn-sm shrink-0" type="button" :disabled="quoting" @click="applyQuote">
+                <span v-if="quoting" class="spinner !size-3.5 !border-2" />
                 {{ quoting ? '核对中…' : '使用' }}
               </button>
             </div>
+            <p v-if="quoting" class="hint mt-2" role="status" aria-live="polite">正在核对优惠码与当前商品和数量…</p>
             <p v-if="quote?.accepted" class="alert alert-success mt-2 break-words">
               已优惠 {{ money(quote.discount) }}
               <span v-if="quote.description"> · {{ quote.description }}</span>
@@ -522,6 +534,10 @@ watch(
             </div>
           </div>
 
+          <div v-if="submitting" class="alert alert-info" role="status" aria-live="polite">
+            <span class="spinner !size-4 !border-2" />
+            {{ submittingPhase === 'order' ? '正在校验优惠码并创建订单，请稍候…' : '订单已创建，正在打开安全支付页面…' }}
+          </div>
           <button
             class="btn btn-primary btn-lg w-full"
             type="submit"

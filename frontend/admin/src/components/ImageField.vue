@@ -55,8 +55,8 @@ async function choose(event: Event) {
 <template>
   <div>
     <label v-if="label" class="label" :for="inputId || undefined">{{ label }}</label>
-    <div class="flex items-center gap-2">
-      <input v-model="model" :id="inputId || undefined" class="input mono text-xs" :placeholder="placeholder" />
+    <div class="image-field flex items-center gap-2">
+      <input v-model="model" :id="inputId || undefined" class="input min-w-0 mono text-xs" :placeholder="placeholder" />
       <button type="button" class="btn btn-secondary btn-sm shrink-0" :disabled="busy || disabled" @click="file?.click()">
         {{ busy ? '上传中…' : '上传' }}
       </button>

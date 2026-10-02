@@ -113,10 +113,17 @@ async function logout() {
       @click="menuOpen = false"
     >
       <RouterLink to="/" class="nav-item w-full">全部商品</RouterLink>
+      <button
+        class="nav-item w-full text-left"
+        type="button"
+        @click="theme.toggle()"
+      >
+        {{ theme.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题' }}
+      </button>
       <template v-if="auth.isAuthenticated">
         <RouterLink to="/orders" class="nav-item w-full">我的订单</RouterLink>
         <RouterLink to="/profile" class="nav-item w-full">
-          个人中心<span v-if="inbox.unread" class="nums ml-2 text-[var(--accent)]">{{ inbox.unread }} 未读</span>
+          个人中心<span v-if="inbox.unread" class="nums ml-2 text-[var(--accent)]">{{ badge }} 未读</span>
         </RouterLink>
         <a v-if="auth.canEnterAdmin" href="/admin/" class="nav-item w-full">进入后台</a>
         <button class="btn btn-quiet btn-sm mt-1 self-start" @click="logout">退出登录</button>

@@ -212,7 +212,7 @@ onMounted(() => {
         <li v-for="order in orders" :key="order.id">
           <RouterLink
             :to="`/orders/${order.order_no}`"
-            class="card flex items-center gap-4 !p-4 transition-colors hover:border-[var(--stroke-hi)]"
+            class="card flex items-center gap-4 !p-4 transition-colors hover:border-[var(--stroke-hi)] order-row"
           >
             <div class="grid size-14 shrink-0 place-items-center overflow-hidden rounded-md border border-[var(--stroke-quiet)] bg-[var(--surface-sunken)]">
               <img

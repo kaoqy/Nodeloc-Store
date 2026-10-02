@@ -381,7 +381,7 @@ onMounted(async () => {
     <p v-if="error" class="alert alert-danger mb-5" role="alert">{{ error }}</p>
 
     <section class="card">
-      <div class="flex items-start gap-4">
+      <div class="profile-hero flex items-start gap-4">
         <div class="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--stroke)] bg-[var(--surface-hi)] text-xl font-bold">
           <img v-if="avatar" :src="avatar" :alt="displayName" class="size-full object-cover" />
           <span v-else>{{ initials }}</span>
@@ -440,11 +440,11 @@ onMounted(async () => {
         </div>
         <div>
           <label class="label" for="avatar">头像地址</label>
-          <div class="flex items-center gap-2">
+          <div class="profile-avatar-input flex items-center gap-2">
             <input
               id="avatar"
               v-model="form.avatar_url"
-              class="input"
+              class="input min-w-0"
               maxlength="255"
               placeholder="https://…（留空则使用 NodeLoc 头像）"
             />
