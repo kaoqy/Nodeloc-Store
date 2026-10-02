@@ -1,6 +1,8 @@
 package routertest
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -65,5 +67,24 @@ func TestEveryRouteRegisters(t *testing.T) {
 
 	if routes := router.Routes(); len(routes) == 0 {
 		t.Fatal("no routes were registered")
+	}
+
+	// The storefront asks this one before login, so it must answer as a guest:
+	// a 401 here would blank the plugin's choices out of the product page for
+	// every buyer who has not signed in yet.
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/products/1/plugin", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("public plugin descriptor answered %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+
+	// And the back office list must stay gated: a plugin catalog names provider
+	// keys and configuration, which is staff business.
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/plugins", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("plugin catalog answered %d as a guest, want 401", recorder.Code)
 	}
 }
