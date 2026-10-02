@@ -243,16 +243,6 @@ func (s *Service) Uninstall(ctx context.Context, id uint) error {
 	return s.repo.DeletePlugin(ctx, id)
 }
 
-// ProvisionSchema is the JSON config form for one provider, so the front end can
-// render settings without a build-time knowledge of any plugin.
-func (s *Service) ProvisionSchema(key string) ([]contract.ConfigField, bool) {
-	provider, ok := s.registry.Lookup(strings.TrimSpace(key))
-	if !ok {
-		return nil, false
-	}
-	return provider.Manifest().ConfigSchema, true
-}
-
 func isSecretField(field contract.ConfigField) bool {
 	return strings.EqualFold(strings.TrimSpace(field.Type), "password")
 }

@@ -1,5 +1,5 @@
 import client from './client'
-import type { Plugin, PluginBinding, PluginCatalogEntry, PluginConfigField } from '../types'
+import type { Plugin, PluginBinding, PluginCatalogEntry } from '../types'
 
 /** Every provider this build carries, joined with what the shop enrolled. */
 export const listPluginCatalog = () =>
@@ -8,10 +8,6 @@ export const listPluginCatalog = () =>
 /** Only the plugins the shop has enrolled. */
 export const listInstalledPlugins = () =>
   client.get<{ data: Plugin[] }>('/plugins/installed').then((r) => r.data.data ?? [])
-
-/** One provider's configuration form, so 设置 stays a generic screen. */
-export const pluginSchema = (key: string) =>
-  client.get<{ data: PluginConfigField[] }>(`/plugins/${key}/schema`).then((r) => r.data.data ?? [])
 
 export const enrollPlugin = (key: string) =>
   client.post<{ data: Plugin }>('/plugins', { key }).then((r) => r.data.data)

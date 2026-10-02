@@ -39,9 +39,11 @@ func (h *Handler) RegisterRoutes(engine gin.IRouter, jwtConfig *config.JWTConfig
 	api.POST("/bindings", guard("manage"), h.CreateBinding)
 	api.PUT("/bindings/:id", guard("manage"), h.UpdateBinding)
 	api.DELETE("/bindings/:id", guard("manage"), h.DeleteBinding)
-	// The schema is what the settings form renders. It is a static manifest, so
-	// answering it does not require the plugin to be installed.
-	api.GET("/:key/schema", guard("view"), h.Schema)
+	// A provider's configuration form is already part of the catalog answer
+	// (manifest.config_schema), so there is no separate schema route: one would
+	// have to be /plugins/:key/schema next to /plugins/:id, and Gin refuses two
+	// different wildcard names at the same position — it panics at registration
+	// time, which would take the whole storefront down on every container build.
 	api.GET("/:id", guard("view"), h.Get)
 
 	admin := engine.Group("/api/v1/admin/plugins")
@@ -73,16 +75,6 @@ func (h *Handler) Installed(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": plugins})
-}
-
-func (h *Handler) Schema(c *gin.Context) {
-	key := strings.TrimSpace(c.Param("key"))
-	fields, ok := h.service.ProvisionSchema(key)
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "没有这个插件提供者", "code": "plugin_not_found"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": fields})
 }
 
 func (h *Handler) Get(c *gin.Context) {
