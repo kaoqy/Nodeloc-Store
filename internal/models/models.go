@@ -179,7 +179,22 @@ type ProductFormField struct {
 	MaxLength   int      `json:"max_length,omitempty"`
 }
 
+// ValidateProductForm checks a set of purchase-form answers against a product's
+// schema and returns the answers as the JSON an order stores.
+//
+// requireValues says whether the answers are expected to be complete. A buyer's
+// checkout passes true: a mandatory field they left blank has to stop the order.
+// A shop saving the product's own schema passes false, because the blanks it
+// would otherwise complain about are the buyer's answers, which do not exist yet
+// — validating a schema that way made any product with a required field
+// impossible to save at all.
 func ValidateProductForm(fields []ProductFormField, values map[string]string) (string, error) {
+	return ValidateProductFormValues(fields, values, true)
+}
+
+// ValidateProductFormValues is ValidateProductForm with the completeness rule
+// made explicit; see that function for what the flag means.
+func ValidateProductFormValues(fields []ProductFormField, values map[string]string, requireValues bool) (string, error) {
 	if len(fields) == 0 {
 		if len(values) > 0 {
 			return "", fmt.Errorf("商品未配置购买表单")
@@ -215,7 +230,7 @@ func ValidateProductForm(fields []ProductFormField, values map[string]string) (s
 	}
 	for key, field := range allowed {
 		value := strings.TrimSpace(values[key])
-		if field.Required && value == "" {
+		if field.Required && value == "" && requireValues {
 			return "", fmt.Errorf("请填写%s", field.Label)
 		}
 		if len(value) > field.MaxLength {

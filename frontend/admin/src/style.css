@@ -490,6 +490,8 @@ html[data-theme='light'] {
   }
   .table-container tbody tr:last-child td, .table tbody tr:last-child td { border-bottom: 0; }
   .table-container td.num, .table td.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  /* Opt-in wrapping for a cell that carries a sentence rather than a value. */
+  .table-container td.wrap, .table td.wrap { white-space: normal; min-width: 18ch; }
   .table-container td.actions, .table td.actions { text-align: right; white-space: nowrap; }
 
   /* ── Feedback states ── */
@@ -672,6 +674,12 @@ html[data-theme='light'] {
    where the wrapper stops scrolling with the page. */
 @media (max-width: 900px) {
   .table-container thead th { position: static; }
+
+  /* The wrapper scrolls sideways on a phone (the hint under the table says so).
+     Letting a cell wrap at the same time squeezes the columns into unreadable
+     slivers — a product name stacked one character per line — instead of using
+     the width the scroll is offering. Long prose cells opt back in with .wrap. */
+  .table-container td:not(.wrap) { white-space: nowrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {

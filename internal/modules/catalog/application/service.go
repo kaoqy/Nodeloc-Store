@@ -951,7 +951,10 @@ func normalizeProduct(product *domain.Product) error {
 		if err := json.Unmarshal([]byte(product.FormSchema), &fields); err != nil {
 			return fmt.Errorf("%w: 商品购买表单配置无效", domain.ErrInvalidInput)
 		}
-		if _, err := models.ValidateProductForm(fields, map[string]string{}); err != nil {
+		// The schema is validated, not the answers: a required field is exactly
+		// what the shop is allowed to declare here, and the buyer's side is what
+		// enforces it at checkout.
+		if _, err := models.ValidateProductFormValues(fields, map[string]string{}, false); err != nil {
 			return fmt.Errorf("%w: %v", domain.ErrInvalidInput, err)
 		}
 		encoded, err := json.Marshal(fields)
