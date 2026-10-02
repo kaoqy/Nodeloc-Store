@@ -505,6 +505,23 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	}
 	c.SetCookie(oauthBindCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
 
+	// Consume and validate the one-time state before handling either success or
+	// provider error. NodeLoc includes state on denial too.
+	stateCookie, cookieErr := c.Cookie(oauthStateCookie)
+	h.clearOAuthState(c)
+	if cookieErr != nil || stateCookie == "" {
+		log.Printf("nodeloc oauth: no state cookie on the callback, so the round trip was interrupted (state_in_redirect=%v)", c.Query("state") != "")
+		h.oauthFailure(c, oauthStepCallback, "expired", domain.ErrInvalidCredentials,
+			"回调没有带回 state cookie；浏览器没存住、跨了域名回来、或登录超过 10 分钟都会这样。", binding)
+		return
+	}
+	if c.Query("state") == "" || stateCookie != c.Query("state") {
+		log.Printf("nodeloc oauth: state mismatch between cookie and callback query")
+		h.oauthFailure(c, oauthStepCallback, "state", domain.ErrInvalidCredentials,
+			"回调带回的 state 与本店发出的不是同一个。", binding)
+		return
+	}
+
 	// NodeLoc answers a rejected authorization with error + error_description +
 	// state and no code. Without this branch that reason only showed up as a
 	// generic "链接过期" on the login page.
@@ -517,20 +534,6 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 		return
 	}
 
-	stateCookie, cookieErr := c.Cookie(oauthStateCookie)
-	switch {
-	case cookieErr != nil || stateCookie == "":
-		log.Printf("nodeloc oauth: no state cookie on the callback, so the round trip was interrupted (state_in_redirect=%v)",
-			c.Query("state") != "")
-		h.oauthFailure(c, oauthStepCallback, "expired", domain.ErrInvalidCredentials,
-			"回调没有带回 state cookie；浏览器没存住、跨了域名回来、或登录超过 10 分钟都会这样。", binding)
-		return
-	case c.Query("state") == "" || stateCookie != c.Query("state"):
-		log.Printf("nodeloc oauth: state mismatch between cookie and callback query")
-		h.oauthFailure(c, oauthStepCallback, "state", domain.ErrInvalidCredentials,
-			"回调带回的 state 与本店发出的不是同一个。", binding)
-		return
-	}
 	if binding {
 		// The SPA redeems the code against POST /auth/bind-oauth with its own
 		// bearer token; fragments never reach a server or log.
@@ -599,6 +602,10 @@ func oauthFailReason(err error) string {
 // It is also the shop's record of the attempt. A buyer sees one sentence and is
 // gone; the owner is left with 「登录不了」 and no way to tell a wrong setting from a
 // dead network, because the answer only ever sat in the container log.
+func (h *Handler) clearOAuthState(c *gin.Context) {
+	c.SetCookie(oauthStateCookie, "", -1, oauthCookiePath, "", h.cookieSecure(c), true)
+}
+
 func (h *Handler) oauthFailure(c *gin.Context, step, reason string, err error, detail string, binding bool) {
 	h.service.LogOAuthAttempt(c.Request.Context(), application.OAuthAttemptLog{
 		Step:    step,

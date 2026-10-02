@@ -175,6 +175,10 @@ onMounted(async () => {
   }
   watchSettlement()
   watchDelivery()
+  if (order.value?.status === 'pending' && !confirmNote.value) {
+    confirmNote.value = '支付结果会自动核实约 2 分钟；如果仍未更新，可以手动再查一次。'
+    confirmRetryable.value = true
+  }
 })
 
 onUnmounted(() => {
@@ -204,7 +208,11 @@ function watchSettlement() {
       stopSettleWatch()
       return
     }
-    if (waited >= 120) stopSettleWatch()
+    if (waited >= 120) {
+      stopSettleWatch()
+      confirmRetryable.value = true
+      confirmNote.value = '自动核实已暂停。若你已经完成付款，请手动再查一次，或稍后返回订单继续确认。'
+    }
   }, 8000)
 }
 
@@ -239,7 +247,14 @@ async function refreshDelivery() {
       <div class="skeleton h-52 w-full !rounded-lg" />
     </div>
 
-    <p v-else-if="!order" class="alert alert-danger" role="alert">{{ error || '未找到该订单' }}</p>
+    <div v-else-if="!order" class="card text-center">
+      <p class="alert alert-danger text-left" role="alert">{{ error || '未找到该订单' }}</p>
+      <button class="btn btn-secondary mt-5" :disabled="loading" @click="load">
+        <span v-if="loading" class="spinner" />
+        {{ loading ? '重新加载中…' : '重新加载订单' }}
+      </button>
+      <RouterLink to="/orders" class="btn btn-quiet ml-2 mt-5">返回订单列表</RouterLink>
+    </div>
 
     <div v-else class="fade-in space-y-5">
       <RouterLink to="/orders" class="hint inline-flex items-center gap-1.5 transition-colors hover:text-[var(--text)]">

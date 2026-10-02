@@ -18,7 +18,7 @@ function query(key: string): string {
 function target(): string {
   const stored = sessionStorage.getItem('oauth_redirect')
   sessionStorage.removeItem('oauth_redirect')
-  return stored && stored.startsWith('/') ? stored : '/'
+  return stored && stored.startsWith('/') && !stored.startsWith('//') ? stored : '/'
 }
 
 function fail(reason: string) {

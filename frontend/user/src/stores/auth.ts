@@ -26,8 +26,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   function saveSession(accessToken: string, currentUser?: User | null, refreshToken?: string) {
     token.value = accessToken
-    if (currentUser) user.value = currentUser
+    user.value = currentUser ?? null
+    permissions.value = []
+    accountRole.value = ''
+    isStaff.value = false
     localStorage.setItem(TOKEN_KEY, accessToken)
+    localStorage.removeItem(REFRESH_KEY)
     if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken)
   }
 
