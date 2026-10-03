@@ -94,6 +94,27 @@ interface FieldMeta {
   affects?: string
 }
 
+/** 与后端 defaultSystemConfigs 对齐的出厂值，仅用于在卡片上提示「默认是多少」。 */
+const DEFAULT_VALUES: Record<string, string> = {
+  'ticket/ticket_no_prefix': 'TK',
+  'ticket/human_timeout_hours': '24',
+  'ticket/allow_reopen': 'true',
+  'ticket/allow_cancel': 'true',
+  'ticket/enable_rating': 'true',
+  'order/unpaid_cancel_hours': '2',
+  'order/auto_deliver_retry': 'true',
+  'product/default_stock_alert': '5',
+  'product/show_sold_count': 'true',
+  'activity/default_per_user_limit': '1',
+  'activity/block_activity_stacking': 'true',
+  'site/footer_show_version': 'true',
+  'risk/coupon_max_attempts': '10',
+  'risk/require_second_confirm': 'true',
+  'retention/audit_log_days': '180',
+  'retention/ticket_days': '365',
+  'upload/max_image_mb': '8',
+}
+
 const FIELD_META: Record<string, FieldMeta> = {
   'ticket/ticket_no_prefix': {
     hint: '买家在工单列表看到的编号前缀，工单创建时写入编号，之后不再变化。',
@@ -370,6 +391,18 @@ function placeholderOf(config: SystemConfig): string {
 
 function affectsOf(config: SystemConfig): string {
   return metaOf(config).affects ?? ''
+}
+
+/**
+ * 出厂的默认值。只在当前取值确实被改过时才显示，
+ * 免得每张卡片都挂一个「默认」，反而看不到哪几项被人动过。
+ */
+function defaultNoteOf(config: SystemConfig): string {
+  const shipped = DEFAULT_VALUES[`${config.group}/${config.key}`]
+  if (shipped === undefined) return ''
+  if ((config.value ?? '') === shipped) return ''
+  const shown = config.value_type === 'bool' ? (isTruthy(shipped) ? '开启' : '关闭') : shipped
+  return `默认 ${shown}`
 }
 
 /**
@@ -828,6 +861,7 @@ onMounted(() => {
                         <span v-if="config.value_type === 'bool'" class="config-kind">开关</span>
                         <span v-else-if="unitOf(config)" class="config-kind">{{ unitOf(config) }}</span>
                         <span v-else class="config-kind">文本</span>
+                        <span v-if="defaultNoteOf(config)" class="config-kind config-kind-default">{{ defaultNoteOf(config) }}</span>
                       </div>
                       <p v-if="affectsOf(config)" class="config-affects">
                         <span class="config-affects-tag">影响</span>
@@ -998,6 +1032,7 @@ onMounted(() => {
   letter-spacing: 0.04em;
   color: var(--text-quiet);
 }
+.config-kind-default { border-style: dashed; color: var(--text-dim); }
 .config-affects {
   display: flex;
   align-items: baseline;
