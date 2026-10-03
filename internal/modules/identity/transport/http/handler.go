@@ -200,13 +200,14 @@ func (h *Handler) AdminAdjustPoints(c *gin.Context) {
 		return
 	}
 	var request struct {
-		Delta *int `json:"delta" binding:"required"`
+		Delta  *int   `json:"delta" binding:"required"`
+		Reason string `json:"reason"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil || request.Delta == nil {
 		writeError(c, domain.ErrInvalidInput)
 		return
 	}
-	user, err := h.service.AdminAdjustPoints(c.Request.Context(), claims.UserID, idParam(c), *request.Delta)
+	user, err := h.service.AdminAdjustPoints(c.Request.Context(), claims.UserID, idParam(c), *request.Delta, request.Reason)
 	if err != nil {
 		writeError(c, err)
 		return

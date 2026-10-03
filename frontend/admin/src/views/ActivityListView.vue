@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import PaginationFooter from '../components/PaginationFooter.vue'
+import AdminIcon from '../components/AdminIcon.vue'
+import DataTable, { type Column } from '../components/DataTable.vue'
+import FilterBar from '../components/FilterBar.vue'
+import PageHeader from '../components/PageHeader.vue'
+import StatusBadge from '../components/StatusBadge.vue'
 import {
   activityStatusOptions,
   activityTypeOptions,
@@ -15,10 +19,25 @@ import {
 import { errorMessage, money, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 
-const PageSize = 12
+/**
+ * 活动营销。列表给出每个活动的参与与优惠总额；上下架、暂停、复制都在行内完成。
+ */
+
+const PAGE_SIZE = 15
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.allows('activities', 'manage'))
+
+const COLUMNS: Column[] = [
+  { label: '活动' },
+  { label: '类型', hideOnMobile: true },
+  { label: '状态' },
+  { label: '优惠金额', numeric: true },
+  { label: '参与', numeric: true, hideOnMobile: true },
+  { label: '有效期', hideOnMobile: true },
+  { label: '', actions: true, width: '230px' },
+]
+
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
@@ -30,25 +49,12 @@ const search = ref('')
 const status = ref('all')
 const type = ref('all')
 const sort = ref('sort_order')
-const overview = ref<ActivityOverview>({ total: 0, running: 0, participants: 0, discounts: 0 })
+const overview = ref<ActivityOverview | null>(null)
 
-const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
+const filtered = computed(() => Boolean(search.value.trim() || status.value !== 'all' || type.value !== 'all'))
 
-const statusTone: Record<string, string> = {
-  draft: 'badge',
-  scheduled: 'badge-info',
-  running: 'badge-success',
-  paused: 'badge-warning',
-  ended: 'badge',
-  offline: 'badge',
-  deleted: 'badge-danger',
-}
-
-const statusLabel = (value: string) =>
-  activityStatusOptions.find((option) => option.value === value)?.label ?? value
-
-const typeLabel = (value: string) =>
-  activityTypeOptions.find((option) => option.value === value)?.label ?? value
+const typeLabel = (value: string) => activityTypeOptions.find((o) => o.value === value)?.label ?? value
 
 async function load() {
   loading.value = true
@@ -60,10 +66,10 @@ async function load() {
         type: type.value,
         q: search.value,
         sort: sort.value,
-        limit: PageSize,
-        offset: (page.value - 1) * PageSize,
+        limit: PAGE_SIZE,
+        offset: (page.value - 1) * PAGE_SIZE,
       }),
-      getActivityOverview().catch(() => ({ total: 0, running: 0, participants: 0, discounts: 0 })),
+      getActivityOverview().catch(() => null),
     ])
     rows.value = list.data
     total.value = list.total
@@ -75,7 +81,7 @@ async function load() {
   }
 }
 
-function applyFilters() {
+function apply() {
   page.value = 1
   void load()
 }
@@ -86,31 +92,26 @@ function goPage(next: number) {
   void load()
 }
 
-async function toggleStatus(activity: Activity) {
+function clearFilters() {
+  search.value = ''
+  status.value = 'all'
+  type.value = 'all'
+  apply()
+}
+
+async function changeStatus(activity: Activity, next: string, reason = '') {
+  if (busy.value) return
+  if (next === 'offline' && !window.confirm('下架活动「' + activity.name + '」？已产生的订单与优惠记录会保留。')) return
   busy.value = true
   error.value = ''
   notice.value = ''
   try {
-    const next = activity.status === 'running' ? 'paused' : 'running'
-    await setActivityStatus(activity.id, next, next === 'paused' ? '管理员暂停活动' : '管理员恢复活动')
-    notice.value = next === 'paused' ? '活动已暂停。' : '活动已恢复。'
+    await setActivityStatus(activity.id, next, reason)
+    const label = activityStatusOptions.find((o) => o.value === next)?.label ?? next
+    notice.value = '活动「' + activity.name + '」已' + label + '。'
     await load()
   } catch (err) {
     error.value = errorMessage(err, '更新活动状态失败')
-  } finally {
-    busy.value = false
-  }
-}
-
-async function takeOffline(activity: Activity) {
-  if (!confirm('下架活动「' + activity.name + '」？已产生的订单与优惠记录会保留。')) return
-  busy.value = true
-  try {
-    await setActivityStatus(activity.id, 'offline', '管理员下架')
-    notice.value = '活动已下架。'
-    await load()
-  } catch (err) {
-    error.value = errorMessage(err, '下架活动失败')
   } finally {
     busy.value = false
   }
@@ -130,7 +131,7 @@ async function copy(activity: Activity) {
 }
 
 async function remove(activity: Activity) {
-  if (!confirm('删除活动「' + activity.name + '」？历史订单快照会保留。')) return
+  if (!window.confirm('删除活动「' + activity.name + '」？历史订单快照会保留。')) return
   busy.value = true
   try {
     await deleteActivity(activity.id)
@@ -148,117 +149,106 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <div class="card !p-5">
-        <p class="eyebrow">活动总数</p>
-        <p class="nums mt-2 text-2xl font-bold">{{ overview.total }}</p>
+    <PageHeader
+      title="活动营销"
+      description="限时折扣、满减、领券等活动在这里创建。下单金额一律由服务端按规则计算。"
+      bordered
+    >
+      <template #actions>
+        <RouterLink v-if="canManage" to="/activities/new" class="btn btn-primary btn-sm">
+          <AdminIcon name="plus" :size="14" />
+          新建活动
+        </RouterLink>
+      </template>
+    </PageHeader>
+
+    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="card-quiet">
+        <p class="quiet text-xs">活动总数</p>
+        <p class="nums mt-1 text-xl font-bold">{{ overview?.total ?? 0 }}</p>
       </div>
-      <div class="card !p-5">
-        <p class="eyebrow">进行中</p>
-        <p class="nums mt-2 text-2xl font-bold accent-text">{{ overview.running }}</p>
+      <div class="card-quiet">
+        <p class="quiet text-xs">进行中</p>
+        <p class="nums accent-text mt-1 text-xl font-bold">{{ overview?.running ?? 0 }}</p>
       </div>
-      <div class="card !p-5">
-        <p class="eyebrow">参与人数</p>
-        <p class="nums mt-2 text-2xl font-bold">{{ overview.participants }}</p>
+      <div class="card-quiet">
+        <p class="quiet text-xs">参与人数</p>
+        <p class="nums mt-1 text-xl font-bold">{{ overview?.participants ?? 0 }}</p>
       </div>
-      <div class="card !p-5">
-        <p class="eyebrow">累计优惠</p>
-        <p class="nums mt-2 text-2xl font-bold">{{ money(overview.discounts) }}</p>
+      <div class="card-quiet">
+        <p class="quiet text-xs">累计优惠</p>
+        <p class="nums mt-1 text-xl font-bold">{{ money(overview?.discounts ?? 0) }}</p>
       </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-2">
-      <input
-        v-model="search"
-        class="input w-56"
-        type="search"
-        placeholder="活动名称 / 副标题"
-        aria-label="搜索活动"
-        @keyup.enter="applyFilters"
-      />
-      <select v-model="status" class="input !w-auto" aria-label="活动状态" @change="applyFilters">
+    <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
+
+    <FilterBar :count="total ? '共 ' + total + ' 个活动' : ''">
+      <input v-model="search" class="input w-52" type="search" placeholder="活动名称 / 副标题" aria-label="搜索活动" @keyup.enter="apply" />
+      <select v-model="status" class="input !w-auto" aria-label="活动状态" @change="apply">
         <option value="all">全部状态</option>
-        <option v-for="option in activityStatusOptions" :key="option.value" :value="option.value">
-          {{ option.label }}
-        </option>
+        <option v-for="option in activityStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
-      <select v-model="type" class="input !w-auto" aria-label="活动类型" @change="applyFilters">
+      <select v-model="type" class="input !w-auto" aria-label="活动类型" @change="apply">
         <option value="all">全部类型</option>
-        <option v-for="option in activityTypeOptions" :key="option.value" :value="option.value">
-          {{ option.label }}
-        </option>
+        <option v-for="option in activityTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
-      <select v-model="sort" class="input !w-auto" aria-label="排序" @change="applyFilters">
+      <select v-model="sort" class="input !w-auto" aria-label="排序" @change="apply">
         <option value="sort_order">按排序值</option>
         <option value="newest">最新创建</option>
         <option value="name">按名称</option>
       </select>
-      <button class="btn btn-secondary btn-sm" :disabled="loading" @click="applyFilters">查询</button>
-      <RouterLink v-if="canManage" to="/activities/new" class="btn btn-primary btn-sm ml-auto">+ 新建活动</RouterLink>
-      <p v-else class="quiet ml-auto text-xs">当前角色只能查看活动，编辑需要「活动营销」管理权限。</p>
-    </div>
+      <button class="btn btn-secondary btn-sm" @click="apply">查询</button>
+      <template #actions>
+        <button v-if="filtered" class="btn btn-quiet btn-sm" @click="clearFilters">清除筛选</button>
+      </template>
+    </FilterBar>
 
-    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
-    <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-
-    <div v-if="loading" class="card space-y-3">
-      <div v-for="i in 4" :key="i" class="skeleton h-10 w-full" />
-    </div>
-
-    <div v-else-if="!rows.length" class="card py-16 text-center">
-      <p class="font-semibold">还没有活动</p>
-      <p class="mt-1.5 text-sm text-[var(--text-quiet)]">创建限时折扣、满减或优惠券活动后，买家会在活动中心看到它们。</p>
-      <RouterLink v-if="canManage" to="/activities/new" class="btn btn-primary btn-sm mt-6">新建活动</RouterLink>
-    </div>
-
-    <div v-else class="table-container">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>活动</th>
-            <th>类型</th>
-            <th>状态</th>
-            <th class="nums">优惠金额</th>
-            <th class="nums">参与</th>
-            <th>时间</th>
-            <th class="text-right">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="activity in rows" :key="activity.id">
-            <td>
-              <RouterLink :to="'/activities/' + activity.id + '/edit'" class="font-semibold hover:accent-text">
-                {{ activity.name }}
-              </RouterLink>
-              <p v-if="activity.subtitle" class="quiet mt-0.5 text-xs">{{ activity.subtitle }}</p>
-            </td>
-            <td><span class="badge">{{ typeLabel(activity.type) }}</span></td>
-            <td><span :class="statusTone[activity.status] || 'badge'">{{ statusLabel(activity.status) }}</span></td>
-            <td class="nums">{{ money(activity.discount_total || 0) }}</td>
-            <td class="nums">{{ activity.user_count || 0 }}</td>
-            <td class="quiet text-xs">
-              <span v-if="activity.start_at">开始 {{ when(activity.start_at) }}</span>
-              <span v-else>不限开始</span>
-              <br />
-              <span v-if="activity.end_at">结束 {{ when(activity.end_at) }}</span>
-              <span v-else>不限结束</span>
-            </td>
-            <td class="text-right">
-              <div class="flex flex-wrap justify-end gap-1.5">
-                <RouterLink :to="'/activities/' + activity.id" class="btn btn-quiet btn-sm">数据</RouterLink>
-                <button v-if="canManage" class="btn btn-quiet btn-sm" :disabled="busy" @click="toggleStatus(activity)">
-                  {{ activity.status === 'running' ? '暂停' : '上线' }}
-                </button>
-                <button v-if="canManage" class="btn btn-quiet btn-sm" :disabled="busy" @click="copy(activity)">复制</button>
-                <button v-if="canManage" class="btn btn-quiet btn-sm" :disabled="busy" @click="takeOffline(activity)">下架</button>
-                <button v-if="canManage" class="btn btn-danger btn-sm" :disabled="busy" @click="remove(activity)">删除</button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <PaginationFooter :page="page" :pages="pageCount" :loading="loading" :summary="'共 ' + total + ' 个活动'" @change="goPage" />
+    <DataTable
+      :columns="COLUMNS"
+      :loading="loading"
+      :error="error"
+      :filtered="filtered"
+      :page="page"
+      :pages="pageCount"
+      :total="total"
+      :summary="'共 ' + total + ' 个活动'"
+      empty-title="还没有活动"
+      empty-hint="创建折扣或满减活动后，买家会在活动中心看到它们。"
+      @retry="load"
+      @clear-filters="clearFilters"
+      @change="goPage"
+    >
+      <tr v-for="activity in rows" :key="activity.id">
+        <td>
+          <RouterLink :to="'/activities/' + activity.id" class="font-semibold hover:accent-text">{{ activity.name }}</RouterLink>
+          <p v-if="activity.subtitle" class="quiet mt-0.5 truncate text-xs">{{ activity.subtitle }}</p>
+        </td>
+        <td class="hide-on-mobile">{{ typeLabel(activity.type) }}</td>
+        <td><StatusBadge :value="activity.status" :label="activityStatusOptions.find((o) => o.value === activity.status)?.label" /></td>
+        <td class="nums">{{ money(activity.discount_total ?? 0) }}</td>
+        <td class="nums hide-on-mobile">{{ activity.user_count ?? 0 }}</td>
+        <td class="quiet hide-on-mobile text-xs">
+          <span>{{ activity.start_at ? when(activity.start_at) : '不限开始' }}</span><br />
+          <span>{{ activity.end_at ? when(activity.end_at) : '不限结束' }}</span>
+        </td>
+        <td class="text-right">
+          <div class="flex flex-wrap justify-end gap-1.5">
+            <RouterLink :to="'/activities/' + activity.id" class="btn btn-quiet btn-sm">数据</RouterLink>
+            <RouterLink v-if="canManage" :to="'/activities/' + activity.id + '/edit'" class="btn btn-quiet btn-sm">编辑</RouterLink>
+            <button
+              v-if="canManage"
+              class="btn btn-quiet btn-sm"
+              :disabled="busy"
+              @click="changeStatus(activity, activity.status === 'running' ? 'paused' : 'running', activity.status === 'running' ? '管理员暂停活动' : '管理员恢复活动')"
+            >
+              {{ activity.status === 'running' ? '暂停' : '上线' }}
+            </button>
+            <button v-if="canManage" class="btn btn-quiet btn-sm" :disabled="busy" @click="copy(activity)">复制</button>
+            <button v-if="canManage" class="btn btn-danger btn-sm" :disabled="busy" @click="remove(activity)">删除</button>
+          </div>
+        </td>
+      </tr>
+    </DataTable>
   </section>
 </template>

@@ -18,8 +18,10 @@ export const toggleAdmin = (id: number) =>
 export const toggleActive = (id: number) =>
   client.post<{ user: User }>(`/admin/users/${id}/toggle-active`).then((r) => r.data.user)
 
-export const adjustPoints = (id: number, delta: number) =>
-  client.post<{ user: User }>(`/admin/users/${id}/points`, { delta }).then((r) => r.data.user)
+export const adjustPoints = (id: number, delta: number, reason?: string) =>
+  client
+    .post<{ user: User }>(`/admin/users/${id}/points`, { delta, reason })
+    .then((r) => r.data.user)
 
 // 转账 goes through NodeLoc, not the shop's own 积分 counter: the buyer's balance
 // lives at the provider, so the only honest way to pay them is the provider's

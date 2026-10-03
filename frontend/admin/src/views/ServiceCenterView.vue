@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import AdminIcon from '../components/AdminIcon.vue'
+import PageHeader from '../components/PageHeader.vue'
+import PaginationFooter from '../components/PaginationFooter.vue'
+import StatusBadge from '../components/StatusBadge.vue'
+import TicketPanel from './support/TicketPanel.vue'
 import {
   getTicketStats,
   listTickets,
@@ -11,14 +16,21 @@ import {
   type TicketView,
 } from '../api/support'
 import { errorMessage, when } from '../utils/format'
-import PaginationFooter from '../components/PaginationFooter.vue'
-import TicketDetailPanel from './support/TicketDetailPanel.vue'
+import { useAuthStore } from '../stores/auth'
 
-// 客服中心只做一件事：处理工单。AI 与客服的配置在「配置中心」，
-// 那里有它自己的分组导航；把配置再放一份到这里，等于同一功能出现两次，
-// 管理员改完还会怀疑哪一处生效。这里只保留一个指向配置的次要入口。
-const PageSize = 15
+/**
+ * 客服中心：左侧队列 + 右侧处理面板。
+ *
+ * 筛选条件全部来自地址栏，因此总览的每一张卡片、搜索框、快速筛选都能
+ * 还原出同一个列表——这也是「点进去筛选不生效」这类问题的根治办法：
+ * 只有一个筛选来源，不存在两套状态。
+ */
+
+const PAGE_SIZE = 15
+
 const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
 
 const loading = ref(true)
 const error = ref('')
@@ -32,57 +44,55 @@ const type = ref('all')
 const attention = ref('')
 const mine = ref(false)
 const stats = ref<TicketStats | null>(null)
-const activeTicketID = ref(0)
-const panelKey = ref(0)
+const activeId = ref(0)
 
-const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
+const canView = computed(() => auth.allows('tickets', 'view'))
 
-const statusTone: Record<string, string> = {
-  ai_processing: 'badge-info',
-  waiting_user: 'badge',
-  ai_solved: 'badge-success',
-  user_requested_human: 'badge-warning',
-  pending_human: 'badge-warning',
-  human_handling: 'badge-info',
-  waiting_confirm: 'badge',
-  resolved: 'badge-success',
-  closed: 'badge',
-  rejected: 'badge-danger',
-  cancelled: 'badge',
+const QUICK = [
+  { key: '', label: '全部' },
+  { key: 'unread', label: '未读', countKey: 'unread' as const },
+  { key: 'overdue', label: '即将超时', countKey: 'overdue' as const },
+  { key: 'urgent', label: '紧急', countKey: 'urgent' as const },
+  { key: 'refund', label: '退款' },
+  { key: 'card', label: '卡密' },
+  { key: 'payment', label: '支付' },
+]
+
+function quickCount(key?: string): number | null {
+  if (!key || !stats.value) return null
+  const value = (stats.value as unknown as Record<string, number>)[key]
+  return typeof value === 'number' ? value : null
 }
 
-const priorityTone: Record<string, string> = {
-  low: 'badge',
-  normal: 'badge',
-  high: 'badge-warning',
-  urgent: 'badge-danger',
-}
-
+/**
+ * 地址栏是筛选的唯一来源。attention 表示业务视角（未读/超时/退款…），
+ * status 是工单状态，mine 是「我的工单」。三者可以组合。
+ */
 async function load() {
   loading.value = true
   error.value = ''
   try {
     const [list, metric] = await Promise.all([
       listTickets({
-        status: status.value,
-        priority: priority.value,
-        type: type.value,
-        attention: attention.value,
+        status: status.value === 'all' ? undefined : status.value,
+        priority: priority.value === 'all' ? undefined : priority.value,
+        type: type.value === 'all' ? undefined : type.value,
+        attention: attention.value || undefined,
         mine: mine.value,
-        q: search.value,
-        limit: PageSize,
-        offset: (page.value - 1) * PageSize,
+        q: search.value.trim() || undefined,
+        limit: PAGE_SIZE,
+        offset: (page.value - 1) * PAGE_SIZE,
       }),
       getTicketStats(mine.value).catch(() => null),
     ])
     rows.value = list.data
     total.value = list.total
     stats.value = metric
-    // 当前选中的工单可能因为筛选变化而不在列表里了，此时改选第一张，
-    // 否则右侧会一直停在一条已看不见的记录上。
-    if (!rows.value.some((row) => row.id === activeTicketID.value)) {
-      activeTicketID.value = rows.value.length ? rows.value[0].id : 0
-      panelKey.value += 1
+    // 选中的工单可能已被筛选排除，这时改选列表第一张，避免右侧停在一张
+    // 看不见的记录上（曾经的 bug：列表换了，面板还显示旧单）。
+    if (!rows.value.some((row) => row.id === activeId.value)) {
+      activeId.value = rows.value.length ? rows.value[0].id : 0
     }
   } catch (err) {
     error.value = errorMessage(err, '加载工单失败')
@@ -91,196 +101,255 @@ async function load() {
   }
 }
 
-function applyFilters() {
+function syncUrl() {
+  const query: Record<string, string> = {}
+  if (attention.value) query.attention = attention.value
+  if (status.value !== 'all') query.status = status.value
+  if (priority.value !== 'all') query.priority = priority.value
+  if (type.value !== 'all') query.type = type.value
+  if (mine.value) query.mine = '1'
+  if (search.value.trim()) query.q = search.value.trim()
+  if (page.value > 1) query.page = String(page.value)
+  void router.replace({ path: '/service', query })
+}
+
+function apply() {
   page.value = 1
+  syncUrl()
   void load()
 }
 
 function goPage(next: number) {
   if (next < 1 || next > pageCount.value || next === page.value) return
   page.value = next
+  syncUrl()
   void load()
 }
 
-// 快速筛选与状态下拉是同一维度的两个入口，点快速筛选时要把状态复位，
-// 否则两个条件叠加会出现「空列表但看不出为什么」。
 function quickView(key: string) {
   attention.value = key
   status.value = 'all'
   mine.value = false
-  page.value = 1
-  void load()
+  apply()
 }
 
-function openTicket(id: number) {
-  activeTicketID.value = id
-  panelKey.value += 1
+function toggleMine() {
+  mine.value = !mine.value
+  attention.value = ''
+  apply()
 }
 
-function onPanelClosed() {
-  void load()
+function clearFilters() {
+  attention.value = ''
+  status.value = 'all'
+  priority.value = 'all'
+  type.value = 'all'
+  mine.value = false
+  search.value = ''
+  apply()
 }
 
-// 总览与各处快捷入口会带参数过来，这里把地址栏当成筛选条件的唯一来源：
-// attention 是「业务视角」（未读/超时/紧急/退款…），status/handler/mine/q
-// 是列表自己的筛选。两者都要支持，否则首页的「待人工工单」点进来会落到
-// 全部工单上，看起来就是按钮没生效。
-function syncFromRoute() {
-  const query = route.query
-  attention.value = typeof query.attention === 'string' ? query.attention : ''
-  status.value = typeof query.status === 'string' && query.status ? query.status : 'all'
-  mine.value = query.mine === '1'
-  if (typeof query.q === 'string') search.value = query.q
-  // 处理方筛选（ai / human）走快速筛选里的语义，这里落到状态上。
-  const handler = typeof query.handler === 'string' ? query.handler : ''
-  if (handler === 'human' && status.value === 'all') {
-    status.value = 'pending_human'
-  }
+const narrowed = computed(
+  () => Boolean(attention.value || mine.value || search.value.trim() || status.value !== 'all' || priority.value !== 'all' || type.value !== 'all'),
+)
+
+// 地址栏变化 → 重新同步筛选。这样从总览点卡片进来、以及浏览器前进后退
+// 都能落到正确的列表上。
+function fromRoute() {
+  const q = route.query
+  attention.value = typeof q.attention === 'string' ? q.attention : ''
+  status.value = typeof q.status === 'string' && q.status ? q.status : 'all'
+  priority.value = typeof q.priority === 'string' && q.priority ? q.priority : 'all'
+  type.value = typeof q.type === 'string' && q.type ? q.type : 'all'
+  mine.value = q.mine === '1'
+  search.value = typeof q.q === 'string' ? q.q : ''
+  const parsed = Number(q.page)
+  page.value = Number.isInteger(parsed) && parsed > 0 ? parsed : 1
 }
 
 watch(
-  () => [route.query.attention, route.query.status, route.query.mine, route.query.q, route.query.handler].join('|'),
+  () => [route.query.attention, route.query.status, route.query.priority, route.query.type, route.query.mine, route.query.q, route.query.page].join('|'),
   () => {
-    syncFromRoute()
-    page.value = 1
+    fromRoute()
     void load()
   },
 )
 
 onMounted(() => {
-  syncFromRoute()
+  fromRoute()
   void load()
 })
 </script>
 
 <template>
   <section class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 class="text-lg font-bold">客服中心</h2>
-        <p class="quiet mt-1 text-xs">
-          AI 先接待、需要时转人工。这里处理工单；模型与工具配置在「配置中心」。
-        </p>
-      </div>
-      <RouterLink to="/config?tab=ai" class="btn btn-secondary btn-sm">AI 与客服配置</RouterLink>
-    </div>
+    <PageHeader
+      title="客服中心"
+      description="工单默认由 AI 接待，需要时转人工。这里处理队列；模型与工具配置在配置中心。"
+      bordered
+    >
+      <template #actions>
+        <RouterLink v-if="auth.allows('ai', 'view')" to="/config?tab=ai" class="btn btn-secondary btn-sm">
+          AI 与客服配置
+        </RouterLink>
+        <button class="btn btn-quiet btn-sm" :disabled="loading" @click="load">
+          <AdminIcon name="refresh" :size="14" />
+          {{ loading ? '刷新中…' : '刷新' }}
+        </button>
+      </template>
+    </PageHeader>
 
-    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+    <p v-if="!canView" class="alert alert-warning" role="alert">当前账号没有工单查看权限。</p>
 
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <div class="card !p-5">
-        <p class="eyebrow">AI 处理中</p>
-        <p class="nums mt-2 text-2xl font-bold">{{ stats?.ai_processing ?? 0 }}</p>
-      </div>
-      <div class="card !p-5">
-        <p class="eyebrow">待人工处理</p>
-        <p class="nums mt-2 text-2xl font-bold accent-text">{{ stats?.pending_human ?? 0 }}</p>
-      </div>
-      <div class="card !p-5">
-        <p class="eyebrow">解决率</p>
-        <p class="nums mt-2 text-2xl font-bold">{{ stats ? (stats.resolve_rate * 100).toFixed(1) : '0.0' }}%</p>
-      </div>
-      <div class="card !p-5">
-        <p class="eyebrow">满意度</p>
-        <p class="nums mt-2 text-2xl font-bold">
-          {{ stats && stats.satisfaction_avg > 0 ? stats.satisfaction_avg.toFixed(1) : '—' }}
-        </p>
-      </div>
-    </div>
-
-    <div class="flex flex-wrap items-center gap-2">
-      <button class="chip" :class="attention === '' ? 'chip-active' : ''" @click="quickView('')">全部</button>
-      <button class="chip" :class="attention === 'unread' ? 'chip-active' : ''" @click="quickView('unread')">
-        未读 <span class="nums">{{ stats?.unread ?? 0 }}</span>
-      </button>
-      <button class="chip" :class="attention === 'overdue' ? 'chip-active' : ''" @click="quickView('overdue')">
-        即将超时 <span class="nums">{{ stats?.overdue ?? 0 }}</span>
-      </button>
-      <button class="chip" :class="attention === 'urgent' ? 'chip-active' : ''" @click="quickView('urgent')">
-        紧急 <span class="nums">{{ stats?.urgent ?? 0 }}</span>
-      </button>
-      <button class="chip" :class="attention === 'refund' ? 'chip-active' : ''" @click="quickView('refund')">退款</button>
-      <button class="chip" :class="attention === 'card' ? 'chip-active' : ''" @click="quickView('card')">卡密</button>
-      <button class="chip" :class="attention === 'payment' ? 'chip-active' : ''" @click="quickView('payment')">支付</button>
-      <button class="chip" :class="mine ? 'chip-active' : ''" @click="mine = !mine; attention = ''; applyFilters()">
-        我的工单
-      </button>
-    </div>
-
-    <div class="flex flex-wrap items-center gap-2">
-      <input
-        v-model="search"
-        class="input w-56"
-        type="search"
-        placeholder="工单号 / 标题 / 订单号"
-        aria-label="搜索工单"
-        @keyup.enter="applyFilters"
-      />
-      <select v-model="status" class="input !w-auto" aria-label="工单状态" @change="applyFilters">
-        <option value="all">全部状态</option>
-        <option v-for="(label, value) in ticketStatusLabels" :key="value" :value="value">{{ label }}</option>
-      </select>
-      <select v-model="priority" class="input !w-auto" aria-label="优先级" @change="applyFilters">
-        <option value="all">全部优先级</option>
-        <option v-for="(label, value) in ticketPriorityLabels" :key="value" :value="value">{{ label }}</option>
-      </select>
-      <select v-model="type" class="input !w-auto" aria-label="工单类型" @change="applyFilters">
-        <option value="all">全部类型</option>
-        <option v-for="option in ticketTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-      </select>
-      <button class="btn btn-secondary btn-sm" :disabled="loading" @click="applyFilters">查询</button>
-    </div>
-
-    <div class="grid gap-4 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-      <div class="space-y-3">
-        <div v-if="loading" class="card space-y-3">
-          <div v-for="i in 5" :key="i" class="skeleton h-10 w-full" />
+    <template v-else>
+      <!-- 统计卡：数字与该筛选下的列表条数一致 -->
+      <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <RouterLink to="/service" class="todo-card">
+          <span class="min-w-0 flex-1">
+            <span class="quiet block text-xs">AI 处理中</span>
+            <span class="nums mt-1 block text-xl font-bold">{{ stats?.ai_processing ?? 0 }}</span>
+          </span>
+          <AdminIcon name="chevronRight" :size="15" class="text-[var(--text-quiet)]" />
+        </RouterLink>
+        <RouterLink to="/service?status=pending_human" class="todo-card">
+          <span class="min-w-0 flex-1">
+            <span class="quiet block text-xs">待人工处理</span>
+            <span class="nums accent-text mt-1 block text-xl font-bold">{{ stats?.pending_human ?? 0 }}</span>
+          </span>
+          <AdminIcon name="chevronRight" :size="15" class="text-[var(--text-quiet)]" />
+        </RouterLink>
+        <div class="card-quiet">
+          <p class="quiet text-xs">解决率</p>
+          <p class="nums mt-1 text-xl font-bold">{{ stats ? Math.round(stats.resolve_rate * 100) : 0 }}%</p>
         </div>
-        <div v-else-if="!rows.length" class="card py-16 text-center">
-          <p class="font-semibold">没有符合条件的工单</p>
-          <p class="mt-1.5 text-sm text-[var(--text-quiet)]">换个筛选条件，或等待买家提交新问题。</p>
+        <div class="card-quiet">
+          <p class="quiet text-xs">满意度</p>
+          <p class="nums mt-1 text-xl font-bold">
+            {{ stats && stats.satisfaction_avg > 0 ? stats.satisfaction_avg.toFixed(1) : '—' }}
+          </p>
         </div>
-        <template v-else>
-          <button
-            v-for="row in rows"
-            :key="row.id"
-            class="card-quiet w-full text-left transition-colors"
-            :class="activeTicketID === row.id ? 'border-[var(--accent-line)]' : ''"
-            @click="openTicket(row.id)"
-          >
-            <div class="flex items-start gap-2">
-              <p class="min-w-0 flex-1 truncate text-sm font-semibold">{{ row.subject }}</p>
-              <span v-if="row.unread" class="badge-info shrink-0">未读</span>
-            </div>
-            <p class="mono quiet mt-1 text-xs">
-              {{ row.ticket_no }} · {{ row.username || '#' + row.user_id }}
-            </p>
-            <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
-              <span :class="statusTone[row.status] || 'badge'">{{ ticketStatusLabels[row.status] || row.status }}</span>
-              <span :class="priorityTone[row.priority] || 'badge'">{{ ticketPriorityLabels[row.priority] || row.priority }}</span>
-              <span :class="row.handler === 'ai' ? 'badge-info' : 'badge-success'">
-                {{ row.handler === 'ai' ? 'AI' : '人工' }}
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          v-for="item in QUICK"
+          :key="item.key"
+          class="chip"
+          :class="attention === item.key ? 'chip-active' : ''"
+          @click="quickView(item.key)"
+        >
+          {{ item.label }}
+          <span v-if="quickCount(item.countKey)" class="nums opacity-70">{{ quickCount(item.countKey) }}</span>
+        </button>
+        <button class="chip" :class="mine ? 'chip-active' : ''" @click="toggleMine">我的工单</button>
+      </div>
+
+      <div class="card flex flex-wrap items-center gap-2 !p-3">
+        <input
+          v-model="search"
+          class="input w-52"
+          type="search"
+          placeholder="工单号 / 标题 / 订单号"
+          aria-label="搜索工单"
+          @keyup.enter="apply"
+        />
+        <select v-model="status" class="input !w-auto" aria-label="工单状态" @change="apply">
+          <option value="all">全部状态</option>
+          <option v-for="(label, value) in ticketStatusLabels" :key="value" :value="value">{{ label }}</option>
+        </select>
+        <select v-model="priority" class="input !w-auto" aria-label="优先级" @change="apply">
+          <option value="all">全部优先级</option>
+          <option v-for="(label, value) in ticketPriorityLabels" :key="value" :value="value">{{ label }}</option>
+        </select>
+        <select v-model="type" class="input !w-auto" aria-label="类型" @change="apply">
+          <option value="all">全部类型</option>
+          <option v-for="option in ticketTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" :disabled="loading" @click="apply">查询</button>
+        <span class="nums quiet ml-auto text-xs">共 {{ total }} 张</span>
+        <button v-if="narrowed" class="btn btn-quiet btn-sm" @click="clearFilters">清除筛选</button>
+      </div>
+
+      <div class="grid gap-4 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+        <!-- 队列 -->
+        <div class="space-y-2">
+          <div v-if="loading" class="space-y-2">
+            <div v-for="i in 6" :key="i" class="skeleton h-16 w-full" />
+          </div>
+          <div v-else-if="error" class="card text-center">
+            <p class="alert alert-danger text-left">{{ error }}</p>
+            <button class="btn btn-secondary btn-sm mt-3" @click="load">重新加载</button>
+          </div>
+          <div v-else-if="!rows.length" class="card py-16 text-center">
+            <p class="font-semibold">没有符合条件的工单</p>
+            <p class="quiet mt-1.5 text-sm">换个筛选条件，或等待买家提交新问题。</p>
+            <button v-if="narrowed" class="btn btn-secondary btn-sm mt-5" @click="clearFilters">清除筛选</button>
+          </div>
+          <template v-else>
+            <button
+              v-for="row in rows"
+              :key="row.id"
+              class="queue-item"
+              :class="activeId === row.id ? 'queue-item-active' : ''"
+              @click="activeId = row.id"
+            >
+              <span class="flex items-start gap-2">
+                <span class="min-w-0 flex-1 truncate text-[13px] font-semibold">{{ row.subject }}</span>
+                <span v-if="row.unread" class="badge-info shrink-0">未读</span>
               </span>
-              <span class="quiet ml-auto">{{ when(row.last_message_at || row.created_at) }}</span>
-            </div>
-          </button>
-          <PaginationFooter
-            :page="page"
-            :pages="pageCount"
-            :loading="loading"
-            :summary="'共 ' + total + ' 张工单'"
-            @change="goPage"
-          />
-        </template>
-      </div>
+              <span class="mono quiet mt-1 block truncate text-[11px]">
+                {{ row.ticket_no }} · {{ row.username || '#' + row.user_id }}
+              </span>
+              <span class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <StatusBadge :value="row.status" :label="ticketStatusLabels[row.status]" />
+                <StatusBadge :value="row.priority" :label="ticketPriorityLabels[row.priority]" />
+                <span class="badge-neutral">{{ row.handler === 'ai' ? 'AI' : '人工' }}</span>
+                <span class="quiet ml-auto text-[11px]">{{ when(row.last_message_at || row.created_at) }}</span>
+              </span>
+            </button>
+            <PaginationFooter
+              :page="page"
+              :pages="pageCount"
+              :loading="loading"
+              :summary="'共 ' + total + ' 张'"
+              @change="goPage"
+            />
+          </template>
+        </div>
 
-      <TicketDetailPanel
-        v-if="activeTicketID"
-        :key="activeTicketID + '-' + panelKey"
-        :ticket-id="activeTicketID"
-        @closed="onPanelClosed"
-      />
-      <div v-else class="card py-16 text-center text-sm text-[var(--text-quiet)]">选择左侧工单开始处理</div>
-    </div>
+        <!-- 处理面板 -->
+        <TicketPanel v-if="activeId" :key="activeId" :ticket-id="activeId" @changed="load" />
+        <div v-else class="card py-16 text-center text-sm text-[var(--text-quiet)]">
+          选择左侧工单开始处理
+        </div>
+      </div>
+    </template>
   </section>
 </template>
+
+<style scoped>
+.queue-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  padding: 10px 12px;
+  transition: border-color var(--fast), background var(--fast);
+}
+.queue-item:hover { border-color: var(--stroke-hi); background: var(--surface-hi); }
+.queue-item-active { border-color: var(--accent-line); background: var(--accent-soft); }
+
+.todo-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  padding: 12px 14px;
+  transition: border-color var(--fast), transform var(--normal) var(--spring);
+}
+.todo-card:hover { border-color: var(--stroke-hi); transform: translateY(-1px); }
+</style>

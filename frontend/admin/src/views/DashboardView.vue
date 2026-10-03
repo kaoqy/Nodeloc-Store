@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import StatCard from '../components/StatCard.vue'
-import { listAuditLogs } from '../api/logs'
-import { alertLowStock } from '../api/products'
+import { RouterLink } from 'vue-router'
+import AdminIcon from '../components/AdminIcon.vue'
+import AppDrawer from '../components/AppDrawer.vue'
+import PageHeader from '../components/PageHeader.vue'
+import StatusBadge from '../components/StatusBadge.vue'
 import { getStats } from '../api/system'
 import {
   getTicketStats,
@@ -12,11 +14,17 @@ import {
   type TicketStats,
   type TicketView,
 } from '../api/support'
-import { errorMessage, fulfillmentStatus, money, orderStatus, when, dayLabel } from '../utils/format'
-import { readDashboardCards, writeDashboardCards, type DashboardCardPref } from '../api/configCenter'
+import type { DashboardStats } from '../types'
+import { errorMessage, money, when, dayLabel } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
-import { useInboxStore } from '../stores/inbox'
-import type { AuditLog, DashboardStats } from '../types'
+
+/**
+ * 总览：按「先看待办，再看经营」的顺序组织。
+ *
+ * 店主打开后台的第一件事通常是「有没有要处理的」，所以工单与待办放在图表
+ * 之前；销售趋势等分析性内容放在后面。所有卡片点进去都带着筛选条件落到
+ * 对应列表，卡片上的数字与列表里的结果来自同一批参数。
+ */
 
 type Metric = 'revenue' | 'orders' | 'users'
 
@@ -26,203 +34,106 @@ const RANGES = [
   { days: 90, label: '近 90 天' },
 ]
 
-const METRICS: Record<Metric, { label: string; unit: string; format: (value: number) => string }> = {
+const METRICS: Record<Metric, { label: string; unit: string; format: (v: number) => string }> = {
   revenue: { label: '收入', unit: '', format: money },
-  orders: { label: '订单', unit: '单', format: (value) => String(value) },
-  users: { label: '新客', unit: '人', format: (value) => String(value) },
+  orders: { label: '订单', unit: '单', format: (v) => String(v) },
+  users: { label: '新客', unit: '人', format: (v) => String(v) },
 }
 
-// Moving average window over the trend. Seven days smooths the weekday spikes a
-// small store gets from batch promotions without hiding a real change of pace.
-const AverageWindow = 7
-const AutoRefreshMs = 60_000
-const PrefsKey = 'admin.dashboard.view'
-
-interface ViewPrefs {
-  days: number
-  metric: Metric
-  auto: boolean
-}
-
-function readPrefs(): ViewPrefs {
-  const fallback: ViewPrefs = { days: 30, metric: 'revenue', auto: false }
-  try {
-    const raw = localStorage.getItem(PrefsKey)
-    if (!raw) return fallback
-    const saved = JSON.parse(raw) as Partial<ViewPrefs>
-    return {
-      days: RANGES.some((range) => range.days === saved.days) ? saved.days! : fallback.days,
-      metric: saved.metric && saved.metric in METRICS ? saved.metric : fallback.metric,
-      auto: typeof saved.auto === 'boolean' ? saved.auto : fallback.auto,
-    }
-  } catch {
-    return fallback
-  }
-}
-
-const prefs = readPrefs()
 const auth = useAuthStore()
-const inbox = useInboxStore()
 const loading = ref(true)
 const error = ref('')
+const stats = ref<DashboardStats | null>(null)
+const days = ref(30)
+const metric = ref<Metric>('revenue')
+const updatedAt = ref('')
+const auto = ref(false)
 const alerting = ref(false)
 const alertNotice = ref('')
 const alertFailed = ref(false)
-const days = ref(prefs.days)
-const metric = ref<Metric>(prefs.metric)
-const auto = ref(prefs.auto)
-const stats = ref<DashboardStats | null>(null)
-// 工单中心：总览不只显示数字，也把最近需要处理的工单列出来，
-// 每个入口都带着筛选条件跳到客服中心，点进去就是同一个结果集。
+
 const ticketStats = ref<TicketStats | null>(null)
 const recentTickets = ref<TicketView[]>([])
 const ticketsLoading = ref(false)
 const ticketsError = ref('')
-const cardPrefs = ref<DashboardCardPref[]>(readDashboardCards())
-const showCardSettings = ref(false)
-const logs = ref<AuditLog[]>([])
-const updatedAt = ref('')
-let refreshTimer: number | undefined
+const showTodos = ref(false)
 
 const series = computed(() => stats.value?.revenue_series ?? [])
 const topProducts = computed(() => stats.value?.top_products ?? [])
-const topBuyers = computed(() => stats.value?.top_buyers ?? [])
 const stockAlerts = computed(() => stats.value?.stock_alerts ?? [])
-const funnel = computed(() => stats.value?.funnel ?? [])
 const recentOrders = computed(() => stats.value?.recent_orders ?? [])
-const categorySales = computed(() => stats.value?.category_sales ?? [])
-const topCoupons = computed(() => stats.value?.top_coupons ?? [])
-const cardHealth = computed(() => stats.value?.card_health ?? null)
-const cardByProduct = computed(() => cardHealth.value?.by_product ?? [])
-const engagement = computed(() => stats.value?.engagement ?? null)
-const alertThreshold = computed(() => stats.value?.stock_alert_threshold ?? 0)
-const onboarding = computed(() => Boolean(stats.value) && (stats.value?.orders_total ?? 0) === 0)
 
-// Panels only ask for what the role may open. 近期操作 reads the audit log, so a
-// role without logs:view skips that request instead of collecting a 403.
-const canSeeLogs = computed(() => auth.allows('logs', 'view'))
-const sellThrough = computed(() => {
-  const health = cardHealth.value
-  if (!health?.total) return 0
-  return Math.round((health.sold / health.total) * 100)
+const canSeeTickets = computed(() => auth.allows('tickets', 'view'))
+
+// 待办：只列真的有事要做的项，数量为 0 的不出现，避免一屏都是「0」。
+const todos = computed(() => {
+  const s = stats.value
+  if (!s) return []
+  return [
+    { to: '/orders?status=pending', label: '待支付订单', count: s.orders_pending ?? 0, tone: 'warning', permission: ['orders', 'view'] as const },
+    { to: '/orders?status=paid', label: '等待人工发货', count: s.orders_manual_pending ?? 0, tone: 'info', permission: ['orders', 'view'] as const },
+    { to: '/cards', label: '等待补货', count: s.orders_waiting ?? 0, tone: 'danger', permission: ['cards', 'view'] as const },
+    { to: '/service?status=pending_human', label: '待人工工单', count: s.tickets_pending_human ?? 0, tone: 'danger', permission: ['tickets', 'view'] as const },
+    { to: '/service?attention=urgent', label: '紧急工单', count: s.tickets_urgent ?? 0, tone: 'danger', permission: ['tickets', 'view'] as const },
+    { to: '/service?attention=overdue', label: '即将超时工单', count: s.tickets_overdue ?? 0, tone: 'warning', permission: ['tickets', 'view'] as const },
+    { to: '/orders?attention=undelivered', label: '自动发货异常', count: s.auto_delivery_failed ?? 0, tone: 'danger', permission: ['orders', 'view'] as const },
+  ].filter((item) => item.count > 0 && auth.allows(item.permission[0], item.permission[1]))
 })
-const categoryPeak = computed(() => Math.max(1, ...categorySales.value.map((item) => item.revenue)))
-const couponPeak = computed(() => Math.max(1, ...topCoupons.value.map((item) => item.revenue)))
 
-const onboardingSteps = computed(() =>
-  [
-    { to: '/products/new', label: '上架第一件商品', hint: '定价、描述并公开可见', permission: ['products', 'manage'] },
-    { to: '/cards', label: '导入卡密库存', hint: '卡密类商品付款后自动交付', permission: ['cards', 'manage'] },
-    { to: '/settings', label: '核对支付与登录', hint: 'NodeLoc Payments 与 OAuth 回调', permission: ['settings', 'view'] },
-  ].filter((step) => auth.allows(step.permission[0], step.permission[1])),
-)
+const backlogTotal = computed(() => todos.value.reduce((sum, item) => sum + item.count, 0))
 
+// 图表：柱状图取当前指标的峰值做比例，折线用 7 日移动平均。
 const bars = computed(() => {
   const key = metric.value
-  const peak = Math.max(1, ...series.value.map((point) => point[key]))
-  return series.value.map((point) => {
-    const value = point[key]
-    return { ...point, value, pct: value ? Math.max((value / peak) * 100, 3) : 0.8 }
-  })
+  const peak = Math.max(1, ...series.value.map((p) => p[key]))
+  return series.value.map((p) => ({
+    ...p,
+    value: p[key],
+    pct: p[key] ? Math.max((p[key] / peak) * 100, 3) : 0.8,
+    peak,
+  }))
 })
-
-// Coordinates share the bars' viewBox scale, so the line sits on the columns
-// instead of being a second, differently-scaled chart.
-const averageLine = computed(() => {
-  const key = metric.value
-  if (series.value.length < 3) return ''
-  const peak = Math.max(1, ...series.value.map((point) => point[key]))
-  const step = 100 / (series.value.length - 1)
-  return series.value
-    .map((_, index) => {
-      const window = series.value.slice(Math.max(0, index - AverageWindow + 1), index + 1)
-      const mean = window.reduce((sum, point) => sum + point[key], 0) / window.length
-      return `${(index * step).toFixed(2)},${(100 - (mean / peak) * 100).toFixed(2)}`
-    })
-    .join(' ')
-})
-
-const sparklines = computed(() => {
-  const points = series.value
-  return {
-    revenue: points.map((point) => point.revenue),
-    orders: points.map((point) => point.orders),
-    users: points.map((point) => point.users),
-    aov: points.map((point) => (point.orders ? point.revenue / point.orders : 0)),
-  }
-})
-
+const peakValue = computed(() => Math.max(1, ...series.value.map((p) => p[metric.value])))
+const periodTotal = computed(() => series.value.reduce((sum, p) => sum + p[metric.value], 0))
+const activeDays = computed(() => series.value.filter((p) => p[metric.value] > 0).length)
+const dailyAverage = computed(() => (activeDays.value ? Math.round(periodTotal.value / activeDays.value) : 0))
+const metricMeta = computed(() => METRICS[metric.value])
 const bestDay = computed(() => {
   const key = metric.value
-  let best = null as { date: string; value: number } | null
-  for (const point of series.value) {
-    if (point[key] > 0 && (!best || point[key] > best.value)) best = { date: point.date, value: point[key] }
+  let best: { date: string; value: number } | null = null
+  for (const p of series.value) {
+    if (p[key] > 0 && (!best || p[key] > best.value)) best = { date: p.date, value: p[key] }
   }
   return best
 })
 
-const periodTotal = computed(() => {
-  const key = metric.value
-  return series.value.reduce((sum, point) => sum + point[key], 0)
-})
-
-const activeDays = computed(() => series.value.filter((point) => point[metric.value] > 0).length)
-const dailyAverage = computed(() => (activeDays.value ? Math.round(periodTotal.value / activeDays.value) : 0))
-const metricFormat = computed(() => METRICS[metric.value].format)
-
-const backlog = computed(() => {
-  const s = stats.value
-  if (!s) return []
-  return [
-    { to: '/orders?status=pending', label: '待支付订单', count: s.orders_pending, tone: 'warning', permission: ['orders', 'view'] },
-    { to: '/orders?status=paid', label: '等待人工发货', count: s.orders_manual_pending, tone: 'info', permission: ['orders', 'view'] },
-    { to: '/cards', label: '等待补货', count: s.orders_waiting, tone: 'danger', permission: ['cards', 'view'] },
-    { to: '/orders?status=refunded', label: '期间退款', count: s.refunded_period, tone: 'neutral', permission: ['orders', 'view'] },
-    // 新增待办：工单和发货异常比「已经卖出去多少」更值得第一眼看到。
-    { to: '/service?status=pending_human', label: '待人工工单', count: s.tickets_pending_human, tone: 'danger', permission: ['tickets', 'view'] },
-    { to: '/service?attention=unread', label: '未读工单', count: s.tickets_unread, tone: 'info', permission: ['tickets', 'view'] },
-    { to: '/service?attention=urgent', label: '紧急工单', count: s.tickets_urgent, tone: 'danger', permission: ['tickets', 'view'] },
-    { to: '/service?attention=overdue', label: '即将超时工单', count: s.tickets_overdue, tone: 'warning', permission: ['tickets', 'view'] },
-    { to: '/orders?attention=undelivered', label: '自动发货异常', count: s.auto_delivery_failed, tone: 'danger', permission: ['orders', 'view'] },
-  ].filter((item) => item.count > 0 && auth.allows(item.permission[0], item.permission[1]))
-})
-
-const buyerPeak = computed(() => Math.max(1, ...topBuyers.value.map((item) => item.revenue)))
-const funnelPeak = computed(() => Math.max(1, ...funnel.value.map((stage) => stage.count)))
-const revenuePeak = computed(() => Math.max(1, ...topProducts.value.map((item) => item.revenue)))
+const categoryPeak = computed(() => Math.max(1, ...(stats.value?.category_sales ?? []).map((c) => c.revenue)))
+const productPeak = computed(() => Math.max(1, ...topProducts.value.map((p) => p.revenue)))
+const cardHealth = computed(() => stats.value?.card_health ?? null)
 
 async function load(silent = false) {
   if (!silent) loading.value = true
   error.value = ''
   try {
-    const [statsResult, logResult] = await Promise.all([
-      getStats(days.value),
-      canSeeLogs.value
-        ? listAuditLogs({ page: 1, limit: 6 })
-        : Promise.resolve({ items: [] as AuditLog[], total: 0, page: 1, limit: 6, total_pages: 0 }),
-    ])
-    stats.value = statsResult
-    logs.value = logResult.items
+    stats.value = await getStats(days.value)
     updatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   } catch (err) {
-    error.value = errorMessage(err, '加载概览数据失败')
+    error.value = errorMessage(err, '加载总览数据失败')
   } finally {
     loading.value = false
   }
 }
 
-// 加载工单中心区块。没有工单查看权限的角色直接跳过请求，不产生 403。
 async function loadTickets() {
-  if (!auth.allows('tickets', 'view')) return
+  if (!canSeeTickets.value) return
   ticketsLoading.value = true
   ticketsError.value = ''
   try {
-    const [metric, page] = await Promise.all([
+    const [metric2, page] = await Promise.all([
       getTicketStats(false).catch(() => null),
       listTickets({ limit: 6, offset: 0, attention: 'unread' }).catch(() => ({ data: [], total: 0 })),
     ])
-    ticketStats.value = metric
-    // 「未读」可能有几十条，这里展示最近需要处理的：优先未读，不足时补最新。
+    ticketStats.value = metric2
     const rows: TicketView[] = [...page.data]
     if (rows.length < 6) {
       const latest = await listTickets({ limit: 6, offset: 0 }).catch(() => ({ data: [], total: 0 }))
@@ -250,19 +161,18 @@ async function switchRange(value: number) {
   await load()
 }
 
-// One warning per product per day, so a second click has nothing new to send --
-// the panel then says what was already reported instead of looking like a no-op.
+// 补货提醒：同一天对同一件商品只发一次，第二次点击会说明「今天已经提醒过」。
 async function warnRestock() {
   if (alerting.value) return
   alerting.value = true
   alertNotice.value = ''
   try {
+    const { alertLowStock } = await import('../api/products')
     const result = await alertLowStock()
     alertFailed.value = false
     if (!result.checked) alertNotice.value = '巡检没有需要提醒的商品，卡密都够用。'
-    else if (result.sent) alertNotice.value = `已发出 ${result.sent} 条提醒，覆盖 ${result.checked} 件缺货商品。`
-    else alertNotice.value = `今天已经提醒过 ${result.checked} 件缺货商品了，明天同一时间会再说一次。`
-    void inbox.refresh()
+    else if (result.sent) alertNotice.value = '已发出 ' + result.sent + ' 条提醒，覆盖 ' + result.checked + ' 件缺货商品。'
+    else alertNotice.value = '今天已经提醒过 ' + result.checked + ' 件缺货商品了，明天同一时间会再说一次。'
   } catch (err) {
     alertFailed.value = true
     alertNotice.value = errorMessage(err, '提醒补货失败')
@@ -271,28 +181,18 @@ async function warnRestock() {
   }
 }
 
-function stopAutoRefresh() {
-  if (refreshTimer) window.clearInterval(refreshTimer)
-  refreshTimer = undefined
-}
-
-function syncAutoRefresh() {
-  stopAutoRefresh()
+let timer: number | undefined
+function syncAuto() {
+  if (timer) window.clearInterval(timer)
+  timer = undefined
   if (!auto.value) return
-  // A hidden tab refreshing every minute only spends requests, so the tick is
-  // skipped there and the data reloads as soon as the tab is visible again.
-  refreshTimer = window.setInterval(() => {
+  timer = window.setInterval(() => {
     if (document.hidden || loading.value) return
     void load(true)
     void loadTickets()
-  }, AutoRefreshMs)
+  }, 60_000)
 }
-
-watch([days, metric, auto], () => {
-  localStorage.setItem(PrefsKey, JSON.stringify({ days: days.value, metric: metric.value, auto: auto.value }))
-  syncAutoRefresh()
-})
-
+watch(auto, syncAuto)
 function onVisible() {
   if (!document.hidden && auto.value && !loading.value) {
     void load(true)
@@ -300,159 +200,99 @@ function onVisible() {
   }
 }
 
-// 卡片偏好保存在本地：拖拽顺序与显示开关都是这台机器的个人偏好，
-// 不写进店铺的共享设置，也不会影响其他管理员。
-function cardVisible(key: string) {
-  return cardPrefs.value.find((item) => item.key === key)?.visible !== false
-}
-
-function toggleCard(key: string) {
-  cardPrefs.value = cardPrefs.value.map((item) =>
-    item.key === key ? { ...item, visible: !item.visible } : item,
-  )
-  writeDashboardCards(cardPrefs.value)
-}
-
-const draggingKey = ref('')
-
-function onDragStart(key: string) {
-  draggingKey.value = key
-}
-
-function onDrop(target: string) {
-  const source = draggingKey.value
-  draggingKey.value = ''
-  if (!source || source === target) return
-  const list = [...cardPrefs.value]
-  const from = list.findIndex((item) => item.key === source)
-  const to = list.findIndex((item) => item.key === target)
-  if (from < 0 || to < 0) return
-  const [moved] = list.splice(from, 1)
-  list.splice(to, 0, moved)
-  cardPrefs.value = list
-  writeDashboardCards(list)
-}
-
 onMounted(() => {
   void load()
   void loadTickets()
-  syncAutoRefresh()
   document.addEventListener('visibilitychange', onVisible)
 })
-
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisible)
-  stopAutoRefresh()
+  if (timer) window.clearInterval(timer)
 })
 </script>
 
 <template>
   <section class="space-y-5">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="flex gap-1.5">
-        <button
-          v-for="option in RANGES"
-          :key="option.days"
-          class="btn btn-sm"
-          :class="days === option.days ? 'btn-primary' : 'btn-secondary'"
-          :aria-pressed="days === option.days"
-          @click="switchRange(option.days)"
-        >
-          {{ option.label }}
-        </button>
-      </div>
-      <div class="flex items-center gap-3">
-        <button
-          class="btn btn-sm"
-          :class="auto ? 'btn-secondary border-[var(--accent-line)] accent-text' : 'btn-quiet'"
-          :aria-pressed="auto"
-          title="开启后每 60 秒静默刷新一次"
-          @click="auto = !auto"
-        >
-          自动刷新 · {{ auto ? '开' : '关' }}
-        </button>
-        <span v-if="updatedAt" class="hint mono">更新于 {{ updatedAt }}</span>
-        <button class="btn btn-quiet btn-sm" :aria-pressed="showCardSettings" @click="showCardSettings = !showCardSettings">
-          卡片
-        </button>
-        <button class="btn btn-quiet btn-sm" :disabled="loading || ticketsLoading" @click="refreshAll()">
-          {{ loading || ticketsLoading ? '加载中…' : '刷新' }}
-        </button>
-      </div>
-    </div>
-
-    <div v-if="showCardSettings" class="card space-y-2">
-      <p class="eyebrow">总览卡片</p>
-      <p class="quiet text-xs">拖动可调整顺序，勾选控制显示。偏好保存在当前浏览器。</p>
-      <div class="flex flex-wrap gap-2">
-        <label
-          v-for="card in cardPrefs"
-          :key="card.key"
-          class="chip cursor-grab"
-          draggable="true"
-          @dragstart="onDragStart(card.key)"
-          @dragover.prevent
-          @drop="onDrop(card.key)"
-        >
-          <input type="checkbox" class="mr-1.5" :checked="card.visible" @change="toggleCard(card.key)" />
-          {{ card.label }}
-        </label>
-      </div>
-    </div>
+    <PageHeader
+      title="总览"
+      description="先看今天要处理的事，再看生意怎么样。卡片上的每个数字都可以点开对应的列表。"
+      bordered
+    >
+      <template #actions>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <button
+            v-for="option in RANGES"
+            :key="option.days"
+            class="btn btn-sm"
+            :class="days === option.days ? 'btn-primary' : 'btn-secondary'"
+            :aria-pressed="days === option.days"
+            @click="switchRange(option.days)"
+          >
+            {{ option.label }}
+          </button>
+          <button
+            class="btn btn-quiet btn-sm"
+            :class="auto ? 'accent-text' : ''"
+            :aria-pressed="auto"
+            title="开启后每 60 秒静默刷新一次"
+            @click="auto = !auto"
+          >
+            <AdminIcon name="refresh" :size="14" />
+            自动刷新 · {{ auto ? '开' : '关' }}
+          </button>
+          <button class="btn btn-quiet btn-sm" :disabled="loading || ticketsLoading" @click="refreshAll">
+            <span v-if="loading || ticketsLoading" class="spinner !size-3.5" />
+            {{ loading || ticketsLoading ? '刷新中…' : '刷新' }}
+          </button>
+          <span v-if="updatedAt" class="hint mono hidden sm:inline">更新于 {{ updatedAt }}</span>
+        </div>
+      </template>
+    </PageHeader>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
-    <!-- 快捷入口：把「今天最可能要去处理的事」放在一张卡片里，
-         管理员不必先记住新功能分别在哪一个菜单下。 -->
-    <div class="quick-entries grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <RouterLink to="/service" class="card-hover flex items-center gap-3 !p-4">
-        <span class="brand-mark">客</span>
-        <span class="min-w-0">
-          <span class="block text-sm font-semibold">客服中心</span>
-          <span class="quiet block truncate text-xs">工单队列与 AI 接待</span>
-        </span>
-      </RouterLink>
-      <RouterLink to="/activities" class="card-hover flex items-center gap-3 !p-4">
-        <span class="brand-mark">活</span>
-        <span class="min-w-0">
-          <span class="block text-sm font-semibold">活动营销</span>
-          <span class="quiet block truncate text-xs">折扣、满减与领券</span>
-        </span>
-      </RouterLink>
-      <RouterLink to="/config" class="card-hover flex items-center gap-3 !p-4">
-        <span class="brand-mark">配</span>
-        <span class="min-w-0">
-          <span class="block text-sm font-semibold">配置中心</span>
-          <span class="quiet block truncate text-xs">AI、通知、风控与保留策略</span>
-        </span>
-      </RouterLink>
-      <RouterLink to="/cards" class="card-hover flex items-center gap-3 !p-4">
-        <span class="brand-mark">卡</span>
-        <span class="min-w-0">
-          <span class="block text-sm font-semibold">卡密库存</span>
-          <span class="quiet block truncate text-xs">补货与等待发货</span>
-        </span>
-      </RouterLink>
-    </div>
-
-    <!-- 快捷操作：新建商品、导入卡密、创建活动这些是店主每天要做的动作，
-         每一项都指向真正存在的页面并预先打开对应状态。 -->
+    <!-- 待办：数量为 0 的项不出现；没有待办时给一句明确的「都清完了」 -->
     <div class="card space-y-3">
-      <p class="eyebrow">快捷操作</p>
-      <div class="flex flex-wrap gap-2">
-        <RouterLink v-if="auth.allows('products','manage')" to="/products/new" class="btn btn-secondary btn-sm">新增商品</RouterLink>
-        <RouterLink v-if="auth.allows('cards','view')" to="/cards" class="btn btn-secondary btn-sm">导入卡密</RouterLink>
-        <RouterLink v-if="auth.allows('activities','manage')" to="/activities/new" class="btn btn-secondary btn-sm">创建活动</RouterLink>
-        <RouterLink v-if="auth.allows('orders','view')" to="/orders" class="btn btn-secondary btn-sm">全部订单</RouterLink>
-        <RouterLink v-if="auth.allows('tickets','view')" to="/service" class="btn btn-secondary btn-sm">工单中心</RouterLink>
-        <RouterLink v-if="auth.allows('ai','view')" to="/config?tab=ai" class="btn btn-secondary btn-sm">AI 客服配置</RouterLink>
-        <RouterLink v-if="auth.allows('knowledge','view')" to="/config?tab=knowledge" class="btn btn-secondary btn-sm">知识库</RouterLink>
-        <RouterLink v-if="auth.allows('settings','view')" to="/settings" class="btn btn-secondary btn-sm">系统设置</RouterLink>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <p class="eyebrow">待办</p>
+          <span v-if="backlogTotal" class="badge-warning nums">{{ backlogTotal }}</span>
+          <span v-else class="badge-success">已清空</span>
+        </div>
+        <button
+          v-if="todos.length > 4"
+          class="hint"
+          type="button"
+          @click="showTodos = true"
+        >
+          查看全部 {{ todos.length }} 项 →
+        </button>
+      </div>
+
+      <div v-if="!stats" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div v-for="i in 4" :key="i" class="skeleton h-16" />
+      </div>
+      <div v-else-if="!todos.length" class="card-quiet py-6 text-center text-sm text-[var(--text-quiet)]">
+        目前没有待处理的事项，可以看看下面的经营数据。
+      </div>
+      <div v-else class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <RouterLink
+          v-for="item in todos.slice(0, 4)"
+          :key="item.to"
+          :to="item.to"
+          class="todo-card"
+        >
+          <span class="min-w-0 flex-1">
+            <span class="quiet block truncate text-xs">{{ item.label }}</span>
+            <span class="nums mt-1 block text-xl font-bold">{{ item.count }}</span>
+          </span>
+          <AdminIcon name="chevronRight" :size="15" class="shrink-0 text-[var(--text-quiet)]" />
+        </RouterLink>
       </div>
     </div>
 
-    <!-- 工单中心：数字 + 最近工单 + 每个都能点进筛选后的列表。 -->
-    <div v-if="auth.allows('tickets', 'view')" class="card space-y-4">
+    <!-- 工单中心 -->
+    <div v-if="canSeeTickets" class="card space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p class="eyebrow">工单中心</p>
@@ -460,6 +300,7 @@ onUnmounted(() => {
         </div>
         <div class="flex flex-wrap gap-2">
           <button class="btn btn-quiet btn-sm" :disabled="ticketsLoading" @click="loadTickets">
+            <AdminIcon name="refresh" :size="14" />
             {{ ticketsLoading ? '刷新中…' : '刷新工单' }}
           </button>
           <RouterLink to="/service" class="btn btn-secondary btn-sm">查看全部工单</RouterLink>
@@ -467,33 +308,41 @@ onUnmounted(() => {
       </div>
 
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <RouterLink to="/service?attention=unread" class="card-quiet transition-colors hover:border-[var(--stroke-hi)]">
-          <p class="quiet text-xs">未读工单</p>
-          <p class="nums mt-1 text-xl font-bold">{{ ticketStats?.unread ?? 0 }}</p>
+        <RouterLink to="/service?attention=unread" class="todo-card">
+          <span class="min-w-0 flex-1">
+            <span class="quiet block text-xs">未读工单</span>
+            <span class="nums mt-1 block text-lg font-bold">{{ ticketStats?.unread ?? 0 }}</span>
+          </span>
         </RouterLink>
-        <RouterLink to="/service" class="card-quiet transition-colors hover:border-[var(--stroke-hi)]">
-          <p class="quiet text-xs">AI 处理中</p>
-          <p class="nums mt-1 text-xl font-bold">{{ ticketStats?.ai_processing ?? 0 }}</p>
+        <RouterLink to="/service" class="todo-card">
+          <span class="min-w-0 flex-1">
+            <span class="quiet block text-xs">AI 处理中</span>
+            <span class="nums mt-1 block text-lg font-bold">{{ ticketStats?.ai_processing ?? 0 }}</span>
+          </span>
         </RouterLink>
-        <RouterLink to="/service?status=pending_human" class="card-quiet transition-colors hover:border-[var(--stroke-hi)]">
-          <p class="quiet text-xs">待人工处理</p>
-          <p class="nums mt-1 text-xl font-bold accent-text">{{ ticketStats?.pending_human ?? 0 }}</p>
+        <RouterLink to="/service?status=pending_human" class="todo-card">
+          <span class="min-w-0 flex-1">
+            <span class="quiet block text-xs">待人工处理</span>
+            <span class="nums accent-text mt-1 block text-lg font-bold">{{ ticketStats?.pending_human ?? 0 }}</span>
+          </span>
         </RouterLink>
-        <RouterLink to="/service?attention=overdue" class="card-quiet transition-colors hover:border-[var(--stroke-hi)]">
-          <p class="quiet text-xs">即将超时</p>
-          <p class="nums mt-1 text-xl font-bold">{{ ticketStats?.overdue ?? 0 }}</p>
+        <RouterLink to="/service?attention=overdue" class="todo-card">
+          <span class="min-w-0 flex-1">
+            <span class="quiet block text-xs">即将超时</span>
+            <span class="nums mt-1 block text-lg font-bold">{{ ticketStats?.overdue ?? 0 }}</span>
+          </span>
         </RouterLink>
       </div>
 
-      <p v-if="ticketsError" class="alert alert-danger" role="alert">
+      <div v-if="ticketsError" class="alert alert-danger flex flex-wrap items-center gap-2" role="alert">
         {{ ticketsError }}
-        <button class="btn btn-secondary btn-sm ml-2" @click="loadTickets">重试</button>
-      </p>
+        <button class="btn btn-secondary btn-sm ml-auto" @click="loadTickets">重试</button>
+      </div>
 
       <div v-if="ticketsLoading" class="space-y-2">
-        <div v-for="i in 3" :key="i" class="skeleton h-10 w-full" />
+        <div v-for="i in 3" :key="i" class="skeleton h-11 w-full" />
       </div>
-      <div v-else-if="!recentTickets.length" class="card-quiet py-8 text-center text-sm text-[var(--text-quiet)]">
+      <div v-else-if="!recentTickets.length" class="card-quiet py-6 text-center text-sm text-[var(--text-quiet)]">
         当前没有待处理的工单
       </div>
       <ul v-else class="space-y-2">
@@ -504,619 +353,282 @@ onUnmounted(() => {
           >
             <span v-if="ticket.unread" class="badge-info">未读</span>
             <span class="min-w-0 flex-1 truncate text-sm font-semibold">{{ ticket.subject }}</span>
-            <span class="badge">{{ ticketStatusLabels[ticket.status] || ticket.status }}</span>
-            <span class="badge-warning">{{ ticketPriorityLabels[ticket.priority] || ticket.priority }}</span>
+            <StatusBadge :value="ticket.status" :label="ticketStatusLabels[ticket.status]" />
+            <StatusBadge :value="ticket.priority" :label="ticketPriorityLabels[ticket.priority]" />
             <span class="mono quiet text-xs">{{ ticket.ticket_no }}</span>
           </RouterLink>
         </li>
       </ul>
     </div>
 
-    <div v-if="loading && !stats" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <div v-for="i in 4" :key="i" class="card !p-5">
-        <div class="skeleton h-3 w-16" />
-        <div class="skeleton mt-4 h-7 w-24" />
-        <div class="skeleton mt-3 h-3 w-32" />
-      </div>
-    </div>
-
-    <div v-else-if="stats" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <StatCard
-        v-if="cardVisible('revenue')"
-        label="期间收入"
-        :value="money(stats?.revenue_period ?? 0)"
-        :hint="`累计 ${money(stats?.revenue_total ?? 0)} · 上期 ${money(stats?.revenue_prev ?? 0)}`"
-        :delta="(stats?.revenue_prev ?? 0) > 0 ? (stats?.revenue_delta ?? null) : null"
-        :spark="sparklines.revenue"
-        icon="coupons"
-        accent
-      />
-      <StatCard
-        v-if="cardVisible('orders')"
-        label="支付订单"
-        :value="stats?.paid_period ?? 0"
-        :hint="`下单 ${stats?.orders_period ?? 0} 笔 · 转化率 ${Math.round(stats?.conversion ?? 0)}%`"
-        :delta="(stats?.paid_prev ?? 0) > 0 ? (stats?.paid_delta ?? null) : null"
-        :spark="sparklines.orders"
-        icon="orders"
-      />
-      <StatCard
-        v-if="cardVisible('avg_minutes')"
-        label="客单价"
-        :value="money(stats?.aov ?? 0)"
-        :hint="`已交付 ${stats?.delivered_period ?? 0} 笔 · 退款 ${stats?.refunded_period ?? 0} 笔`"
-        :spark="sparklines.aov"
-        icon="cards"
-      />
-      <StatCard
-        v-if="cardVisible('satisfaction')"
-        label="期间新客"
-        :value="stats?.new_users_period ?? 0"
-        :hint="`购买用户 ${stats?.active_buyers_period ?? 0} 人 · 复购 ${stats?.repeat_buyers_period ?? 0} 人`"
-        :delta="(stats?.new_users_prev ?? 0) > 0 ? (stats?.new_users_delta ?? null) : null"
-        :spark="sparklines.users"
-        icon="users"
-      />
-      <StatCard
-        v-if="cardVisible('tickets_ai')"
-        label="AI 处理中工单"
-        :value="stats?.tickets_ai_processing ?? 0"
-        :hint="`工单 ${stats?.tickets_total ?? 0} 张 · 解决率 ${Math.round((stats?.ticket_resolve_rate ?? 0) * 100)}%`"
-        icon="orders"
-      />
-      <StatCard
-        v-if="cardVisible('tickets_pending')"
-        label="待人工处理"
-        :value="stats?.tickets_pending_human ?? 0"
-        :hint="`即将超时 ${stats?.tickets_overdue ?? 0} 张 · 满意度 ${(stats?.ticket_satisfaction ?? 0).toFixed(1)}`"
-        icon="users"
-      />
-      <StatCard
-        v-if="cardVisible('activities')"
-        label="进行中活动"
-        :value="stats?.activities_running ?? 0"
-        :hint="`参与人数 ${stats?.activity_participants ?? 0} 人`"
-        icon="coupons"
-      />
-      <StatCard
-        v-if="cardVisible('ai_calls')"
-        label="AI 工具调用"
-        :value="stats?.ai_tool_calls ?? 0"
-        :hint="`转人工 ${stats?.ai_transfers ?? 0} 次 · 发货异常 ${stats?.auto_delivery_failed ?? 0} 笔`"
-        icon="plugins"
-      />
-    </div>
-
-    <!-- 概览一次都没读出来时，整块看板都不该开口：那些面板只会把「没有数据」念成
-         「0 笔」「卡密充足，无需补货」，而这两句话在这家店里都不是结论。 -->
-    <div v-else class="card !p-0 overflow-hidden">
-      <div class="empty-state">
-        <p class="empty-glyph" aria-hidden="true">◌</p>
-        <p class="empty-title">概览数据没有读出来</p>
-        <p class="empty-hint">原因写在上面的红色提示里。修好之前，收入、订单与库存预警都不会给出数字，免得把「读不到」说成「生意是 0」。</p>
-        <button class="btn btn-secondary btn-sm mt-3" type="button" @click="load()">再读一次</button>
-      </div>
-    </div>
-
-    <div v-if="!loading && onboarding" class="card">
-      <h2 class="text-base font-semibold">开张三件事</h2>
-      <p class="hint mt-1">还没有任何订单。按下面顺序把店铺跑起来，这一步跑完看板就会有数据。</p>
-      <ol class="mt-4 grid gap-3 sm:grid-cols-3">
-        <li v-for="(step, index) in onboardingSteps" :key="step.to">
-          <RouterLink
-            :to="step.to"
-            class="flex h-full flex-col gap-1.5 rounded-md border border-[var(--stroke-quiet)] px-4 py-3.5 transition-colors hover:border-[var(--accent-line)]"
-          >
-            <span class="mono quiet text-xs">{{ String(index + 1).padStart(2, '0') }}</span>
-            <span class="text-[13px] font-semibold">{{ step.label }}</span>
-            <span class="hint">{{ step.hint }}</span>
-          </RouterLink>
-        </li>
-      </ol>
-    </div>
-
-    <div v-if="!loading && backlog.length" class="card !p-4">
-      <div class="flex flex-wrap items-center gap-2.5">
-        <span class="eyebrow shrink-0">需要处理</span>
-        <RouterLink
-          v-for="item in backlog"
-          :key="item.label"
-          :to="item.to"
-          class="badge"
-          :class="`badge-${item.tone}`"
-        >
-          {{ item.label }} <span class="nums font-semibold">{{ item.count }}</span>
+    <!-- 快捷操作：店主每天要做的动作，按权限显示，点进去就是可用的页面 -->
+    <div class="card space-y-3">
+      <p class="eyebrow">快捷操作</p>
+      <div class="flex flex-wrap gap-2">
+        <RouterLink v-if="auth.allows('products', 'manage')" to="/products/new" class="btn btn-secondary btn-sm">
+          <AdminIcon name="plus" :size="14" />
+          新增商品
         </RouterLink>
+        <RouterLink v-if="auth.allows('cards', 'manage')" to="/cards" class="btn btn-secondary btn-sm">
+          <AdminIcon name="plus" :size="14" />
+          导入卡密
+        </RouterLink>
+        <RouterLink v-if="auth.allows('activities', 'manage')" to="/activities/new" class="btn btn-secondary btn-sm">
+          <AdminIcon name="plus" :size="14" />
+          创建活动
+        </RouterLink>
+        <RouterLink v-if="auth.allows('orders', 'view')" to="/orders" class="btn btn-quiet btn-sm">全部订单</RouterLink>
+        <RouterLink v-if="auth.allows('tickets', 'view')" to="/service" class="btn btn-quiet btn-sm">工单中心</RouterLink>
+        <RouterLink v-if="auth.allows('ai', 'view')" to="/config?tab=ai" class="btn btn-quiet btn-sm">AI 客服配置</RouterLink>
+        <RouterLink v-if="auth.allows('knowledge', 'view')" to="/config?tab=knowledge" class="btn btn-quiet btn-sm">知识库</RouterLink>
+        <RouterLink v-if="auth.allows('settings', 'view')" to="/settings" class="btn btn-quiet btn-sm">系统设置</RouterLink>
       </div>
     </div>
 
-    <div v-if="stats" class="grid gap-5 xl:grid-cols-3">
-      <div class="card xl:col-span-2">
-        <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 class="text-base font-semibold">{{ METRICS[metric].label }}趋势</h2>
-            <p class="quiet mt-1 text-xs">
-              期间合计 {{ metricFormat(periodTotal) }}{{ METRICS[metric].unit }} · 活跃 {{ activeDays }} 天 · 日均
-              {{ metricFormat(dailyAverage) }}{{ METRICS[metric].unit }}
-              <span v-if="averageLine" class="mono"> · <span class="accent-text">┅</span> {{ AverageWindow }} 日均线</span>
-            </p>
-          </div>
-          <div class="flex gap-1.5">
-            <button
-              v-for="option in (['revenue', 'orders', 'users'] as Metric[])"
-              :key="option"
-              class="btn btn-sm"
-              :class="metric === option ? 'btn-secondary border-[var(--accent-line)] accent-text' : 'btn-quiet'"
-              :aria-pressed="metric === option"
-              @click="metric = option"
-            >
-              {{ METRICS[option].label }}
-            </button>
-          </div>
-        </div>
-
-        <div v-if="loading" class="skeleton h-56" />
-        <div v-else-if="!bars.length" class="py-16 text-center text-sm quiet">暂无数据</div>
-        <div v-else>
-          <div class="relative h-56">
-            <div class="absolute inset-0 flex flex-col justify-between" aria-hidden="true">
-              <span v-for="i in 4" :key="i" class="block border-t border-dashed border-[var(--stroke-quiet)]" />
-            </div>
-            <div class="relative flex h-full items-end gap-[3px]" role="img" :aria-label="`${METRICS[metric].label}趋势，共 ${series.length} 天，含 ${AverageWindow} 日均线`">
-              <div
-                v-for="point in bars"
-                :key="point.date"
-                class="group relative flex h-full flex-1 items-end"
-                :title="`${point.date} · ${metricFormat(point.value)}${METRICS[metric].unit}`"
-              >
-                <div
-                  class="w-full rounded-t-sm border border-b-0 transition-colors"
-                  :class="
-                    point.value
-                      ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] group-hover:bg-[var(--accent-line)]'
-                      : 'border-[var(--stroke-quiet)] bg-[var(--surface-sunken)]'
-                  "
-                  :style="{ height: `${point.pct}%` }"
-                />
-                <div
-                  class="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-[var(--stroke)] bg-[var(--surface-hi)] px-2 py-1.5 text-[11px] shadow-lg group-hover:block"
-                >
-                  <span class="mono quiet">{{ point.date }}</span>
-                  <span class="nums font-semibold"> {{ metricFormat(point.value) }}{{ METRICS[metric].unit }}</span>
-                  <span v-if="metric !== 'orders'" class="quiet"> · {{ point.orders }} 单</span>
-                </div>
-              </div>
-            </div>
-            <svg
-              v-if="averageLine"
-              class="pointer-events-none absolute inset-0 h-full w-full"
-              viewBox="0 0 100 100"
-              preserveAspectRatio="none"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <polyline
-                :points="averageLine"
-                fill="none"
-                stroke="var(--accent)"
-                stroke-width="1.5"
-                stroke-dasharray="4 3"
-                stroke-linejoin="round"
-                vector-effect="non-scaling-stroke"
-                opacity="0.85"
-              />
-            </svg>
-          </div>
-          <div class="mt-3 flex justify-between text-[11px] quiet mono">
-            <span>{{ dayLabel(series[0].date) }}</span>
-            <span v-if="bestDay" class="nums">
-              峰值 {{ dayLabel(bestDay.date) }} · {{ metricFormat(bestDay.value) }}{{ METRICS[metric].unit }}
-            </span>
-            <span>{{ dayLabel(series[series.length - 1].date) }}</span>
-          </div>
-        </div>
+    <!-- 核心指标卡 -->
+    <div v-if="loading && !stats" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div v-for="i in 8" :key="i" class="card !p-5">
+        <div class="skeleton h-3 w-16" />
+        <div class="skeleton mt-3 h-7 w-24" />
       </div>
-
-      <div class="card">
-        <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="text-base font-semibold">订单结构</h2>
-          <RouterLink v-if="auth.allows('orders', 'view')" to="/orders" class="text-sm accent-text">订单管理</RouterLink>
-        </div>
-        <div v-if="loading" class="space-y-3">
-          <div v-for="i in 4" :key="i" class="skeleton h-9" />
-        </div>
-        <div v-else-if="!funnel.length" class="py-12 text-center text-sm quiet">期间内还没有订单</div>
-        <ul v-else class="space-y-3">
-          <li v-for="stage in funnel" :key="stage.key">
-            <div class="flex items-baseline justify-between gap-3 text-xs">
-              <span class="muted">{{ stage.label }}</span>
-              <span class="nums font-semibold">{{ stage.count }}</span>
-            </div>
-            <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
-              <div
-                class="h-full rounded-full"
-                :class="stage.key === 'refunded' || stage.key === 'failed' ? 'bg-[var(--danger)]' : 'bg-[var(--accent-line)]'"
-                :style="{ width: `${Math.max((stage.count / funnelPeak) * 100, 2)}%` }"
-              />
-            </div>
-          </li>
-        </ul>
-
-        <div class="my-4 divider" />
-
-        <div class="grid grid-cols-2 gap-3 text-center">
-          <div class="panel">
-            <p class="hint">在售商品</p>
-            <p class="nums mt-1 text-lg font-bold">{{ stats?.products_total ?? 0 }}</p>
-          </div>
-          <div class="panel">
-            <p class="hint">注册用户</p>
-            <p class="nums mt-1 text-lg font-bold">{{ stats?.users_total ?? 0 }}</p>
-          </div>
-        </div>
+    </div>
+    <div v-else-if="stats" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="card !p-5">
+        <p class="eyebrow">期间收入</p>
+        <p class="nums mt-2 text-2xl font-bold">{{ money(stats.revenue_period) }}</p>
+        <p class="hint mt-1.5">累计 {{ money(stats.revenue_total) }}</p>
+      </div>
+      <div class="card !p-5">
+        <p class="eyebrow">支付订单</p>
+        <p class="nums mt-2 text-2xl font-bold">{{ stats.paid_period }}</p>
+        <p class="hint mt-1.5">下单 {{ stats.orders_period }} 笔 · 转化 {{ Math.round(stats.conversion) }}%</p>
+      </div>
+      <div class="card !p-5">
+        <p class="eyebrow">客单价</p>
+        <p class="nums mt-2 text-2xl font-bold">{{ money(stats.aov) }}</p>
+        <p class="hint mt-1.5">已交付 {{ stats.delivered_period }} 笔 · 退款 {{ stats.refunded_period }} 笔</p>
+      </div>
+      <div class="card !p-5">
+        <p class="eyebrow">期间新客</p>
+        <p class="nums mt-2 text-2xl font-bold">{{ stats.new_users_period }}</p>
+        <p class="hint mt-1.5">购买 {{ stats.active_buyers_period }} 人 · 复购 {{ stats.repeat_buyers_period }} 人</p>
+      </div>
+      <div class="card !p-5">
+        <p class="eyebrow">AI 处理中工单</p>
+        <p class="nums mt-2 text-2xl font-bold">{{ stats.tickets_ai_processing }}</p>
+        <p class="hint mt-1.5">工单 {{ stats.tickets_total }} 张</p>
+      </div>
+      <div class="card !p-5">
+        <p class="eyebrow">工单解决率</p>
+        <p class="nums mt-2 text-2xl font-bold">{{ Math.round((stats.ticket_resolve_rate ?? 0) * 100) }}%</p>
+        <p class="hint mt-1.5">满意度 {{ (stats.ticket_satisfaction ?? 0).toFixed(1) }}</p>
+      </div>
+      <div class="card !p-5">
+        <p class="eyebrow">进行中活动</p>
+        <p class="nums mt-2 text-2xl font-bold">{{ stats.activities_running }}</p>
+        <p class="hint mt-1.5">参与 {{ stats.activity_participants }} 人</p>
+      </div>
+      <div class="card !p-5">
+        <p class="eyebrow">库存预警</p>
+        <p class="nums mt-2 text-2xl font-bold">{{ stockAlerts.length }}</p>
+        <p class="hint mt-1.5">自动发货异常 {{ stats.auto_delivery_failed }} 笔</p>
       </div>
     </div>
 
-    <div v-if="stats" class="stagger grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-      <div class="card">
-        <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="text-base font-semibold">热销商品</h2>
-          <RouterLink v-if="auth.allows('products', 'view')" to="/products" class="text-sm accent-text">商品管理</RouterLink>
-        </div>
-        <div v-if="loading" class="space-y-3">
-          <div v-for="i in 4" :key="i" class="skeleton h-10" />
-        </div>
-        <div v-else-if="!topProducts.length" class="py-12 text-center text-sm quiet">期间内还没有成交</div>
-        <ol v-else class="space-y-3.5">
-          <li v-for="(item, index) in topProducts" :key="item.product_id">
-            <div class="flex items-baseline justify-between gap-3">
-              <p class="min-w-0 truncate text-[13px]">
-                <span class="mono quiet mr-1.5">{{ String(index + 1).padStart(2, '0') }}</span>
-                {{ item.name || `#${item.product_id}` }}
-              </p>
-              <span class="nums shrink-0 text-[13px] font-semibold">{{ money(item.revenue) }}</span>
-            </div>
-            <div class="mt-1.5 flex items-center gap-2">
-              <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
-                <div
-                  class="h-full rounded-full border border-[var(--accent-line)] bg-[var(--accent-soft)]"
-                  :style="{ width: `${Math.max((item.revenue / revenuePeak) * 100, 2)}%` }"
-                />
-              </div>
-              <span class="hint nums shrink-0">{{ item.orders }} 单</span>
-            </div>
-          </li>
-        </ol>
-      </div>
-
-      <div class="card">
-        <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="text-base font-semibold">买家排行</h2>
-          <RouterLink v-if="auth.allows('users', 'view')" to="/users" class="text-sm accent-text">用户管理</RouterLink>
-        </div>
-        <div v-if="loading" class="space-y-3">
-          <div v-for="i in 4" :key="i" class="skeleton h-10" />
-        </div>
-        <div v-else-if="!topBuyers.length" class="py-12 text-center text-sm quiet">期间内还没有成交买家</div>
-        <ol v-else class="space-y-3.5">
-          <li v-for="(item, index) in topBuyers" :key="item.user_id">
-            <RouterLink
-              v-if="auth.allows('users', 'view')"
-              :to="`/users/${item.user_id}`"
-              class="flex items-baseline justify-between gap-3 transition-colors hover:underline"
-            >
-              <p class="min-w-0 truncate text-[13px]">
-                <span class="mono quiet mr-1.5">{{ String(index + 1).padStart(2, '0') }}</span>
-                {{ item.name || `#${item.user_id}` }}
-              </p>
-              <span class="nums shrink-0 text-[13px] font-semibold">{{ money(item.revenue) }}</span>
-            </RouterLink>
-            <div v-else class="flex items-baseline justify-between gap-3">
-              <p class="min-w-0 truncate text-[13px]">
-                <span class="mono quiet mr-1.5">{{ String(index + 1).padStart(2, '0') }}</span>
-                {{ item.name || `#${item.user_id}` }}
-              </p>
-              <span class="nums shrink-0 text-[13px] font-semibold">{{ money(item.revenue) }}</span>
-            </div>
-            <div class="mt-1.5 flex items-center gap-2">
-              <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
-                <div
-                  class="h-full rounded-full border border-[var(--accent-line)] bg-[var(--accent-soft)]"
-                  :style="{ width: `${Math.max((item.revenue / buyerPeak) * 100, 2)}%` }"
-                />
-              </div>
-              <span class="hint nums shrink-0">{{ item.orders }} 单</span>
-            </div>
-          </li>
-        </ol>
-      </div>
-
-      <div class="card">
-        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 class="text-base font-semibold">库存预警</h2>
-          <div v-if="auth.allows('cards', 'view')" class="flex items-center gap-3">
-            <button
-              class="btn btn-quiet btn-sm"
-              :disabled="alerting || loading"
-              :title="`阈值 ${alertThreshold} 张以内、有成交或在途订单的商品会收到一条通知，每件商品每天一次`"
-              @click="warnRestock"
-            >
-              {{ alerting ? '巡检中…' : '提醒补货' }}
-            </button>
-            <RouterLink to="/cards" class="text-sm accent-text">卡密库存</RouterLink>
-          </div>
-          <span v-else class="hint nums">阈值 {{ alertThreshold }}</span>
-        </div>
-        <div v-if="loading" class="space-y-3">
-          <div v-for="i in 4" :key="i" class="skeleton h-10" />
-        </div>
-        <p v-else-if="!stockAlerts.length" class="py-12 text-center text-sm quiet">卡密充足，无需补货</p>
-        <ul v-else class="space-y-2.5">
-          <li v-for="item in stockAlerts" :key="item.product_id">
-            <RouterLink
-              v-if="auth.allows('cards', 'view')"
-              :to="`/cards/${item.product_id}`"
-              class="flex items-center justify-between gap-3 rounded-md border border-[var(--stroke-quiet)] px-3 py-2.5 transition-colors hover:border-[var(--stroke-hi)]"
-            >
-              <span class="min-w-0">
-                <span class="block truncate text-[13px]">{{ item.name || `#${item.product_id}` }}</span>
-                <span class="hint nums block">
-                  已售 {{ item.sold }} 张 · 阈值 {{ alertThreshold }}
-                  <span v-if="item.waiting" class="text-[var(--warning)]"> · {{ item.waiting }} 笔已付款在等</span>
-                </span>
-              </span>
-              <span class="badge shrink-0" :class="item.available ? 'badge-warning' : 'badge-danger'">
-                余 {{ item.available }}
-              </span>
-            </RouterLink>
-            <div
-              v-else
-              class="flex items-center justify-between gap-3 rounded-md border border-[var(--stroke-quiet)] px-3 py-2.5"
-            >
-              <span class="min-w-0">
-                <span class="block truncate text-[13px]">{{ item.name || `#${item.product_id}` }}</span>
-                <span class="hint nums block">
-                  已售 {{ item.sold }} 张
-                  <span v-if="item.waiting" class="text-[var(--warning)]"> · {{ item.waiting }} 笔已付款在等</span>
-                </span>
-              </span>
-              <span class="badge shrink-0" :class="item.available ? 'badge-warning' : 'badge-danger'">
-                余 {{ item.available }}
-              </span>
-            </div>
-          </li>
-        </ul>
-        <p
-          v-if="alertNotice"
-          class="hint mt-3"
-          :class="alertFailed ? 'text-[var(--danger)]' : 'accent-text'"
-          role="status"
-        >
-          {{ alertNotice }}
-        </p>
-      </div>
-
-      <div v-if="canSeeLogs" class="card">
-        <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="text-base font-semibold">近期操作</h2>
-          <RouterLink to="/logs" class="text-sm accent-text">审计日志</RouterLink>
-        </div>
-        <div v-if="loading" class="space-y-3">
-          <div v-for="i in 5" :key="i" class="skeleton h-10" />
-        </div>
-        <div v-else-if="!logs.length" class="py-12 text-center text-sm quiet">暂无日志</div>
-        <div v-else class="space-y-3.5">
-          <div v-for="log in logs" :key="log.id" class="border-l-2 border-[var(--accent-line)] pl-3">
-            <p class="mono text-xs">{{ log.action }}</p>
-            <p class="quiet mt-1 truncate text-xs">{{ log.target || '—' }} · {{ when(log.created_at) }}</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="stats" class="stagger grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-      <div class="card">
-        <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="text-base font-semibold">分类销售</h2>
-          <RouterLink v-if="auth.allows('categories', 'view')" to="/categories" class="text-sm accent-text">分类管理</RouterLink>
-        </div>
-        <div v-if="loading" class="space-y-3">
-          <div v-for="i in 4" :key="i" class="skeleton h-10" />
-        </div>
-        <div v-else-if="!categorySales.length" class="py-12 text-center text-sm quiet">期间内还没有分类成交</div>
-        <ul v-else class="space-y-3.5">
-          <li v-for="(item, index) in categorySales" :key="item.name">
-            <div class="flex items-baseline justify-between gap-3">
-              <p class="min-w-0 truncate text-[13px]">
-                <span class="mono quiet mr-1.5">{{ String(index + 1).padStart(2, '0') }}</span>
-                {{ item.name || '未分类' }}
-              </p>
-              <span class="nums shrink-0 text-[13px] font-semibold">{{ money(item.revenue) }}</span>
-            </div>
-            <div class="mt-1.5 flex items-center gap-2">
-              <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
-                <div
-                  class="h-full rounded-full border border-[var(--accent-line)] bg-[var(--accent-soft)]"
-                  :style="{ width: `${Math.max((item.revenue / categoryPeak) * 100, 2)}%` }"
-                />
-              </div>
-              <span class="hint nums shrink-0">{{ item.orders }} 单 · {{ item.products }} 品</span>
-            </div>
-          </li>
-        </ul>
-      </div>
-
-      <div class="card">
-        <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="text-base font-semibold">优惠码成效</h2>
-          <RouterLink v-if="auth.allows('coupons', 'view')" to="/coupons" class="text-sm accent-text">优惠码</RouterLink>
-        </div>
-        <div v-if="loading" class="space-y-3">
-          <div v-for="i in 3" :key="i" class="skeleton h-10" />
-        </div>
-        <template v-else>
-          <div class="mb-4 grid gap-2 text-center sm:grid-cols-3">
-            <div class="panel">
-              <p class="hint">用码次数</p>
-              <p class="nums mt-1 text-base font-bold">{{ stats?.coupon_uses_period ?? 0 }}</p>
-            </div>
-            <div class="panel">
-              <p class="hint">让利</p>
-              <p class="nums mt-1 text-base font-bold">{{ money(stats?.coupon_discount_period ?? 0) }}</p>
-            </div>
-            <div class="panel">
-              <p class="hint">生效中</p>
-              <p class="nums mt-1 text-base font-bold">{{ stats?.coupons_active ?? 0 }}/{{ stats?.coupons_total ?? 0 }}</p>
-            </div>
-          </div>
-          <div v-if="!topCoupons.length" class="py-8 text-center text-sm quiet">期间内还没有人用码</div>
-          <ul v-else class="space-y-3">
-            <li v-for="item in topCoupons" :key="item.coupon_id">
-              <div class="flex items-baseline justify-between gap-3">
-                <code class="mono min-w-0 truncate text-[13px]">{{ item.code }}</code>
-                <span class="nums shrink-0 text-[13px] font-semibold">{{ money(item.discount) }}</span>
-              </div>
-              <div class="mt-1.5 flex items-center gap-2">
-                <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
-                  <div
-                    class="h-full rounded-full bg-[var(--teal)]"
-                    :style="{ width: `${Math.max((item.revenue / couponPeak) * 100, 2)}%` }"
-                  />
-                </div>
-                <span class="hint nums shrink-0">{{ item.uses }} 次 · 带单 {{ money(item.revenue) }}</span>
-              </div>
-            </li>
-          </ul>
-        </template>
-      </div>
-
-      <div class="card">
-        <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="text-base font-semibold">卡密健康</h2>
-          <RouterLink v-if="auth.allows('cards', 'view')" to="/cards" class="text-sm accent-text">库存</RouterLink>
-        </div>
-        <div v-if="loading" class="space-y-3">
-          <div v-for="i in 3" :key="i" class="skeleton h-10" />
-        </div>
-        <template v-else>
-          <div class="mb-3 flex items-end gap-4">
-            <div>
-              <p class="hint">售出率</p>
-              <p class="nums text-2xl font-bold">{{ sellThrough }}%</p>
-            </div>
-            <div class="min-w-0 flex-1">
-              <div class="flex h-2.5 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
-                <div class="h-full bg-[var(--accent)]" :style="{ width: `${sellThrough}%` }" />
-                <div
-                  class="h-full bg-[var(--warning)]"
-                  :style="{ width: `${cardHealth?.total ? (cardHealth.disabled / cardHealth.total) * 100 : 0}%` }"
-                />
-              </div>
-              <p class="hint nums mt-1.5">
-                共 {{ cardHealth?.total ?? 0 }} 张 · 已售 {{ cardHealth?.sold ?? 0 }} · 可用
-                {{ cardHealth?.available ?? 0 }} · 停用 {{ cardHealth?.disabled ?? 0 }}
-              </p>
-            </div>
-          </div>
-          <div v-if="!cardByProduct.length" class="py-6 text-center text-sm quiet">还没有卡密库存</div>
-          <ul v-else class="space-y-2">
-            <li v-for="item in cardByProduct.slice(0, 4)" :key="item.product_id" class="flex items-center justify-between gap-3">
-              <span class="min-w-0 truncate text-[13px]">{{ item.name || `#${item.product_id}` }}</span>
-              <span class="hint nums shrink-0">
-                可用 {{ item.available }} · 售出率 {{ Math.round((item.sell_through || 0) * 100) }}%
-              </span>
-            </li>
-          </ul>
-        </template>
-      </div>
-
-      <div class="card">
-        <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="text-base font-semibold">买家活跃</h2>
-          <RouterLink v-if="auth.allows('users', 'view')" to="/users" class="text-sm accent-text">用户</RouterLink>
-        </div>
-        <div v-if="loading" class="space-y-3">
-          <div v-for="i in 3" :key="i" class="skeleton h-10" />
-        </div>
-        <div v-else class="grid grid-cols-2 gap-3">
-          <div class="panel">
-            <p class="hint">期间签到</p>
-            <p class="nums mt-1 text-lg font-bold">{{ engagement?.checkins_period ?? 0 }}</p>
-            <p class="hint nums">{{ engagement?.checkin_users_period ?? 0 }} 人参与</p>
-          </div>
-          <div class="panel">
-            <p class="hint">发放积分</p>
-            <p class="nums mt-1 text-lg font-bold">{{ engagement?.points_issued_period ?? 0 }}</p>
-            <p class="hint nums">持有 {{ engagement?.points_held ?? 0 }}</p>
-          </div>
-          <div class="panel">
-            <p class="hint">绑定 NodeLoc</p>
-            <p class="nums mt-1 text-lg font-bold">{{ engagement?.bound_users ?? 0 }}</p>
-          </div>
-          <div class="panel">
-            <p class="hint">近 7 天活跃</p>
-            <p class="nums mt-1 text-lg font-bold">{{ engagement?.active_week ?? 0 }}</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="stats" class="card !p-0 overflow-hidden">
-      <div class="flex items-center justify-between gap-3 px-5 py-4">
+    <!-- 经营数据：趋势 -->
+    <div v-if="stats" class="card space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 class="text-base font-semibold">最新订单</h2>
-          <p class="hint mt-0.5">共 {{ stats?.orders_total ?? 0 }} 笔订单 · 可用卡密 {{ stats?.cards_available ?? 0 }} 张</p>
+          <p class="eyebrow">经营趋势</p>
+          <p class="quiet mt-1 text-xs">按天统计，空白日期为 0</p>
         </div>
-        <RouterLink v-if="auth.allows('orders', 'view')" to="/orders" class="text-sm accent-text">查看全部</RouterLink>
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            v-for="(meta, key) in METRICS"
+            :key="key"
+            class="chip"
+            :class="metric === key ? 'chip-active' : ''"
+            @click="metric = key as Metric"
+          >
+            {{ meta.label }}
+          </button>
+        </div>
       </div>
-      <div v-if="loading" class="space-y-2 px-5 pb-5">
-        <div v-for="i in 4" :key="i" class="skeleton h-11" />
+
+      <div class="grid gap-4 sm:grid-cols-3">
+        <div class="card-quiet">
+          <p class="quiet text-xs">期间合计</p>
+          <p class="nums mt-1 text-lg font-bold">
+            {{ metricMeta.unit === '' ? money(periodTotal) : periodTotal + ' ' + metricMeta.unit }}
+          </p>
+        </div>
+        <div class="card-quiet">
+          <p class="quiet text-xs">日均（有数据的天）</p>
+          <p class="nums mt-1 text-lg font-bold">
+            {{ metricMeta.unit === '' ? money(dailyAverage) : dailyAverage + ' ' + metricMeta.unit }}
+          </p>
+        </div>
+        <div class="card-quiet">
+          <p class="quiet text-xs">最好的一天</p>
+          <p class="nums mt-1 text-lg font-bold">
+            {{ bestDay ? dayLabel(bestDay.date) + ' · ' + metricMeta.format(bestDay.value) : '—' }}
+          </p>
+        </div>
       </div>
-      <p v-else-if="!recentOrders.length" class="px-5 pb-8 text-center text-sm quiet">暂无订单</p>
-      <div v-else class="table overflow-x-auto border-t border-[var(--stroke-quiet)]">
-        <table>
+
+      <div class="chart" role="img" :aria-label="metricMeta.label + ' 趋势图'">
+        <div v-for="bar in bars" :key="bar.date" class="chart-col" :title="dayLabel(bar.date) + '：' + metricMeta.format(bar.value)">
+          <span class="chart-bar" :style="{ height: bar.pct + '%' }" />
+        </div>
+      </div>
+      <p class="quiet nums flex justify-between text-[11px]">
+        <span>{{ series.length ? dayLabel(series[0].date) : '' }}</span>
+        <span>{{ series.length ? dayLabel(series[series.length - 1].date) : '' }}</span>
+      </p>
+    </div>
+
+    <!-- 热销商品与库存预警 -->
+    <div v-if="stats" class="grid gap-4 lg:grid-cols-2">
+      <div class="card space-y-3">
+        <p class="eyebrow">热销商品</p>
+        <div v-if="!topProducts.length" class="quiet py-6 text-center text-sm">期间还没有成交</div>
+        <ul v-else class="space-y-2.5">
+          <li v-for="item in topProducts.slice(0, 6)" :key="item.product_id">
+            <div class="flex items-center justify-between gap-3 text-sm">
+              <RouterLink :to="'/products/' + item.product_id + '/edit'" class="min-w-0 truncate hover:accent-text">
+                {{ item.name }}
+              </RouterLink>
+              <span class="nums shrink-0">{{ money(item.revenue) }}</span>
+            </div>
+            <div class="bar-track mt-1.5">
+              <span class="bar-fill" :style="{ width: Math.max((item.revenue / productPeak) * 100, 3) + '%' }" />
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="card space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <p class="eyebrow">库存预警</p>
+          <button class="btn btn-quiet btn-sm" :disabled="alerting" @click="warnRestock">
+            {{ alerting ? '发送中…' : '提醒补货' }}
+          </button>
+        </div>
+        <p v-if="alertNotice" class="text-xs" :class="alertFailed ? 'text-[var(--danger)]' : 'quiet'">{{ alertNotice }}</p>
+        <div v-if="!stockAlerts.length" class="quiet py-6 text-center text-sm">卡密充足，无需补货</div>
+        <ul v-else class="space-y-2">
+          <li v-for="item in stockAlerts" :key="item.product_id" class="card-quiet flex items-center gap-3">
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-sm font-semibold">{{ item.name }}</span>
+              <span class="quiet text-xs">
+                剩余 <span class="nums">{{ item.available }}</span>
+                <span v-if="item.waiting"> · 已付待发 <span class="nums text-[var(--warning)]">{{ item.waiting }}</span></span>
+              </span>
+            </span>
+            <RouterLink :to="'/cards/' + item.product_id" class="btn btn-secondary btn-sm">去补货</RouterLink>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 最近订单 -->
+    <div v-if="stats" class="card space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="eyebrow">最近订单</p>
+        <RouterLink to="/orders" class="hint">全部订单 →</RouterLink>
+      </div>
+      <div v-if="!recentOrders.length" class="quiet py-6 text-center text-sm">还没有订单</div>
+      <div v-else class="table-container">
+        <table class="table">
           <thead>
             <tr>
-              <th>订单号</th>
-              <th>用户</th>
+              <th>订单</th>
               <th>商品</th>
-              <th>金额</th>
+              <th>买家</th>
+              <th class="nums">金额</th>
               <th>状态</th>
-              <th>发货</th>
-              <th>创建时间</th>
+              <th class="text-right">时间</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="order in recentOrders" :key="order.order_no">
               <td>
-                <RouterLink
-                  v-if="auth.allows('orders', 'view')"
-                  :to="`/orders/${order.order_no}`"
-                  class="mono text-sm accent-text"
-                >
-                  {{ order.order_no }}
-                </RouterLink>
-                <span v-else class="mono text-sm quiet">{{ order.order_no }}</span>
+                <RouterLink :to="'/orders/' + order.order_no" class="mono hover:accent-text">{{ order.order_no }}</RouterLink>
               </td>
-              <td class="text-sm">{{ order.buyer || '—' }}</td>
-              <td class="max-w-[220px] truncate text-sm">{{ order.product || '—' }}</td>
-              <td class="nums text-sm">{{ money(order.amount) }}</td>
-              <td>
-                <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
-              </td>
-              <td>
-                <span
-                  class="badge"
-                  :class="fulfillmentStatus(order.fulfillment_status, order.status).badge"
-                >
-                  {{ fulfillmentStatus(order.fulfillment_status, order.status).label }}
-                </span>
-              </td>
-              <td class="text-sm quiet">{{ when(order.created_at) }}</td>
+              <td class="max-w-[220px] truncate">{{ order.product }}</td>
+              <td>{{ order.buyer }}</td>
+              <td class="nums">{{ money(order.amount) }}</td>
+              <td><StatusBadge :value="order.status" /></td>
+              <td class="quiet text-right text-xs">{{ when(order.created_at) }}</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
+
+    <!-- 全部待办抽屉 -->
+    <AppDrawer :open="showTodos" title="全部待办" width="sm" @close="showTodos = false">
+      <ul class="space-y-2">
+        <li v-for="item in todos" :key="item.to">
+          <RouterLink :to="item.to" class="card-quiet flex items-center gap-3" @click="showTodos = false">
+            <span class="min-w-0 flex-1 text-sm">{{ item.label }}</span>
+            <span class="nums font-bold">{{ item.count }}</span>
+            <AdminIcon name="chevronRight" :size="15" class="text-[var(--text-quiet)]" />
+          </RouterLink>
+        </li>
+      </ul>
+    </AppDrawer>
   </section>
 </template>
+
+<style scoped>
+/* 待办卡：hover 时整块抬起来，暗示可点击 */
+.todo-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  padding: 12px 14px;
+  transition: border-color var(--fast), transform var(--normal) var(--spring);
+}
+.todo-card:hover { border-color: var(--stroke-hi); transform: translateY(-1px); }
+
+/* 柱状趋势图：用百分比高度，容器高度固定 */
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 180px;
+  padding-top: 8px;
+}
+.chart-col {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  min-width: 2px;
+}
+.chart-bar {
+  width: 100%;
+  border-radius: var(--radius-xs) var(--radius-xs) 2px 2px;
+  background: linear-gradient(to top, var(--accent), var(--accent-hi));
+  opacity: 0.9;
+  transition: opacity var(--fast);
+}
+.chart-col:hover .chart-bar { opacity: 1; }
+
+.bar-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-hi);
+  overflow: hidden;
+}
+.bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+</style>

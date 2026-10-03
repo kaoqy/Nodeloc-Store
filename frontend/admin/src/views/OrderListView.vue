@@ -1,76 +1,103 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import PaginationFooter from '../components/PaginationFooter.vue'
+import { useRoute, useRouter } from 'vue-router'
+import AdminIcon from '../components/AdminIcon.vue'
+import AppDrawer from '../components/AppDrawer.vue'
+import DataTable, { type Column } from '../components/DataTable.vue'
+import FilterBar from '../components/FilterBar.vue'
+import PageHeader from '../components/PageHeader.vue'
+import StatusBadge from '../components/StatusBadge.vue'
 import { listOrders, reconcilePendingOrders, exportOrders, type ReconcileReport } from '../api/orders'
-import { errorMessage, fulfillmentStatus, money, orderStatus, providerStatus, when } from '../utils/format'
+import { money, when, errorMessage } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 import type { Order } from '../types'
 
-const PageSize = 20
+/**
+ * 订单管理：筛选条件全部放在地址栏，刷新与分享都能还原同一个列表。
+ * 批量查单会真的向 NodeLoc 询问每一笔待支付订单，结果在抽屉里逐条列出。
+ */
 
+const PAGE_SIZE = 20
+
+const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const canManage = computed(() => auth.allows('orders', 'manage'))
 
+const COLUMNS: Column[] = [
+  { label: '订单' },
+  { label: '商品', hideOnMobile: true },
+  { label: '买家', hideOnMobile: true },
+  { label: '金额', numeric: true },
+  { label: '状态' },
+  { label: '发货' },
+  { label: '', actions: true, width: '180px' },
+]
+
 const loading = ref(true)
+const error = ref('')
 const orders = ref<Order[]>([])
 const total = ref(0)
-const offset = ref(0)
+const page = ref(1)
+const status = ref('')
+const attention = ref('')
 const search = ref('')
-const statusFilter = ref('')
 const buyerId = ref(0)
 const buyerName = ref('')
-const error = ref('')
 
-const page = computed(() => Math.floor(offset.value / PageSize) + 1)
-const pages = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
-const from = computed(() => (orders.value.length ? offset.value + 1 : 0))
-const to = computed(() => offset.value + orders.value.length)
-// 一行都没有时不报「第 0–20 条」那种范围，只说总数。
-const summary = computed(() =>
-  orders.value.length ? `第 ${from.value}–${to.value} 条 · 共 ${total.value} 条` : `共 ${total.value} 条`,
+const reconciling = ref(false)
+const report = ref<ReconcileReport | null>(null)
+const showReport = ref(false)
+const exporting = ref(false)
+
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
+const filtered = computed(
+  () => Boolean(status.value || attention.value || search.value.trim() || buyerId.value),
 )
 
-const statuses = [
+const STATUS_OPTIONS = [
+  { value: '', label: '全部状态' },
   { value: 'pending', label: '待支付' },
   { value: 'paid', label: '已支付' },
   { value: 'completed', label: '已完成' },
   { value: 'cancelled', label: '已取消' },
   { value: 'refunded', label: '已退款' },
+  { value: 'failed', label: '支付失败' },
 ]
 
-const filtered = computed(
-  () => Boolean(search.value.trim() || statusFilter.value || buyerId.value || needAttention.value),
-)
+const FULFILLMENT_LABEL: Record<string, string> = {
+  pending: '待发货',
+  delivered: '已发货',
+  completed: '已完成',
+  manual_pending: '人工待发',
+  waiting_stock: '等待补货',
+  plugin_pending: '交付中',
+  failed: '发货异常',
+}
 
-function queryParams() {
-  return {
-    limit: PageSize,
-    offset: offset.value,
-    status: statusFilter.value || undefined,
-    q: search.value.trim() || undefined,
-    user_id: buyerId.value || undefined,
-    attention: needAttention.value ? 'undelivered' : undefined,
-  }
+/** 把当前筛选写回地址栏，让「已支付 + 某买家 + 第 3 页」成为可分享的链接。 */
+function syncUrl() {
+  const query: Record<string, string> = {}
+  if (status.value) query.status = status.value
+  if (attention.value) query.attention = attention.value
+  if (search.value.trim()) query.q = search.value.trim()
+  if (buyerId.value) query.user = String(buyerId.value)
+  if (page.value > 1) query.page = String(page.value)
+  void router.replace({ path: '/orders', query })
 }
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    let result = await listOrders(queryParams())
-    // 地址栏里的页码可能比实际页数还大（链接是手写的，或者刚筛完只剩一页）。
-    // 有货就退回最后一页再取一次，一笔都没有就回到第 1 页，别把店家丢在
-    // 一个看着像坏掉的空白页上（第 2 / 1 页 共 0 条）。
-    if (!result.data.length && offset.value > 0) {
-      if (!result.total) {
-        offset.value = 0
-      } else {
-        offset.value = (Math.max(1, Math.ceil(result.total / PageSize)) - 1) * PageSize
-        result = await listOrders(queryParams())
-      }
-      syncUrl()
-    }
+    const result = await listOrders({
+      page: page.value,
+      limit: PAGE_SIZE,
+      status: status.value || undefined,
+      q: search.value.trim() || undefined,
+      attention: attention.value || undefined,
+      user: buyerId.value || undefined,
+    } as never)
     orders.value = result.data
     total.value = result.total
   } catch (err) {
@@ -80,70 +107,48 @@ async function load() {
   }
 }
 
-function applyFilters() {
-  offset.value = 0
+function apply() {
+  page.value = 1
   syncUrl()
-  load()
+  void load()
 }
 
-const exporting = ref(false)
-/**
- * 导出的是屏幕上这一批单子：对账、报税、跟 NodeLoc 流水核对都要把整批带走，
- * 而不是照着列表手抄。所以这里传的是当前筛选条件，不含分页。
- */
-async function downloadOrders() {
-  if (exporting.value) return
-  exporting.value = true
-  error.value = ''
-  notice.value = ''
-  try {
-    const { rows, truncated } = await exportOrders({
-      status: statusFilter.value || undefined,
-      q: search.value.trim() || undefined,
-      user_id: buyerId.value || undefined,
-      attention: needAttention.value ? 'undelivered' : undefined,
-    })
-    notice.value = truncated
-      ? `已导出 ${rows} 笔订单，但筛选结果比这更多，文件只装了前面那些 —— 请缩小范围（例如按状态或日期）后再导一次。`
-      : `已导出${filtered.value ? '当前筛选的' : '全部'} ${rows} 笔订单。`
-  } catch (err) {
-    error.value = errorMessage(err, '导出订单失败')
-  } finally {
-    exporting.value = false
-  }
+function goPage(next: number) {
+  if (next < 1 || next > pageCount.value || next === page.value) return
+  page.value = next
+  syncUrl()
+  void load()
 }
 
-const reconciling = ref(false)
-const reconcileReport = ref<ReconcileReport | null>(null)
-const notice = ref('')
-// 「需处理交付」：钱已到账、东西还没出去的单子。自动重试每几分钟跑一次，这里
-// 是给店家看剩下那些确实需要人推一把的（人工发货、补货）。
-const needAttention = ref(false)
-const reconcileIssues = computed(() =>
-  (reconcileReport.value?.items ?? []).filter((item) => !item.settled),
-)
-// 只要有一笔是用「下单」核实的，就说明 NodeLoc 的查单这条路当前走不通。店家需要
-// 知道这一点，否则设置的开关看着正常，钱却从另一条路进来。
-const reconcileViaCheckout = computed(() =>
-  (reconcileReport.value?.items ?? []).some((item) => item.provider_via === 'reprocess'),
-)
+function clearFilters() {
+  status.value = ''
+  attention.value = ''
+  search.value = ''
+  buyerId.value = 0
+  buyerName.value = ''
+  apply()
+}
 
-/**
- * 批量查单对账：买家关掉付款页、回调没回来时，这些单子会一直挂着「待支付」。
- * 一次问完 NodeLoc，已付的当场入账，剩下的逐条给出原因。
- */
-async function reconcilePending() {
+function toggleAttention() {
+  attention.value = attention.value === 'undelivered' ? '' : 'undelivered'
+  apply()
+}
+
+function pickBuyer(id: number, name: string) {
+  buyerId.value = id
+  buyerName.value = name
+  apply()
+}
+
+/** 批量查单：让服务端把这批待支付订单拿去问 NodeLoc，结果逐条展示。 */
+async function reconcile() {
   if (reconciling.value) return
   reconciling.value = true
   error.value = ''
-  notice.value = ''
   try {
-    const report = await reconcilePendingOrders()
-    reconcileReport.value = report
-    notice.value = report.checked
-      ? `已向 NodeLoc 核实 ${report.checked} 笔待支付订单，${report.settled} 笔确认到账并补发。`
-      : '没有需要核实的订单：待支付订单里还没有拿到 NodeLoc 交易号的。'
-    if (report.settled) await load()
+    report.value = await reconcilePendingOrders()
+    showReport.value = true
+    await load()
   } catch (err) {
     error.value = errorMessage(err, '批量查单失败')
   } finally {
@@ -151,257 +156,162 @@ async function reconcilePending() {
   }
 }
 
-/** Focus the list on one buyer; the order rows link here by user id. */
-function pickBuyer(id: number, name: string) {
-  if (!id) return
-  buyerId.value = id
-  buyerName.value = name
-  search.value = ''
-  applyFilters()
-}
-
-function clearBuyer() {
-  buyerId.value = 0
-  buyerName.value = ''
-  applyFilters()
-}
-
-const route = useRoute()
-
-/**
- * Every filter and the current page live in the address bar, so a list pointed
- * at 「已支付、这一位买家、第 3 页」 can be pasted into a support thread. The URL
- * is rewritten rather than routed to: the back-office shell keys its view by
- * fullPath, and a route change would throw away and rebuild this screen.
- */
-function syncUrl() {
-  const params = new URLSearchParams()
-  if (statusFilter.value) params.set('status', statusFilter.value)
-  if (search.value.trim()) params.set('q', search.value.trim())
-  if (buyerId.value) params.set('user', String(buyerId.value))
-  if (needAttention.value) params.set('attention', 'undelivered')
-  if (page.value > 1) params.set('page', String(page.value))
-  const query = params.toString()
-  window.history.replaceState(null, '', query ? `/admin/orders?${query}` : '/admin/orders')
-}
-
-function goTo(target: number) {
-  offset.value = Math.min(pages.value - 1, Math.max(0, target - 1)) * PageSize
-  syncUrl()
-  load()
-}
-
-/** 只看钱已到账、东西还没出去的单子。 */
-function toggleAttention() {
-  needAttention.value = !needAttention.value
-  if (needAttention.value) statusFilter.value = ''
-  applyFilters()
+async function download() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    await exportOrders({
+      status: status.value || undefined,
+      q: search.value.trim() || undefined,
+      attention: attention.value || undefined,
+      user: buyerId.value || undefined,
+    } as never)
+  } catch (err) {
+    error.value = errorMessage(err, '导出失败')
+  } finally {
+    exporting.value = false
+  }
 }
 
 onMounted(() => {
-  const { status, q, attention, user, page: asked } = route.query
-  if (typeof status === 'string' && statuses.some((item) => item.value === status)) statusFilter.value = status
-  if (typeof q === 'string') search.value = q
-  if (attention === 'undelivered') {
-    needAttention.value = true
-    // 「需处理交付」本身就是一组状态，不再叠加状态筛选（下拉框这时也是锁住的）。
-    statusFilter.value = ''
-  }
-  if (typeof user === 'string' && /^\d+$/.test(user)) {
-    buyerId.value = Number(user)
-    buyerName.value = `#${user}`
-  }
-  if (typeof asked === 'string' && /^\d+$/.test(asked)) offset.value = (Math.max(1, Number(asked)) - 1) * PageSize
-  load()
+  const query = route.query
+  if (typeof query.status === 'string') status.value = query.status
+  if (typeof query.attention === 'string') attention.value = query.attention
+  if (typeof query.q === 'string') search.value = query.q
+  if (typeof query.user === 'string') buyerId.value = Number(query.user) || 0
+  if (typeof query.page === 'string') page.value = Math.max(1, Number(query.page) || 1)
+  void load()
 })
 </script>
 
 <template>
   <section class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="flex flex-wrap items-center gap-2">
-        <input
-          v-model="search"
-          class="input w-64"
-          type="search"
-          placeholder="订单号 / 用户 / 商品 / 交易号"
-          aria-label="搜索订单"
-          @keyup.enter="applyFilters"
-        />
-        <select v-model="statusFilter" class="input w-32" aria-label="按订单状态筛选" :disabled="needAttention" @change="applyFilters">
-          <option value="">全部状态</option>
-          <option v-for="item in statuses" :key="item.value" :value="item.value">{{ item.label }}</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" @click="applyFilters">筛选</button>
-        <button
-          class="chip"
-          :class="{ 'chip-active': needAttention }"
-          :aria-pressed="needAttention"
-          title="已收款但还没发货/待人工/待补货的订单"
-          @click="toggleAttention"
-        >
-          需处理交付
+    <PageHeader
+      title="订单管理"
+      description="查看支付与发货状态、重试自动发货、人工补发或退款。批量查单会向 NodeLoc 核对待支付订单。"
+      bordered
+    >
+      <template #actions>
+        <button class="btn btn-quiet btn-sm" :disabled="reconciling" @click="reconcile">
+          <span v-if="reconciling" class="spinner !size-3.5" />
+          {{ reconciling ? '核对中…' : '批量查单' }}
         </button>
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <!-- Reconciling writes: it settles payment and hands out cards, so it is
-             orders:manage, not the read grant this screen opens with. -->
-        <button
-          v-if="canManage"
-          class="btn btn-secondary btn-sm"
-          :disabled="reconciling"
-          @click="reconcilePending"
-        >
-          <span v-if="reconciling" class="spinner" />
-          {{ reconciling ? '正在向 NodeLoc 核实…' : '批量查单对账' }}
+        <button class="btn btn-quiet btn-sm" :disabled="exporting" @click="download">
+          <AdminIcon name="download" :size="14" />
+          {{ exporting ? '导出中…' : '导出 CSV' }}
         </button>
-        <!-- 导出只是读，所以跟着这一页本身走：能打开订单页就导得动。 -->
-        <button
-          class="btn btn-quiet btn-sm"
-          :disabled="exporting || loading"
-          :title="filtered ? '按当前筛选导出' : '导出全部订单'"
-          @click="downloadOrders"
-        >
-          <span v-if="exporting" class="spinner" />
-          {{ exporting ? '正在生成…' : filtered ? '导出当前筛选' : '导出订单 CSV' }}
-        </button>
-        <RouterLink to="/orders?status=pending" class="quiet text-xs">只看待支付 →</RouterLink>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
-    <p v-if="needAttention" class="alert alert-info" role="status">
-      正在只看「已收款但未交付」的订单（含人工发货与等待补货），状态筛选暂不生效。商店每几分钟会自动重试交付，这里列出仍需要人推一把的。
-      <button class="btn btn-quiet btn-sm ml-2" @click="toggleAttention">查看全部订单</button>
-    </p>
+    <FilterBar :count="total ? '共 ' + total + ' 笔订单' : ''">
+      <input
+        v-model="search"
+        class="input w-52"
+        type="search"
+        placeholder="订单号 / 交易号 / 商品"
+        aria-label="搜索订单"
+        @keyup.enter="apply"
+      />
+      <select v-model="status" class="input !w-auto" aria-label="订单状态" @change="apply">
+        <option v-for="option in STATUS_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+      </select>
+      <button class="chip" :class="attention === 'undelivered' ? 'chip-active' : ''" @click="toggleAttention">
+        仅看未发货
+      </button>
+      <button v-if="buyerId" class="chip chip-active" @click="pickBuyer(0, '')">
+        买家：{{ buyerName || buyerId }} ✕
+      </button>
+      <button class="btn btn-secondary btn-sm" @click="apply">查询</button>
+      <template #actions>
+        <button v-if="filtered" class="btn btn-quiet btn-sm" @click="clearFilters">清除筛选</button>
+      </template>
+    </FilterBar>
 
-    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
-    <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-
-    <div v-if="reconcileIssues.length" class="card space-y-2">
-      <p class="text-sm font-semibold">以下 {{ reconcileIssues.length }} 笔仍未到账</p>
-      <p class="hint">
-        商店每 3 分钟会自动向 NodeLoc 核实一次超过 10 分钟的待支付订单，无需守着点。
-        <RouterLink to="/orders?attention=undelivered" class="accent-text underline-offset-2 hover:underline">
-          查看已收款未交付 →
-        </RouterLink>
-      </p>
-      <p v-if="reconcileViaCheckout" class="hint">
-        本轮有几笔是用「下单」核实的：NodeLoc 的查单接口不接受服务器端调用，商店自己换了这条路，到账不受影响。
-      </p>
-      <ul class="space-y-1.5">
-        <li v-for="item in reconcileIssues" :key="item.order_no" class="flex flex-wrap items-center gap-2 text-sm">
-          <RouterLink :to="`/orders/${item.order_no}`" class="mono accent-text underline-offset-2 hover:underline">
-            {{ item.order_no }}
-          </RouterLink>
-          <span v-if="item.provider_status" class="badge badge-neutral">{{ providerStatus(item.provider_status) }}</span>
-          <span v-if="item.provider_via === 'reprocess'" class="badge badge-neutral">经由下单核实</span>
-          <span v-if="item.detail || item.message" class="quiet text-xs">{{ item.detail || item.message }}</span>
-        </li>
-      </ul>
-    </div>
-
-    <div v-if="buyerId" class="flex flex-wrap items-center gap-2">
-      <span class="chip chip-active">
-        只看用户
-        <RouterLink :to="`/users/${buyerId}`" class="underline-offset-2 hover:underline">
-          {{ buyerName || `#${buyerId}` }}
-        </RouterLink>
-      </span>
-      <button class="btn btn-quiet btn-sm" @click="clearBuyer">取消筛选</button>
-    </div>
-
-    <div class="table-container">
-      <table>
-        <thead>
-          <tr>
-            <th>订单号</th>
-            <th>用户</th>
-            <th>商品</th>
-            <th>金额</th>
-            <th>订单状态</th>
-            <th>交付</th>
-            <th>创建时间</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <template v-if="loading">
-            <tr v-for="i in 5" :key="`skeleton-${i}`">
-              <td colspan="8"><div class="skeleton h-6" /></td>
-            </tr>
-          </template>
-          <tr v-else-if="!orders.length">
-            <td colspan="8">
-              <div class="empty-state">
-                <p class="empty-glyph" aria-hidden="true">◌</p>
-                <p class="empty-title">{{ needAttention ? '没有待交付的订单' : filtered ? '没有符合条件的订单' : '还没有订单' }}</p>
-                <p class="empty-hint">
-                  {{ needAttention ? '已收款的订单都已交付，商店还会每几分钟自动重试失败的那几笔。' : filtered ? '换个关键词或选择全部状态。' : '买家在前台下单后会出现在这里。' }}
-                </p>
-              </div>
-            </td>
-          </tr>
-          <tr v-for="order in orders" :key="order.order_no">
-            <td>
-              <RouterLink :to="`/orders/${order.order_no}`" class="mono text-sm accent-text">
-                {{ order.order_no }}
-              </RouterLink>
-            </td>
-            <td class="text-sm">
-              <div class="flex items-center gap-2">
-                <RouterLink
-                  v-if="order.user_id"
-                  :to="`/users/${order.user_id}`"
-                  class="accent-text underline-offset-2 hover:underline"
-                >
-                  {{ order.user?.username || `#${order.user_id}` }}
-                </RouterLink>
-                <span v-else class="quiet">已删除用户</span>
-                <button
-                  v-if="order.user_id"
-                  class="quiet text-xs transition-colors hover:accent-text"
-                  :title="`只看 ${order.user?.username || '#' + order.user_id} 的订单`"
-                  @click="pickBuyer(order.user_id, order.user?.username || '')"
-                >
-                  筛选
-                </button>
-              </div>
-              <p v-if="order.user?.email" class="hint mono mt-0.5 truncate">{{ order.user.email }}</p>
-            </td>
-            <td class="max-w-[220px] truncate text-sm">{{ order.product?.name || `#${order.product_id}` }}</td>
-            <td class="nums text-sm">
-              {{ money(order.total_amount) }} <span class="quiet">×{{ order.quantity }}</span>
-              <!-- The code and its cut belong on the list: when a buyer says
-                   「优惠码没减」, the owner should see at a glance whether this
-                   order carried one at all. -->
-              <p v-if="order.discount_amount" class="mt-0.5 text-xs text-[var(--success)]">
-                <span class="mono">{{ order.coupon_code || '优惠码' }}</span>
-                -{{ money(order.discount_amount) }}
-              </p>
-            </td>
-            <td>
-              <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
-            </td>
-            <td>
-              <span class="badge" :class="fulfillmentStatus(order.fulfillment_status, order.status).badge">
-                {{ fulfillmentStatus(order.fulfillment_status, order.status).label }}
-              </span>
-            </td>
-            <td class="text-sm quiet">{{ when(order.created_at) }}</td>
-            <td class="text-right">
-              <RouterLink :to="`/orders/${order.order_no}`" class="btn btn-ghost btn-sm">详情</RouterLink>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <PaginationFooter
-      :page="page"
-      :pages="pages"
+    <DataTable
+      :columns="COLUMNS"
       :loading="loading"
-      :summary="summary"
-      @change="goTo"
-    />
+      :error="error"
+      :filtered="filtered"
+      :page="page"
+      :pages="pageCount"
+      :total="total"
+      :summary="'共 ' + total + ' 笔订单'"
+      empty-title="还没有订单"
+      empty-hint="买家下单后会出现在这里。"
+      @retry="load"
+      @clear-filters="clearFilters"
+      @change="goPage"
+    >
+      <tr v-for="order in orders" :key="order.id">
+        <td>
+          <RouterLink :to="'/orders/' + order.order_no" class="mono text-[12.5px] hover:accent-text">
+            {{ order.order_no }}
+          </RouterLink>
+          <p v-if="order.transaction_id" class="quiet mono mt-0.5 text-[11px]">交易 {{ order.transaction_id }}</p>
+        </td>
+        <td class="hide-on-mobile max-w-[220px] truncate">
+          {{ order.product?.name || '—' }}
+          <span v-if="(order.quantity ?? 1) > 1" class="nums quiet">×{{ order.quantity }}</span>
+        </td>
+        <td class="hide-on-mobile">
+          <RouterLink v-if="order.user_id" :to="'/users/' + order.user_id" class="hover:accent-text">
+            {{ order.user?.username || '#' + order.user_id }}
+          </RouterLink>
+        </td>
+        <td class="nums">{{ money(order.total_amount) }}</td>
+        <td><StatusBadge :value="order.status" /></td>
+        <td>
+          <StatusBadge
+            :value="order.fulfillment_status || 'pending'"
+            :label="FULFILLMENT_LABEL[order.fulfillment_status || 'pending'] || order.fulfillment_status || '待发货'"
+          />
+        </td>
+        <td class="text-right">
+          <div class="flex flex-wrap justify-end gap-1.5">
+            <RouterLink :to="'/orders/' + order.order_no" class="btn btn-quiet btn-sm">详情</RouterLink>
+            <button
+              v-if="canManage && order.status === 'pending'"
+              class="btn btn-quiet btn-sm"
+              @click="reconcile"
+            >
+              查单
+            </button>
+          </div>
+        </td>
+      </tr>
+    </DataTable>
+
+    <!-- 批量查单结果 -->
+    <AppDrawer :open="showReport" title="批量查单结果" @close="showReport = false">
+      <div v-if="report" class="space-y-3">
+        <div class="grid gap-3 sm:grid-cols-3">
+          <div class="card-quiet">
+            <p class="quiet text-xs">已核对</p>
+            <p class="nums mt-1 text-lg font-bold">{{ report.checked }}</p>
+          </div>
+          <div class="card-quiet">
+            <p class="quiet text-xs">本次入账</p>
+            <p class="nums mt-1 text-lg font-bold accent-text">{{ report.settled }}</p>
+          </div>
+          <div class="card-quiet">
+            <p class="quiet text-xs">核对时间</p>
+            <p class="mt-1 text-[13px]">{{ when(report.checked_at) }}</p>
+          </div>
+        </div>
+
+        <p v-if="!report.items.length" class="quiet py-8 text-center text-sm">没有需要核对的待支付订单</p>
+        <ul v-else class="space-y-2">
+          <li v-for="item in report.items" :key="item.order_no" class="card-quiet space-y-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="mono text-[12.5px]">{{ item.order_no }}</span>
+              <StatusBadge :value="item.settled ? 'paid' : 'pending'" :label="item.settled ? '已入账' : '仍未支付'" />
+              <span v-if="item.provider_via" class="badge-neutral">{{ item.provider_via }}</span>
+            </div>
+            <p v-if="item.message" class="text-xs text-[var(--text-dim)]">{{ item.message }}</p>
+            <p v-if="item.provider_note" class="quiet text-[11px]">NodeLoc 原文：{{ item.provider_note }}</p>
+          </li>
+        </ul>
+      </div>
+    </AppDrawer>
   </section>
 </template>

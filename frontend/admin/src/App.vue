@@ -1,120 +1,102 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import SideBar from './components/SideBar.vue'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import AdminIcon from './components/AdminIcon.vue'
+import AppSidebar from './components/AppSidebar.vue'
 import RouteProgress from './components/RouteProgress.vue'
+import { breadcrumbsOf, titleOf } from './navigation'
 import { useAuthStore } from './stores/auth'
 import { useInboxStore } from './stores/inbox'
 import { useThemeStore } from './stores/theme'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const inbox = useInboxStore()
 const theme = useThemeStore()
-const open = ref(false)
 
-// A restock warning arrives from the background sweep rather than from a click,
-// so nothing in the shell would otherwise refresh the dot: it is read when a
-// session opens and when one ends. The inbox page and the dashboard each refresh
-// it after they change the unread count themselves.
-watch(
-  () => auth.isAuthenticated,
-  (signedIn) => {
-    if (signedIn) void inbox.refresh()
-    else inbox.reset(0)
-  },
-  { immediate: true },
-)
+const navOpen = ref(false)
+const collapsed = ref(localStorage.getItem('admin.sidebar.collapsed') === '1')
+const userMenu = ref(false)
 
-const titles: Record<string, string> = {
-  '/': '仪表盘',
-  '/products': '商品管理',
-  '/orders': '订单管理',
-  '/cards': '卡密管理',
-  '/categories': '分类管理',
-  '/coupons': '优惠券',
-  '/activities': '活动营销',
-  '/service': '客服中心',
-  '/knowledge': '知识库',
-  '/config': '配置中心',
-  '/users': '用户管理',
-  '/notifications': '通知中心',
-  '/plugins': '插件管理',
-  '/roles': '角色权限',
-  '/logs': '审计日志',
-  '/settings': '系统设置',
-  '/forbidden': '权限不足',
+function toggleCollapse() {
+  collapsed.value = !collapsed.value
+  localStorage.setItem('admin.sidebar.collapsed', collapsed.value ? '1' : '0')
 }
 
-// 子页面段：/products/new、/products/7/edit 会在面包屑里落下最后一段，
-// 原样写「new」「edit」就是把路由表贴给店家看。
-const subTitles: Record<string, string> = {
-  new: '新建',
-  edit: '编辑',
-  setup: '初始化',
-  login: '登录',
-}
-
-const label = (segment: string) => titles['/' + segment] || subTitles[segment] || segment
-
-// The catch-all has no section to name, and its raw path would otherwise sit in
-// the header as if it were a screen the shop has.
-const pageTitle = computed(() =>
-  route.name === 'not-found'
-    ? '页面不存在'
-    : label(route.path.split('/').filter(Boolean)[0] ?? '') || '仪表盘',
-)
-
-const breadcrumb = computed(() => {
-  if (route.name === 'not-found') return []
-  const segments = route.path.split('/').filter(Boolean)
-  return segments.map((segment, index) => ({
-    label: label(segment),
-    path: '/' + segments.slice(0, index + 1).join('/'),
-    last: index === segments.length - 1,
-  }))
+// 页面标题：详情页用页面自己登记的标题（route.meta.title 会被子页面覆盖），
+// 其余从导航表推导，保证侧栏、标题、面包屑永远说的是同一个名字。
+const pageTitle = computed(() => titleOf(route.path, dynamicTitle.value))
+const dynamicTitle = computed(() => {
+  const meta = route.meta.title
+  if (typeof meta === 'string' && meta && !['详情', '编辑'].includes(meta)) return meta
+  return undefined
 })
+const crumbs = computed(() => breadcrumbsOf(route))
+
+function logout() {
+  userMenu.value = false
+  auth.logout()
+  void router.push('/login')
+}
+
+function goSettings() {
+  userMenu.value = false
+  void router.push('/settings')
+}
 </script>
 
 <template>
   <RouteProgress />
 
+  <!-- 登录与初始化是独立整页，不套后台外壳 -->
   <div v-if="route.path === '/login' || route.path === '/setup'" class="min-h-screen">
     <RouterView />
   </div>
 
   <div v-else class="min-h-screen">
-    <SideBar :open="open" @close="open = false" />
+    <AppSidebar
+      :open="navOpen"
+      :collapsed="collapsed"
+      @close="navOpen = false"
+      @toggle-collapse="toggleCollapse"
+    />
 
-    <div class="lg:pl-64">
-      <header class="site-header">
-        <div class="admin-topbar flex h-[68px] items-center gap-3 px-5 sm:px-7">
-          <button class="icon-btn lg:hidden" aria-label="打开导航菜单" @click="open = true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" class="size-[18px]" aria-hidden="true">
-              <path d="M4 7h16M4 12h16M4 17h16" />
-            </svg>
+    <div :class="['transition-[padding] duration-300', collapsed ? 'lg:pl-[72px]' : 'lg:pl-[248px]']">
+      <header class="site-header sticky top-0 z-20">
+        <div class="admin-topbar flex h-[60px] items-center gap-2.5 px-4 sm:px-6">
+          <button class="icon-btn lg:hidden" type="button" aria-label="打开导航菜单" @click="navOpen = true">
+            <AdminIcon name="menu" :size="18" />
           </button>
 
           <div class="min-w-0">
-            <p class="eyebrow">管理后台</p>
-            <h1 class="truncate text-[17px] font-bold leading-tight">{{ pageTitle }}</h1>
+            <h1 class="truncate text-[16px] font-bold leading-tight">{{ pageTitle }}</h1>
+            <nav v-if="crumbs.length" class="crumb-row mt-0.5 hidden items-center gap-1.5 text-[11.5px] sm:flex" aria-label="路径">
+              <template v-for="(crumb, index) in crumbs" :key="crumb.path">
+                <AdminIcon v-if="index > 0" name="chevronRight" :size="11" class="text-[var(--text-quiet)]" />
+                <RouterLink
+                  v-if="!crumb.last"
+                  :to="crumb.path"
+                  class="text-[var(--text-quiet)] transition-colors hover:text-[var(--text-dim)]"
+                >
+                  {{ crumb.label }}
+                </RouterLink>
+                <span v-else class="text-[var(--text-quiet)]">{{ crumb.label }}</span>
+              </template>
+            </nav>
           </div>
 
-          <nav class="ml-4 hidden items-center gap-2 text-[13px] md:flex" aria-label="路径">
-            <template v-for="crumb in breadcrumb" :key="crumb.path">
-              <span v-if="!crumb.last" class="text-[var(--text-quiet)]">/</span>
-              <RouterLink
-                v-if="!crumb.last"
-                :to="crumb.path"
-                class="text-[var(--text-quiet)] transition-colors hover:text-[var(--text-dim)]"
-              >
-                {{ crumb.label }}
-              </RouterLink>
-              <span v-else class="nums mono text-[var(--text-quiet)]">{{ crumb.label }}</span>
-            </template>
-          </nav>
+          <div class="ml-auto flex items-center gap-1">
+            <RouterLink
+              v-if="auth.allows('notifications', 'view')"
+              to="/notifications"
+              class="icon-btn"
+              aria-label="通知中心"
+            >
+              <AdminIcon name="notifications" :size="18" />
+              <span v-if="inbox.unread" class="count nums">{{ inbox.unread > 99 ? '99+' : inbox.unread }}</span>
+            </RouterLink>
 
-          <div class="ml-auto flex items-center gap-1.5">
             <button
               class="icon-btn"
               type="button"
@@ -122,39 +104,60 @@ const breadcrumb = computed(() => {
               :aria-label="theme.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
               @click="theme.toggle"
             >
-              <svg v-if="theme.theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" class="size-[18px]" aria-hidden="true">
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-              </svg>
-              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" class="size-[18px]" aria-hidden="true">
-                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
-              </svg>
+              <AdminIcon :name="theme.theme === 'dark' ? 'sun' : 'moon'" :size="18" />
             </button>
 
-            <span class="topbar-sep hidden sm:block" />
-
-            <RouterLink v-if="auth.allows('notifications', 'view')" to="/notifications" class="icon-btn" aria-label="通知中心">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-[18px]" aria-hidden="true">
-                <path d="M18 8A6 6 0 1 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-              </svg>
-              <span v-if="inbox.unread" class="count nums">{{ inbox.unread > 99 ? '99+' : inbox.unread }}</span>
-            </RouterLink>
-
-            <a href="/" class="btn btn-quiet btn-sm ml-1 hidden sm:inline-flex" target="_blank" rel="noopener">
+            <a href="/" class="btn btn-quiet btn-sm hidden sm:inline-flex" target="_blank" rel="noopener">
               看店铺
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true">
-                <path d="M7 17 17 7M9 7h8v8" />
-              </svg>
+              <AdminIcon name="external" :size="13" />
             </a>
+
+            <!-- 管理员菜单 -->
+            <div class="relative">
+              <button
+                class="admin-chip"
+                type="button"
+                :aria-expanded="userMenu"
+                aria-haspopup="menu"
+                @click="userMenu = !userMenu"
+              >
+                <span class="grid size-6 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--accent-soft)] text-[11px] font-bold text-[var(--accent)]">
+                  <img v-if="auth.user?.avatar_url" :src="auth.user.avatar_url" alt="" class="size-full object-cover" />
+                  <span v-else>{{ (auth.user?.nickname || auth.user?.username || 'A').slice(0, 1).toUpperCase() }}</span>
+                </span>
+                <span class="hidden max-w-[7rem] truncate text-[12.5px] sm:block">
+                  {{ auth.user?.nickname || auth.user?.username || '管理员' }}
+                </span>
+                <AdminIcon name="chevronDown" :size="13" />
+              </button>
+
+              <div v-if="userMenu" class="menu-panel" role="menu">
+                <p class="menu-head">
+                  <span class="block truncate font-semibold">{{ auth.user?.username }}</span>
+                  <span class="quiet block truncate text-[11.5px]">{{ auth.user?.email || '未绑定邮箱' }}</span>
+                </p>
+                <button class="menu-item" type="button" role="menuitem" @click="goSettings">
+                  <AdminIcon name="settings" :size="15" />
+                  系统设置
+                </button>
+                <a class="menu-item" href="/" target="_blank" rel="noopener" role="menuitem" @click="userMenu = false">
+                  <AdminIcon name="external" :size="15" />
+                  返回前台
+                </a>
+                <button class="menu-item menu-item-danger" type="button" role="menuitem" @click="logout">
+                  <AdminIcon name="logout" :size="15" />
+                  退出登录
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </header>
 
-      <main class="px-5 pb-12 pt-7 sm:px-7">
-        <!-- Keyed by fullPath: without it, moving between two records of the same
-             view (order → order, user → user) reuses the component and shows the
-             previous record's data. -->
+      <!-- 点击空白处收起管理员菜单 -->
+      <div v-if="userMenu" class="fixed inset-0 z-10" @click="userMenu = false" />
+
+      <main class="px-4 pb-14 pt-6 sm:px-6">
         <RouterView v-slot="{ Component, route: view }">
           <Transition name="page" mode="out-in">
             <component :is="Component" :key="view.fullPath" />
@@ -166,10 +169,51 @@ const breadcrumb = computed(() => {
 </template>
 
 <style scoped>
-.page-enter-active {
-  transition: opacity 220ms var(--ease), transform 220ms var(--spring);
-}
-.page-leave-active { transition: opacity 110ms var(--ease); }
-.page-enter-from { opacity: 0; transform: translateY(8px); }
+.page-enter-active { transition: opacity 200ms var(--ease), transform 200ms var(--spring); }
+.page-leave-active { transition: opacity 100ms var(--ease); }
+.page-enter-from { opacity: 0; transform: translateY(6px); }
 .page-leave-to { opacity: 0; }
+
+.admin-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px 4px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  color: var(--text-dim);
+  transition: background var(--fast), border-color var(--fast);
+}
+.admin-chip:hover { background: var(--surface-hi); border-color: var(--stroke); color: var(--text); }
+
+.menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 30;
+  width: 15rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
+}
+.menu-head {
+  border-bottom: 1px solid var(--stroke-quiet);
+  padding: 8px 10px 10px;
+  font-size: 13px;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text-dim);
+  transition: background var(--fast), color var(--fast);
+}
+.menu-item:hover { background: var(--surface-hi); color: var(--text); }
+.menu-item-danger:hover { background: var(--danger-soft); color: var(--danger); }
 </style>

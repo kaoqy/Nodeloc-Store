@@ -1,117 +1,138 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import AdminIcon from '../components/AdminIcon.vue'
+import PageHeader from '../components/PageHeader.vue'
 import { listPermissions, listRoles, saveRolePermissions } from '../api/permissions'
-import type { PermissionGroup, RoleRow } from '../api/permissions'
 import { errorMessage } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 
+/**
+ * 权限与管理员：每个角色能看到哪些页面、能做哪些操作。
+ *
+ * 权限矩阵直接按后端返回的权限目录渲染，勾选即保存；super_admin 固定拥有
+ * 全部权限，不提供编辑（避免把唯一的管理员锁在门外）。
+ */
+
 const auth = useAuthStore()
-
-const loading = ref(true)
-const busy = ref('')
-const error = ref('')
-const notice = ref('')
-const groups = ref<PermissionGroup[]>([])
-const roles = ref<RoleRow[]>([])
-
-// drafts holds what the checkboxes say, not what the database holds, so a role
-// can be edited and abandoned without touching live policies.
-const drafts = ref<Record<string, string[]>>({})
-const open = ref<string>('')
-
 const canManage = computed(() => auth.allows('roles', 'manage'))
 
-function grantsOf(role: RoleRow | undefined): string[] {
-  return role ? role.permissions ?? [] : []
+const loading = ref(true)
+const busy = ref(false)
+const error = ref('')
+const notice = ref('')
+const groups = ref<{ resource: string; label: string; actions: string[] }[]>([])
+const roles = ref<{ role: string; label: string; permissions: string[]; headcount: number; editable: boolean }[]>([])
+const active = ref('')
+
+const ROLE_LABELS: Record<string, string> = {
+  super_admin: '超级管理员', admin: '管理员', operator: '运营', support: '客服',
+  ops_manager: '运营管理员', product_manager: '商品管理员', order_manager: '订单管理员',
+  finance: '财务', support_lead: '客服主管', support_agent: '普通客服',
+  ai_admin: 'AI 管理员', data_viewer: '数据查看员',
 }
 
-function hydrate() {
-  const next: Record<string, string[]> = {}
-  for (const role of roles.value) next[role.role] = [...grantsOf(role)]
-  drafts.value = next
+const draft = ref<Record<string, Set<string>>>({})
+
+const activeRole = computed(() => roles.value.find((r) => r.role === active.value) ?? null)
+const isSuper = computed(() => active.value === 'super_admin')
+const dirty = computed(() => {
+  const role = activeRole.value
+  if (!role) return false
+  const current = draft.value[role.role]
+  if (!current) return false
+  const saved = new Set(role.permissions)
+  if (saved.size !== current.size) return true
+  for (const item of current) if (!saved.has(item)) return true
+  return false
+})
+
+function key(resource: string, action: string) {
+  return resource + ':' + action
 }
 
-function holds(role: string, permission: string): boolean {
-  return drafts.value[role]?.includes(permission) ?? false
+function has(permission: string): boolean {
+  return draft.value[active.value]?.has(permission) ?? false
 }
 
-function countFor(role: string): number {
-  return drafts.value[role]?.length ?? 0
+function toggle(permission: string) {
+  if (!canManage.value || isSuper.value) return
+  const set = draft.value[active.value]
+  if (!set) return
+  if (set.has(permission)) set.delete(permission)
+  else set.add(permission)
+  // 触发响应式：Set 的增删不会自动通知 computed
+  draft.value = { ...draft.value, [active.value]: new Set(set) }
 }
 
-function changed(role: RoleRow): boolean {
-  const saved = new Set(grantsOf(role))
-  const draft = drafts.value[role.role] ?? []
-  return draft.length !== saved.size || draft.some((permission) => !saved.has(permission))
-}
-
-function toggle(role: string, permission: string) {
-  if (!canManage.value) return
-  const current = drafts.value[role] ?? []
-  drafts.value = {
-    ...drafts.value,
-    [role]: current.includes(permission)
-      ? current.filter((item) => item !== permission)
-      : [...current, permission],
+/** 整组勾选/取消：常见需求是「给运营加一组订单相关的权限」。 */
+function toggleGroup(resource: string) {
+  if (!canManage.value || isSuper.value) return
+  const set = draft.value[active.value]
+  if (!set) return
+  const group = groups.value.find((g) => g.resource === resource)
+  if (!group) return
+  const allOn = group.actions.every((a) => set.has(key(resource, a)))
+  for (const action of group.actions) {
+    if (allOn) set.delete(key(resource, action))
+    else set.add(key(resource, action))
   }
+  draft.value = { ...draft.value, [active.value]: new Set(set) }
 }
 
-function toggleGroup(role: string, group: PermissionGroup) {
-  if (!canManage.value) return
-  const all = group.actions.map((action) => `${group.resource}:${action}`)
-  const done = all.every((permission) => holds(role, permission))
-  const current = drafts.value[role] ?? []
-  drafts.value = {
-    ...drafts.value,
-    [role]: done
-      ? current.filter((permission) => !all.includes(permission))
-      : [...new Set([...current, ...all])],
-  }
-}
-
-function groupState(role: string, group: PermissionGroup): 'none' | 'some' | 'all' {
-  const all = group.actions.map((action) => `${group.resource}:${action}`)
-  const on = all.filter((permission) => holds(role, permission)).length
-  if (!on) return 'none'
-  return on === all.length ? 'all' : 'some'
+function groupState(resource: string): 'all' | 'none' | 'some' {
+  const group = groups.value.find((g) => g.resource === resource)
+  if (!group) return 'none'
+  const set = draft.value[active.value]
+  if (!set) return 'none'
+  const on = group.actions.filter((a) => set.has(key(resource, a))).length
+  if (on === 0) return 'none'
+  if (on === group.actions.length) return 'all'
+  return 'some'
 }
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [permissionGroups, roleRows] = await Promise.all([listPermissions(), listRoles()])
-    groups.value = permissionGroups
-    roles.value = roleRows
-    hydrate()
-    if (!open.value) open.value = roleRows.find((row) => row.editable)?.role ?? roleRows[0]?.role ?? ''
+    const [groupList, roleList] = await Promise.all([listPermissions(), listRoles()])
+    groups.value = groupList
+    roles.value = roleList.map((r) => ({
+      role: r.role,
+      label: ROLE_LABELS[r.role] ?? r.role,
+      permissions: r.permissions ?? [],
+      headcount: r.user_count ?? 0,
+      editable: r.editable !== false,
+    }))
+    draft.value = Object.fromEntries(roleList.map((r) => [r.role, new Set(r.permissions)]))
+    if (!active.value && roles.value.length) active.value = roles.value[0].role
   } catch (err) {
-    error.value = errorMessage(err, '加载角色权限失败')
+    error.value = errorMessage(err, '加载权限失败')
   } finally {
     loading.value = false
   }
 }
 
-async function save(role: RoleRow) {
-  if (!canManage.value || busy.value) return
-  busy.value = role.role
+async function save() {
+  if (!activeRole.value) return
+  busy.value = true
   error.value = ''
   notice.value = ''
   try {
-    const result = await saveRolePermissions(role.role, drafts.value[role.role] ?? [])
-    const index = roles.value.findIndex((item) => item.role === result.role)
-    if (index >= 0) roles.value[index] = { ...roles.value[index], permissions: result.permissions ?? [] }
-    hydrate()
-    notice.value = `已保存「${role.label}」的权限，${role.user_count ? role.user_count + ' 个成员' : '该角色成员'}下一次请求即生效。`
+    const permissions = [...(draft.value[active.value] ?? new Set<string>())]
+    await saveRolePermissions(active.value, permissions)
+    notice.value = '「' + activeRole.value.label + '」的权限已保存。'
+    await load()
   } catch (err) {
-    error.value = errorMessage(err, '保存角色权限失败')
+    error.value = errorMessage(err, '保存权限失败')
   } finally {
-    busy.value = ''
+    busy.value = false
   }
 }
 
-function reset(role: RoleRow) {
-  drafts.value = { ...drafts.value, [role.role]: [...grantsOf(role)] }
+function reset() {
+  const role = activeRole.value
+  if (!role) return
+  draft.value = { ...draft.value, [role.role]: new Set(role.permissions) }
 }
 
 onMounted(load)
@@ -119,107 +140,110 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <p class="quiet text-sm leading-relaxed">
-      细分权限决定每个角色在后台能看到哪些页面、能做哪些改动。改动会立刻对全部该角色成员生效；超级管理员固定拥有全部权限，
-      不可编辑，以免把自己锁在店铺之外。
-    </p>
-
-    <p v-if="!canManage" class="alert alert-warning" role="status">
-      当前角色可以查看权限矩阵，但没有「角色权限」的修改权，需要管理员调整。
-    </p>
-    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
-    <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-
-    <div v-if="loading" class="space-y-3">
-      <div v-for="i in 3" :key="i" class="skeleton h-24" />
-    </div>
-
-    <div v-else class="space-y-3">
-      <div v-for="role in roles" :key="role.role" class="card !p-0">
-        <button
-          class="flex w-full items-center gap-3 px-5 py-4 text-left"
-          :aria-expanded="open === role.role"
-          @click="open = open === role.role ? '' : role.role"
-        >
-          <span class="min-w-0">
-            <span class="block text-sm font-semibold">{{ role.label }}</span>
-            <span class="mono quiet block truncate text-xs">
-              {{ role.role }}{{ role.user_count ? ' · ' + role.user_count + ' 个账号' : ' · 暂无人使用' }}
-            </span>
-          </span>
-          <span class="ml-auto flex items-center gap-2">
-            <span v-if="!role.editable" class="badge badge-info">全部权限</span>
-            <span v-else-if="changed(role)" class="badge badge-warning">未保存</span>
-            <span v-else class="badge badge-neutral">{{ countFor(role.role) }} 项</span>
-            <span class="quiet text-xs">{{ open === role.role ? '收起' : '展开' }}</span>
-          </span>
+    <PageHeader title="权限与管理员" description="每个角色能看到与能操作的范围。改动立即对持有该角色的账号生效。" bordered>
+      <template #actions>
+        <button v-if="canManage && !isSuper" class="btn btn-quiet btn-sm" :disabled="!dirty || busy" @click="reset">
+          取消修改
         </button>
+        <button
+          v-if="canManage && !isSuper"
+          class="btn btn-primary btn-sm"
+          :disabled="!dirty || busy"
+          @click="save"
+        >
+          <span v-if="busy" class="spinner !size-3.5" />
+          {{ busy ? '保存中…' : '保存权限' }}
+        </button>
+      </template>
+    </PageHeader>
 
-        <div v-if="open === role.role" class="border-t border-[var(--stroke)] px-5 py-4">
-          <p v-if="!role.editable" class="quiet text-sm">
-            超级管理员的策略是通配符 <span class="mono">*:*</span>，不参与勾选，也无法被保存覆盖。
-          </p>
+    <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+    <p v-if="!canManage" class="alert" role="status">当前角色只能查看权限矩阵，修改需要「角色权限」管理权限。</p>
 
-          <div v-else class="grid gap-2 sm:grid-cols-2">
-            <p class="quiet col-span-full -mt-1 text-xs">
-              {{ role.user_count
-                ? '保存后，该角色下 ' + role.user_count + ' 个账号的下一次请求即按新权限执行。'
-                : '当前没有账号使用该角色，改动不会影响任何人。' }}
-            </p>
-            <div
-              v-for="group in groups"
-              :key="group.resource"
-              class="card-quiet flex items-center gap-3 !p-3"
+    <div class="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <nav class="card !p-2" aria-label="角色列表">
+        <ul class="space-y-0.5">
+          <li v-for="role in roles" :key="role.role">
+            <button
+              class="role-item w-full text-left"
+              :class="active === role.role ? 'role-item-active' : ''"
+              @click="active = role.role"
             >
-              <button
-                v-if="group.actions.length > 1"
-                class="btn btn-ghost btn-sm shrink-0"
-                :disabled="!canManage"
-                :title="groupState(role.role, group) === 'all' ? '取消整组' : '勾选整组'"
-                @click="toggleGroup(role.role, group)"
-              >
-                {{ groupState(role.role, group) === 'all' ? '−' : '+' }}
-              </button>
               <span class="min-w-0 flex-1">
-                <span class="block text-[13px] font-medium">{{ group.label }}</span>
-                <span class="mono quiet block truncate text-[11px]">{{ group.resource }}</span>
+                <span class="block truncate text-[13px]">{{ role.label }}</span>
+                <span class="quiet block truncate text-[11px]">
+                  {{ role.permissions.length }} 项权限
+                  <span v-if="role.headcount"> · {{ role.headcount }} 人</span>
+                </span>
               </span>
-              <label
-                v-for="action in group.actions"
-                :key="action"
-                class="flex shrink-0 items-center gap-1.5 text-xs"
-              >
-                <input
-                  type="checkbox"
-                  class="accent-[var(--accent)]"
-                  :checked="holds(role.role, `${group.resource}:${action}`)"
-                  :disabled="!canManage"
-                  @change="toggle(role.role, `${group.resource}:${action}`)"
-                />
-                <span class="quiet">{{ action === 'view' ? '查看' : '管理' }}</span>
-              </label>
+            </button>
+          </li>
+        </ul>
+      </nav>
+
+      <div class="min-w-0 space-y-3">
+        <div v-if="loading" class="card space-y-2">
+          <div v-for="i in 6" :key="i" class="skeleton h-9 w-full" />
+        </div>
+
+        <template v-else-if="activeRole">
+          <div class="card space-y-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="text-[15px] font-bold">{{ activeRole.label }}</h3>
+              <span v-if="isSuper" class="badge-accent">固定拥有全部权限</span>
+              <span v-if="dirty" class="badge-warning">有未保存的改动</span>
+            </div>
+            <p class="quiet text-xs">
+              勾选表示该角色可以执行这个操作。隐藏菜单不等于禁止调用，接口会用同一套权限再校验一次。
+            </p>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div v-for="group in groups" :key="group.resource" class="card space-y-2.5">
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-[13.5px] font-semibold">{{ group.label }}</p>
+                <button
+                  v-if="canManage && !isSuper"
+                  class="hint"
+                  type="button"
+                  @click="toggleGroup(group.resource)"
+                >
+                  {{ groupState(group.resource) === 'all' ? '取消全选' : '全选' }}
+                </button>
+                <span v-else-if="isSuper" class="hint">全部</span>
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="action in group.actions"
+                  :key="action"
+                  class="chip"
+                  :class="has(key(group.resource, action)) ? 'chip-active' : ''"
+                  :disabled="!canManage || isSuper"
+                  @click="toggle(key(group.resource, action))"
+                >
+                  <AdminIcon v-if="has(key(group.resource, action))" name="check" :size="12" />
+                  {{ action === 'view' ? '查看' : action === 'manage' ? '管理' : action === 'export' ? '导出' : action === 'assign' ? '分配' : action }}
+                </button>
+              </div>
             </div>
           </div>
-
-          <div v-if="role.editable" class="mt-4 flex items-center gap-2">
-            <button
-              class="btn btn-primary btn-sm"
-              :disabled="!canManage || busy === role.role || !changed(role)"
-              @click="save(role)"
-            >
-              {{ busy === role.role ? '保存中…' : '保存该角色' }}
-            </button>
-            <button
-              class="btn btn-quiet btn-sm"
-              :disabled="!changed(role) || busy === role.role"
-              @click="reset(role)"
-            >
-              撤销改动
-            </button>
-            <span class="quiet ml-auto text-xs">{{ countFor(role.role) }} 项已勾选</span>
-          </div>
-        </div>
+        </template>
       </div>
     </div>
   </section>
 </template>
+
+<style scoped>
+.role-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  transition: background var(--fast), color var(--fast);
+}
+.role-item:hover { background: var(--surface-hi); color: var(--text); }
+.role-item-active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+</style>

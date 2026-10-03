@@ -521,12 +521,21 @@ func (s *Service) AdminToggleActive(ctx context.Context, actorID, userID uint) (
 
 // AdminAdjustPoints moves a user's point balance, never below zero, and writes
 // the reason to the ledger so the balance always explains itself.
-func (s *Service) AdminAdjustPoints(ctx context.Context, actorID, userID uint, delta int) (*domain.User, error) {
+// AdminAdjustPoints 调整积分并把原因写进流水。reason 为空时用默认说明，
+// 这样后台的「原因」输入框填了就有记录，不填也不会出现空流水。
+func (s *Service) AdminAdjustPoints(ctx context.Context, actorID, userID uint, delta int, reason string) (*domain.User, error) {
 	user, err := s.repo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	return s.adjustPoints(ctx, user, delta, "管理员调整", &actorID)
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "管理员调整"
+	}
+	if len([]rune(reason)) > 100 {
+		reason = string([]rune(reason)[:100])
+	}
+	return s.adjustPoints(ctx, user, delta, reason, &actorID)
 }
 
 func (s *Service) adjustPoints(ctx context.Context, user *domain.User, delta int, reason string, actorID *uint) (*domain.User, error) {

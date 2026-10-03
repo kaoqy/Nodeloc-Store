@@ -1,104 +1,117 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import AdminIcon from '../components/AdminIcon.vue'
+import AppDrawer from '../components/AppDrawer.vue'
+import PageHeader from '../components/PageHeader.vue'
 import PaginationFooter from '../components/PaginationFooter.vue'
 import { broadcastNotification, listNotifications, markAllRead, markAsRead, sendNotification } from '../api/notifications'
 import { errorMessage, notificationKind, when } from '../utils/format'
-import { useAuthStore } from '../stores/auth'
 import { useInboxStore } from '../stores/inbox'
 import type { Notification } from '../types'
 
-const PageSize = 20
+/** 通知中心：管理员的收件箱 + 向用户发通知 / 广播。 */
 
-const auth = useAuthStore()
+const PAGE_SIZE = 20
+
+const router = useRouter()
 const inbox = useInboxStore()
-// Sending and broadcasting are one guarded route pair on the server; the form
-// stays visible so a 客服 account sees what they are missing, but nothing in it
-// is pressable without the grant.
-const canManage = computed(() => auth.allows('notifications', 'manage'))
 
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
-// The list confirms its own reads; the composer confirms what it sent. One
-// shared sentence would show the same words on both sides of the page.
-const listNotice = ref('')
-const notifications = ref<Notification[]>([])
+const items = ref<Notification[]>([])
 const total = ref(0)
 const page = ref(1)
+const filter = ref('all')
+const showSend = ref(false)
+const draft = ref({ target: 'broadcast', user_id: '', type: 'system', title: '', content: '', link: '' })
 
-const form = ref({ type: 'system', title: '', content: '', link: '', user_id: '' })
-
-const unread = computed(() => notifications.value.filter((item) => !item.is_read).length)
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PageSize)))
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
+const filtered = computed(() => {
+  if (filter.value === 'all') return items.value
+  if (filter.value === 'unread') return items.value.filter((n) => !n.is_read)
+  return items.value.filter((n) => n.type === filter.value)
+})
+const kinds = computed(() => ['all', 'unread', ...new Set(items.value.map((n) => n.type))])
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const result = await listNotifications(page.value, PageSize)
-    notifications.value = result.items
+    const result = await listNotifications(page.value, PAGE_SIZE)
+    items.value = result.items
     total.value = result.total
   } catch (err) {
     error.value = errorMessage(err, '加载通知失败')
   } finally {
     loading.value = false
   }
-  // The sidebar dot is the server's count, not this page's, so a restock warning
-  // that arrived while this screen was open still shows up.
-  void inbox.refresh()
 }
 
 async function read(item: Notification) {
-  if (item.is_read) return
   try {
     await markAsRead(item.id)
-    item.is_read = true
-    if (inbox.unread > 0) inbox.reset(inbox.unread - 1)
+    items.value = items.value.map((n) => (n.id === item.id ? { ...n, is_read: true } : n))
+    await inbox.refresh()
   } catch (err) {
     error.value = errorMessage(err, '标记已读失败')
   }
 }
 
 async function readAll() {
-  if (busy.value) return
   busy.value = true
-  error.value = ''
-  listNotice.value = ''
   try {
     const marked = await markAllRead()
-    notifications.value = notifications.value.map((item) => ({ ...item, is_read: true }))
-    inbox.reset(0)
-    listNotice.value = marked ? `已把 ${marked} 条标为已读。` : '这里已经没有未读消息了。'
+    notice.value = '已把 ' + marked + ' 条通知标为已读。'
+    await load()
+    await inbox.refresh()
   } catch (err) {
-    error.value = errorMessage(err, '标记已读失败')
+    error.value = errorMessage(err, '操作失败')
   } finally {
     busy.value = false
   }
 }
 
-async function publish() {
-  const title = form.value.title.trim()
-  if (!title) return
+function open(item: Notification) {
+  if (!item.is_read) void read(item)
+  if (item.link) {
+    if (/^https?:\/\//i.test(item.link)) window.open(item.link, '_blank', 'noopener')
+    else void router.push(item.link)
+  }
+}
+
+async function send() {
+  if (!draft.value.title.trim()) {
+    error.value = '请填写通知标题。'
+    return
+  }
   busy.value = true
   error.value = ''
-  notice.value = ''
   try {
-    const payload = {
-      type: form.value.type,
-      title,
-      content: form.value.content.trim() || undefined,
-      link: form.value.link.trim() || undefined,
-    }
-    const userId = Number(form.value.user_id)
-    if (userId > 0) {
-      await sendNotification({ ...payload, user_id: userId })
-      notice.value = `已发送给用户 #${userId}`
+    if (draft.value.target === 'broadcast') {
+      const result = await broadcastNotification({
+        type: draft.value.type, title: draft.value.title,
+        content: draft.value.content || undefined, link: draft.value.link || undefined,
+      })
+      notice.value = '已向 ' + result.sent + ' 位用户发出通知。'
     } else {
-      const result = await broadcastNotification(payload)
-      notice.value = `已广播给 ${result.sent ?? 0} 位用户`
+      const userId = Number(draft.value.user_id)
+      if (!userId) {
+        error.value = '请填写收件人的用户 ID。'
+        busy.value = false
+        return
+      }
+      await sendNotification({
+        user_id: userId, type: draft.value.type, title: draft.value.title,
+        content: draft.value.content || undefined, link: draft.value.link || undefined,
+      })
+      notice.value = '已发送给用户 #' + userId + '。'
     }
-    form.value = { ...form.value, title: '', content: '', link: '', user_id: '' }
+    showSend.value = false
+    draft.value = { target: 'broadcast', user_id: '', type: 'system', title: '', content: '', link: '' }
+    await load()
   } catch (err) {
     error.value = errorMessage(err, '发送失败')
   } finally {
@@ -106,138 +119,118 @@ async function publish() {
   }
 }
 
-function go(next: number) {
-  page.value = Math.max(1, next)
-  load()
-}
-
-/**
- * Where the message points inside the back office. A restock warning carries the
- * card page of the shelf it is about, so reading it and acting on it are one
- * click. An absolute link a shop broadcast instead stays a normal page open: it
- * is not a router path this app owns.
- */
-function routeOf(link?: string | null): string | null {
-  if (!link) return null
-  return link.startsWith('/') && !link.startsWith('//') ? link : null
+function goPage(next: number) {
+  if (next < 1 || next > pageCount.value || next === page.value) return
+  page.value = next
+  void load()
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <section class="grid gap-5 lg:grid-cols-3">
-    <div class="space-y-4 lg:col-span-2">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="flex items-center gap-2">
-          <h2 class="text-base font-semibold">我的通知</h2>
-          <!-- The count is the inbox's, not this page's: a 「3 未读」 next to a
-               sidebar dot saying 45 reads as two different mailboxes. -->
-          <span v-if="inbox.unread" class="badge badge-accent">{{ inbox.unread }} 未读</span>
-          <button
-            v-if="inbox.unread || unread"
-            class="btn btn-quiet btn-sm"
-            :disabled="busy"
-            title="把这一页和后面的未读消息一次读完"
-            @click="readAll"
-          >
-            全部标为已读
-          </button>
-        </div>
-        <PaginationFooter
-          class="!justify-end"
-          :page="page"
-          :pages="totalPages"
-          :loading="loading"
-          summary=""
-          @change="go"
-        />
-      </div>
+  <section class="space-y-4">
+    <PageHeader title="通知中心" description="你的站内信，以及向买家发送通知与广播。" bordered>
+      <template #actions>
+        <button class="btn btn-primary btn-sm" @click="showSend = true">
+          <AdminIcon name="plus" :size="14" />
+          发送通知
+        </button>
+        <button class="btn btn-quiet btn-sm" :disabled="busy" @click="readAll">全部标为已读</button>
+        <button class="btn btn-quiet btn-sm" :disabled="loading" @click="load">
+          <AdminIcon name="refresh" :size="14" />
+          刷新
+        </button>
+      </template>
+    </PageHeader>
 
-      <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
-      <p v-if="listNotice" class="alert alert-info" role="status">{{ listNotice }}</p>
+    <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
-      <div v-if="loading" class="space-y-2">
-        <div v-for="i in 5" :key="i" class="skeleton h-20" />
-      </div>
-      <p v-else-if="!notifications.length" class="card py-14 text-center text-sm quiet">
-        {{ canManage ? '还没有通知。右侧广播一条试试。' : '还没有通知。' }}
-      </p>
-      <div
-        v-else
-        class="card !p-0 divide-y divide-[var(--stroke-quiet)]"
+    <div class="flex flex-wrap gap-1.5">
+      <button
+        v-for="kind in kinds"
+        :key="kind"
+        class="chip"
+        :class="filter === kind ? 'chip-active' : ''"
+        @click="filter = kind"
       >
-        <div v-for="item in notifications" :key="item.id" class="flex items-start gap-4 px-5 py-4">
-          <span
-            class="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-            :class="item.is_read ? 'bg-[var(--stroke-hi)]' : 'bg-[var(--accent)]'"
-          />
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <h3 class="text-sm font-medium">{{ item.title }}</h3>
-              <span class="badge badge-neutral">{{ notificationKind(item.type) }}</span>
-              <RouterLink
-                v-if="routeOf(item.link)"
-                :to="routeOf(item.link) as string"
-                class="text-xs accent-text underline-offset-2 hover:underline"
-                >去处理 →</RouterLink
-              >
-              <a
-                v-else-if="item.link"
-                :href="item.link"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-xs accent-text underline-offset-2 hover:underline"
-                >打开链接 ↗</a
-              >
-            </div>
-            <p v-if="item.content" class="mt-1 break-words text-sm muted">{{ item.content }}</p>
-            <p class="quiet mt-1.5 text-xs">{{ when(item.created_at) }}</p>
-          </div>
-          <button v-if="!item.is_read" class="btn btn-ghost btn-sm" :disabled="busy" @click="read(item)">标为已读</button>
-        </div>
-      </div>
+        {{ kind === 'all' ? '全部' : kind === 'unread' ? '未读' : notificationKind(kind) }}
+      </button>
     </div>
 
-    <div class="card h-fit">
-      <h2 class="text-base font-semibold">发送通知</h2>
-      <p class="quiet mt-1 mb-4 text-xs">填写用户 ID 只通知单个用户，留空则广播给全部用户。</p>
-      <p v-if="!canManage" class="alert alert-info mb-4 text-xs" role="status">
-        当前账号没有「通知管理」权限，只能查看自己的通知。
-      </p>
+    <div v-if="loading" class="card space-y-2.5">
+      <div v-for="i in 5" :key="i" class="skeleton h-12 w-full" />
+    </div>
+    <div v-else-if="!filtered.length" class="card py-16 text-center">
+      <p class="font-semibold">没有通知</p>
+      <p class="quiet mt-1.5 text-sm">订单、工单与库存提醒都会出现在这里。</p>
+    </div>
+    <template v-else>
+      <ul class="space-y-2">
+        <li v-for="item in filtered" :key="item.id">
+          <button
+            class="card-quiet flex w-full items-start gap-3 text-left transition-colors hover:border-[var(--stroke-hi)]"
+            @click="open(item)"
+          >
+            <span class="mt-0.5 shrink-0">
+              <span v-if="!item.is_read" class="badge-accent">未读</span>
+              <span v-else class="badge-neutral">{{ notificationKind(item.type) }}</span>
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-[13.5px] font-semibold">{{ item.title }}</span>
+              <span v-if="item.content" class="quiet mt-1 block whitespace-pre-line text-xs">{{ item.content }}</span>
+            </span>
+            <span class="quiet shrink-0 text-[11px]">{{ when(item.created_at) }}</span>
+          </button>
+        </li>
+      </ul>
+      <PaginationFooter :page="page" :pages="pageCount" :loading="loading" :summary="'共 ' + total + ' 条'" @change="goPage" />
+    </template>
 
-      <fieldset class="m-0 space-y-3 border-0 p-0" :disabled="!canManage">
+    <AppDrawer :open="showSend" title="发送通知" @close="showSend = false">
+      <div class="space-y-3">
+        <div>
+          <label class="label" for="n-target">发送对象</label>
+          <select id="n-target" v-model="draft.target" class="input">
+            <option value="broadcast">全体用户（广播）</option>
+            <option value="single">指定用户</option>
+          </select>
+        </div>
+        <div v-if="draft.target === 'single'">
+          <label class="label" for="n-user">用户 ID</label>
+          <input id="n-user" v-model="draft.user_id" class="input nums" placeholder="例如 12" />
+        </div>
         <div>
           <label class="label" for="n-type">类型</label>
-          <select id="n-type" v-model="form.type" class="input">
+          <select id="n-type" v-model="draft.type" class="input">
             <option value="system">系统</option>
             <option value="order">订单</option>
-            <option value="promo">促销</option>
+            <option value="ticket">工单</option>
+            <option value="activity">活动</option>
+            <option value="coupon">优惠券</option>
+            <option value="stock">库存</option>
           </select>
         </div>
         <div>
-          <label class="label" for="n-user">用户 ID（可选）</label>
-          <input id="n-user" v-model="form.user_id" class="input nums" placeholder="留空表示广播" />
-        </div>
-        <div>
           <label class="label" for="n-title">标题</label>
-          <input id="n-title" v-model="form.title" class="input" placeholder="必填" />
+          <input id="n-title" v-model="draft.title" class="input" maxlength="200" />
         </div>
         <div>
-          <label class="label" for="n-content">正文</label>
-          <textarea id="n-content" v-model="form.content" class="input h-28 resize-none" />
+          <label class="label" for="n-content">内容</label>
+          <textarea id="n-content" v-model="draft.content" class="input min-h-[100px]" />
         </div>
         <div>
-          <label class="label" for="n-link">链接</label>
-          <input id="n-link" v-model="form.link" class="input mono text-xs" placeholder="/orders 或 https://…" />
+          <label class="label" for="n-link">跳转链接（可选）</label>
+          <input id="n-link" v-model="draft.link" class="input mono text-xs" placeholder="/orders 或 https://…" />
         </div>
-
-        <p v-if="notice" class="alert alert-success mt-4" role="status">{{ notice }}</p>
-
-        <button class="btn btn-primary mt-4 w-full" :disabled="busy || !form.title.trim()" @click="publish">
-          {{ busy ? '发送中…' : '发送' }}
-        </button>
-      </fieldset>
-    </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button class="btn btn-secondary btn-sm" @click="showSend = false">取消</button>
+          <button class="btn btn-primary btn-sm" :disabled="busy" @click="send">{{ busy ? '发送中…' : '发送' }}</button>
+        </div>
+      </template>
+    </AppDrawer>
   </section>
 </template>

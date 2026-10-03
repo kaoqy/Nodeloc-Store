@@ -695,3 +695,19 @@ html[data-theme='light'] {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── 后台外壳补充 ────────────────────────────────────────────────
+   新外壳用到的少量全局类；放在这里而不是各自的 scoped 样式里，
+   因为顶栏、面包屑与页面标题需要在任何页面下都保持同一套间距。 */
+.crumb-row { line-height: 1.2; }
+.admin-topbar { border-bottom: 1px solid var(--stroke); }
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.page-head h2 { font-size: 1.05rem; font-weight: 700; }
+.page-head .page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
