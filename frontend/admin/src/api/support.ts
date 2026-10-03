@@ -118,8 +118,8 @@ export interface TicketListQuery {
   offset?: number
 }
 
-// ai_processing / ai_solved 是旧版智能客服遗留的工单状态，只为了让
-// 历史工单仍能正常显示才保留，新工单不会再产生这两个状态。
+// ai_processing / ai_solved 是早期版本遗留的工单状态码。两个键名不能改：
+// 它们要和库里历史工单的 status 字段对齐，这里只是把它们翻译成现在的中文文案。
 export const ticketStatusLabels: Record<string, string> = {
   ai_processing: '处理中',
   waiting_user: '等待用户回复',
