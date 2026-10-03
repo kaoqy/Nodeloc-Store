@@ -13,10 +13,13 @@ import {
   type ActivityStats,
 } from '../api/activities'
 import { errorMessage, money, when } from '../utils/format'
+import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 const id = computed(() => Number(route.params.id || 0))
+const canManage = computed(() => auth.allows('activities', 'manage'))
 
 const loading = ref(true)
 const busy = ref(false)
@@ -93,8 +96,8 @@ onMounted(load)
       </div>
       <div class="flex gap-2">
         <RouterLink to="/activities" class="btn btn-secondary btn-sm">返回列表</RouterLink>
-        <RouterLink :to="'/activities/' + id + '/edit'" class="btn btn-secondary btn-sm">编辑活动</RouterLink>
-        <button class="btn btn-primary btn-sm" :disabled="busy" @click="toggle">
+        <RouterLink v-if="canManage" :to="'/activities/' + id + '/edit'" class="btn btn-secondary btn-sm">编辑活动</RouterLink>
+        <button v-if="canManage" class="btn btn-primary btn-sm" :disabled="busy" @click="toggle">
           {{ activity?.status === 'running' ? '暂停活动' : '恢复上线' }}
         </button>
       </div>
@@ -102,6 +105,13 @@ onMounted(load)
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
+    <div v-if="error && !stats" class="card py-12 text-center">
+      <p class="quiet text-sm">活动数据暂时不可用。</p>
+      <div class="mt-4 flex justify-center gap-2">
+        <button class="btn btn-secondary btn-sm" :disabled="loading" @click="load">重新加载</button>
+        <RouterLink to="/activities" class="btn btn-quiet btn-sm">返回活动列表</RouterLink>
+      </div>
+    </div>
 
     <div v-if="loading" class="card space-y-3">
       <div v-for="i in 4" :key="i" class="skeleton h-9 w-full" />

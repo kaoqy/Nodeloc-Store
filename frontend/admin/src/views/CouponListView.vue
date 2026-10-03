@@ -158,7 +158,7 @@ onMounted(load)
       <input v-model="search" class="input w-52" type="search" placeholder="搜码或说明" aria-label="搜索优惠券" />
       <select v-model="scopeFilter" class="input !w-auto" aria-label="适用范围">
         <option value="all">全部范围</option>
-        <option value="all_scope">全场</option>
+        <option value="all">全场</option>
         <option value="product">指定商品</option>
         <option value="category">指定分类</option>
       </select>
@@ -216,6 +216,9 @@ onMounted(load)
     </DataTable>
 
     <AppDrawer :open="Boolean(editing)" :title="editing?.id ? '编辑优惠码' : '新建优惠码'" @close="editing = null">
+      <template #feedback>
+        <p v-if="error" class="alert alert-danger mb-3" role="alert">{{ error }}</p>
+      </template>
       <div v-if="editing" class="space-y-3">
         <div class="grid gap-3 sm:grid-cols-2">
           <div>

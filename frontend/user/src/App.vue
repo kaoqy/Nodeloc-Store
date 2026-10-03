@@ -46,8 +46,7 @@ onMounted(async () => {
 
     <footer class="mt-20 border-t border-[var(--stroke)] py-9">
       <div class="mx-auto flex w-full max-w-6xl flex-col items-center gap-3 px-4 text-center sm:px-6">
-        <nav class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13px]" aria-label="帮助与页脚链接">
-          <RouterLink to="/support" class="text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]">客服中心</RouterLink>
+        <nav class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13px]" aria-label="页脚链接">
           <a
             v-for="link in site.footerLinks"
             :key="link.url + link.label"

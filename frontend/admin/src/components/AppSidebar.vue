@@ -185,7 +185,7 @@ onUnmounted(() => {
               <AdminIcon :name="item.icon" :size="17" class="side-icon" />
               <span v-if="!collapsed" class="truncate">{{ item.label }}</span>
               <span
-                v-if="!collapsed && item.path === '/notifications' && inbox.unread"
+                v-if="!collapsed && item.path === '/config' && inbox.unread"
                 class="nums badge-count"
                 :aria-label="inbox.unread + ' 条未读通知'"
                 >{{ unread }}</span

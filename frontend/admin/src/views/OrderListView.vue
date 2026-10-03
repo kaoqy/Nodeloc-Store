@@ -7,7 +7,7 @@ import DataTable, { type Column } from '../components/DataTable.vue'
 import FilterBar from '../components/FilterBar.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusBadge from '../components/StatusBadge.vue'
-import { listOrders, reconcilePendingOrders, exportOrders, type ReconcileReport } from '../api/orders'
+import { listOrders, reconcileOrder, reconcilePendingOrders, exportOrders, type ReconcileReport } from '../api/orders'
 import { money, when, errorMessage } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 import type { Order } from '../types'
@@ -36,6 +36,7 @@ const COLUMNS: Column[] = [
 
 const loading = ref(true)
 const error = ref('')
+const notice = ref('')
 const orders = ref<Order[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -46,6 +47,7 @@ const buyerId = ref(0)
 const buyerName = ref('')
 
 const reconciling = ref(false)
+const reconcilingOrder = ref('')
 const report = ref<ReconcileReport | null>(null)
 const showReport = ref(false)
 const exporting = ref(false)
@@ -91,13 +93,13 @@ async function load() {
   error.value = ''
   try {
     const result = await listOrders({
-      page: page.value,
       limit: PAGE_SIZE,
+      offset: (page.value - 1) * PAGE_SIZE,
       status: status.value || undefined,
       q: search.value.trim() || undefined,
       attention: attention.value || undefined,
-      user: buyerId.value || undefined,
-    } as never)
+      user_id: buyerId.value || undefined,
+    })
     orders.value = result.data
     total.value = result.total
   } catch (err) {
@@ -156,6 +158,24 @@ async function reconcile() {
   }
 }
 
+async function reconcileOne(order: Order) {
+  if (reconcilingOrder.value) return
+  reconcilingOrder.value = order.order_no
+  error.value = ''
+  notice.value = ''
+  try {
+    const result = await reconcileOrder(order.order_no)
+    notice.value = result.settled
+      ? `订单 ${order.order_no} 已确认到账并进入交付流程。`
+      : `订单 ${order.order_no} 尚未到账，NodeLoc 状态：${result.provider_status || '待支付'}。`
+    await load()
+  } catch (err) {
+    error.value = errorMessage(err, '查单失败')
+  } finally {
+    reconcilingOrder.value = ''
+  }
+}
+
 async function download() {
   if (exporting.value) return
   exporting.value = true
@@ -164,8 +184,8 @@ async function download() {
       status: status.value || undefined,
       q: search.value.trim() || undefined,
       attention: attention.value || undefined,
-      user: buyerId.value || undefined,
-    } as never)
+      user_id: buyerId.value || undefined,
+    })
   } catch (err) {
     error.value = errorMessage(err, '导出失败')
   } finally {
@@ -202,6 +222,9 @@ onMounted(() => {
         </button>
       </template>
     </PageHeader>
+
+    <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
+    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 
     <FilterBar :count="total ? '共 ' + total + ' 笔订单' : ''">
       <input
@@ -272,9 +295,10 @@ onMounted(() => {
             <button
               v-if="canManage && order.status === 'pending'"
               class="btn btn-quiet btn-sm"
-              @click="reconcile"
+              :disabled="reconcilingOrder === order.order_no"
+              @click="reconcileOne(order)"
             >
-              查单
+              {{ reconcilingOrder === order.order_no ? '查询中…' : '查单' }}
             </button>
           </div>
         </td>

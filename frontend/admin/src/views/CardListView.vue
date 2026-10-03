@@ -411,6 +411,9 @@ onMounted(async () => {
 
     <!-- 导入 -->
     <AppDrawer :open="showImport" title="导入卡密" @close="showImport = false">
+      <template #feedback>
+        <p v-if="error" class="alert alert-danger mb-3" role="alert">{{ error }}</p>
+      </template>
       <div class="space-y-3">
         <div>
           <label class="label" for="imp-product">选择商品</label>
@@ -437,6 +440,9 @@ onMounted(async () => {
 
     <!-- 生成 -->
     <AppDrawer :open="showGenerate" title="批量生成卡密" width="sm" @close="showGenerate = false">
+      <template #feedback>
+        <p v-if="error" class="alert alert-danger mb-3" role="alert">{{ error }}</p>
+      </template>
       <div class="space-y-3">
         <div>
           <label class="label" for="gen-product">选择商品</label>

@@ -189,6 +189,9 @@ export const setTicketStatus = (id: number, status: string, detail = '') =>
 export const assignTicket = (id: number, agentId: number) =>
   client.post<{ data: Ticket }>('/admin/tickets/' + id + '/assign', { agent_id: agentId }).then((r) => r.data.data)
 
+export const claimTicket = (id: number) =>
+  client.post<{ data: Ticket }>('/admin/tickets/' + id + '/claim').then((r) => r.data.data)
+
 export const autoAssignTicket = (id: number) =>
   client.post<{ data: Ticket }>('/admin/tickets/' + id + '/auto-assign').then((r) => r.data.data)
 

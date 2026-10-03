@@ -1,8 +1,22 @@
 import client from './client'
 import type { Page, PageParams, Transfer, User } from '../types'
 
-export async function listUsers(params: PageParams = {}): Promise<Page<User>> {
-  const { data } = await client.get('/admin/users', { params })
+export interface AdminUserQuery {
+  limit?: number
+  offset?: number
+  q?: string
+  role?: string
+}
+
+export async function listUsers(params: AdminUserQuery = {}): Promise<Page<User>> {
+  const { data } = await client.get('/admin/users', {
+    params: {
+      limit: params.limit,
+      offset: params.offset || undefined,
+      q: params.q?.trim() || undefined,
+      role: params.role || undefined,
+    },
+  })
   return { data: data.data ?? [], total: Number(data.total ?? 0) }
 }
 

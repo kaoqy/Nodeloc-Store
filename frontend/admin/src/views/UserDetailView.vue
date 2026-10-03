@@ -16,6 +16,7 @@ const error = ref('')
 const notice = ref('')
 const user = ref<User | null>(null)
 const delta = ref<number | ''>('')
+const deltaReason = ref('')
 
 const GrantMax = 1000
 const grantAmount = ref<number | ''>(10)
@@ -54,8 +55,6 @@ const canChangeRole = computed(() => {
 // ASSIGNABLE lists what this account may hand out, in role order.
 const ASSIGNABLE = [
   { role: 'user', label: '普通用户', superOnly: false },
-  { role: 'support', label: '客服', superOnly: false },
-  { role: 'operator', label: '运营', superOnly: false },
   { role: 'admin', label: '管理员', superOnly: true },
   { role: 'super_admin', label: '超级管理员', superOnly: true },
 ]
@@ -150,8 +149,12 @@ async function run(action: () => Promise<User>, message: string) {
 
 async function submitPoints() {
   if (!user.value || !points.value) return
-  await run(() => adjustPoints(user.value!.id, points.value as number), `已调整 ${points.value > 0 ? '+' : ''}${points.value} 积分`)
+  await run(
+    () => adjustPoints(user.value!.id, points.value as number, deltaReason.value.trim() || undefined),
+    `已调整 ${points.value > 0 ? '+' : ''}${points.value} 积分`,
+  )
   delta.value = ''
+  deltaReason.value = ''
 }
 
 function changeRole(event: Event) {
@@ -309,6 +312,10 @@ onMounted(load)
             <div>
               <label class="label" for="delta">调整数量</label>
               <input id="delta" v-model="delta" type="number" class="input nums w-32" placeholder="正数加 / 负数扣" />
+            </div>
+            <div class="min-w-48 flex-1">
+              <label class="label" for="delta-reason">原因</label>
+              <input id="delta-reason" v-model="deltaReason" class="input" maxlength="100" placeholder="会记入积分流水" />
             </div>
             <button class="btn btn-primary btn-sm" :disabled="busy || !points" @click="submitPoints">
               {{ busy ? '处理中…' : '确认调账' }}

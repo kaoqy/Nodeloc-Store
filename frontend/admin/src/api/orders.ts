@@ -1,8 +1,26 @@
 import client from './client'
 import type { Order, Page, PageParams } from '../types'
 
-export async function listOrders(params: PageParams = {}): Promise<Page<Order>> {
-  const { data } = await client.get('/admin/orders', { params })
+export interface AdminOrderQuery {
+  limit?: number
+  offset?: number
+  status?: string
+  q?: string
+  user_id?: number
+  attention?: string
+}
+
+export async function listOrders(params: AdminOrderQuery = {}): Promise<Page<Order>> {
+  const { data } = await client.get('/admin/orders', {
+    params: {
+      limit: params.limit,
+      offset: params.offset || undefined,
+      status: params.status || undefined,
+      q: params.q?.trim() || undefined,
+      user_id: params.user_id || undefined,
+      attention: params.attention || undefined,
+    },
+  })
   return { data: data.data ?? [], total: Number(data.total ?? 0) }
 }
 

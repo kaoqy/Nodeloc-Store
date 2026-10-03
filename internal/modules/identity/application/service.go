@@ -445,8 +445,8 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*OAuthResul
 }
 
 // AdminListUsers pages the user directory for the back office.
-func (s *Service) AdminListUsers(ctx context.Context, limit, offset int, search string) ([]*domain.User, int64, error) {
-	return s.repo.List(ctx, limit, offset, search)
+func (s *Service) AdminListUsers(ctx context.Context, limit, offset int, search, role string) ([]*domain.User, int64, error) {
+	return s.repo.List(ctx, limit, offset, search, role)
 }
 
 func (s *Service) AdminGetUser(ctx context.Context, userID uint) (*domain.User, error) {

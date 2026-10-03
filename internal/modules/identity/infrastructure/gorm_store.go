@@ -262,13 +262,23 @@ func translateGormError(err error) error {
 	return err
 }
 
-func (r *GormUserRepo) List(ctx context.Context, limit, offset int, search string) ([]*domain.User, int64, error) {
+func (r *GormUserRepo) List(ctx context.Context, limit, offset int, search, role string) ([]*domain.User, int64, error) {
 	var users []*domain.User
 	var total int64
 	query := r.db.WithContext(ctx).Model(&domain.User{})
 	if pattern := strings.TrimSpace(search); pattern != "" {
 		like := "%" + pattern + "%"
 		query = query.Where("username LIKE ? OR email LIKE ? OR nickname LIKE ?", like, like, like)
+	}
+	if role = strings.TrimSpace(role); role != "" {
+		switch role {
+		case "staff":
+			// 历史角色仍在库中，但界面上统一称作「管理员」；筛选员工时
+			// 不能只匹配 role=admin，否则升级前创建的客服/运营账号会漏掉。
+			query = query.Where("role <> ?", "user")
+		default:
+			query = query.Where("role = ?", role)
+		}
 	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err

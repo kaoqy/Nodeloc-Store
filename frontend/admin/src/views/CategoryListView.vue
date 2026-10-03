@@ -127,6 +127,9 @@ onMounted(load)
     </DataTable>
 
     <AppDrawer :open="Boolean(editing)" :title="editing?.id ? '编辑分类' : '新建分类'" width="sm" @close="editing = null">
+      <template #feedback>
+        <p v-if="error" class="alert alert-danger mb-3" role="alert">{{ error }}</p>
+      </template>
       <div v-if="editing" class="space-y-3">
         <div>
           <label class="label" for="cat-name">名称</label>

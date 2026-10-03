@@ -55,6 +55,7 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	adminTickets.POST("/:id/messages", guard("tickets", "manage"), h.adminReply)
 	adminTickets.POST("/:id/status", guard("tickets", "manage"), h.adminSetStatus)
 	adminTickets.POST("/:id/assign", guard("tickets", "assign"), h.adminAssign)
+	adminTickets.POST("/:id/claim", guard("tickets", "assign"), h.adminClaim)
 	adminTickets.POST("/:id/auto-assign", guard("tickets", "assign"), h.adminAutoAssign)
 	adminTickets.POST("/:id/transfer", guard("tickets", "manage"), h.adminTransfer)
 	adminTickets.POST("/:id/read", guard("tickets", "view"), h.adminMarkRead)
@@ -507,6 +508,34 @@ func (h *Handler) adminAutoAssign(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"data": ticket})
+}
+
+// adminClaim assigns a ticket to the signed-in staff member's own service
+// agent. A staff account without a 客服坐席 record cannot be named as an
+// assignee, so the handler refuses instead of writing a user id into an agent
+// foreign key.
+func (h *Handler) adminClaim(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	actorID := contextUserID(c)
+	agent, err := h.service.AgentByUser(c.Request.Context(), actorID)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	if agent == nil {
+		respondError(c, fmt.Errorf("%w: 当前账号还没有客服坐席，请先在「业务配置 · 工单与客服」中配置。", domain.ErrInvalidInput))
+		return
+	}
+	ticket, err := h.service.AssignAgent(c.Request.Context(), id, agent.ID, actorID, "claim")
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Set(middleware.AuditDetailKey, "接管工单 "+ticket.TicketNo)
 	c.JSON(http.StatusOK, gin.H{"data": ticket})
 }
 

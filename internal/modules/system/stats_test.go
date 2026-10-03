@@ -112,3 +112,35 @@ func TestStockAlertsPutOwedOrdersFirst(t *testing.T) {
 		t.Fatalf("third alert is product %d, want %d", got, quiet.ID)
 	}
 }
+
+// The dashboard's 自动发货异常 entry is an operator queue: every paid order still
+// owed goods belongs there, including ordinary pending delivery and plugin
+// delivery. A delivered order or one that never paid must not inflate it.
+func TestAutoDeliveryFailedCountsEveryUndeliveredPaidOrder(t *testing.T) {
+	db := newStatsTestDB(t)
+	ctx := context.Background()
+	product := stockProduct(t, db, "delivery-queue", 10, 0)
+
+	orders := []*models.Order{
+		paidOrder(db, product.ID, "QUEUE-PENDING", "pending"),
+		paidOrder(db, product.ID, "QUEUE-WAITING", "waiting_stock"),
+		paidOrder(db, product.ID, "QUEUE-PLUGIN", "plugin_pending"),
+		paidOrder(db, product.ID, "QUEUE-FAILED", "failed"),
+		paidOrder(db, product.ID, "QUEUE-DONE", "delivered"),
+		{
+			OrderNo: "QUEUE-UNPAID", UserID: 1, ProductID: product.ID, Quantity: 1,
+			UnitPrice: 10, TotalAmount: 10, Status: "pending", FulfillmentStatus: "pending",
+		},
+	}
+	if err := db.Create(orders).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	stats := &DashboardStats{}
+	if err := statSupport(ctx, db, stats, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if stats.AutoDeliveryFailed != 4 {
+		t.Fatalf("AutoDeliveryFailed = %d, want 4 undelivered paid orders", stats.AutoDeliveryFailed)
+	}
+}

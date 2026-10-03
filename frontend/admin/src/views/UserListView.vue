@@ -57,7 +57,7 @@ const filtered = computed(() => Boolean(search.value.trim() || role.value !== 'a
 const ROLES = [
   { value: 'all', label: '全部角色' },
   { value: 'user', label: '普通用户' },
-  { value: 'admin', label: '管理员' },
+  { value: 'staff', label: '管理员' },
   { value: 'super_admin', label: '超级管理员' },
 ]
 
@@ -80,7 +80,12 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const result = await listUsers({ page: page.value, limit: PAGE_SIZE, q: search.value.trim() || undefined, role: role.value === 'all' ? undefined : role.value } as never)
+    const result = await listUsers({
+      offset: (page.value - 1) * PAGE_SIZE,
+      limit: PAGE_SIZE,
+      q: search.value.trim() || undefined,
+      role: role.value === 'all' ? undefined : role.value,
+    })
     users.value = result.data
     total.value = result.total
   } catch (err) {

@@ -258,46 +258,50 @@ func (s *Service) Stats(ctx context.Context, days int) (*DashboardStats, error) 
 // 任何一张表不存在时（老库尚未迁移）只跳过该段，不影响其它统计。
 func statSupport(ctx context.Context, db *gorm.DB, stats *DashboardStats, _ time.Time) error {
 	now := time.Now().UTC()
-	if err := db.WithContext(ctx).Model(&models.Ticket{}).Count(&stats.TicketsTotal).Error; err != nil {
-		return nil
-	}
+	// Each panel is independent: an old database may be missing one of the
+	// optional tables, but that must not erase the metrics that are readable.
+	ticketsAvailable := true
 	type counts struct {
 		Pending int64
 		Overdue int64
 	}
 	var metric counts
-	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+	if err := db.WithContext(ctx).Model(&models.Ticket{}).Count(&stats.TicketsTotal).Error; err != nil {
+		ticketsAvailable = false
+		stats.TicketsTotal = 0
+	}
+	if ticketsAvailable && db.WithContext(ctx).Model(&models.Ticket{}).
 		Where("status IN ?", []string{models.TicketStatusPendingHuman, models.TicketStatusUserRequested}).
-		Count(&metric.Pending).Error; err == nil {
+		Count(&metric.Pending).Error == nil {
 		stats.TicketsPendingHuman = metric.Pending
 	}
-	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+	if ticketsAvailable && db.WithContext(ctx).Model(&models.Ticket{}).
 		Where("due_at IS NOT NULL AND due_at < ? AND status NOT IN ?", now, []string{models.TicketStatusResolved, models.TicketStatusClosed}).
-		Count(&metric.Overdue).Error; err == nil {
+		Count(&metric.Overdue).Error == nil {
 		stats.TicketsOverdue = metric.Overdue
 	}
 	// 未读与紧急是工单中心两个最常用的入口，总览直接把数字带出来，
 	// 卡片点进去时也能带上同样的筛选条件。
-	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+	if !ticketsAvailable || db.WithContext(ctx).Model(&models.Ticket{}).
 		Where("unread_for_staff = ?", true).
-		Count(&stats.TicketsUnread).Error; err != nil {
+		Count(&stats.TicketsUnread).Error != nil {
 		stats.TicketsUnread = 0
 	}
-	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+	if !ticketsAvailable || db.WithContext(ctx).Model(&models.Ticket{}).
 		Where("priority = ? AND status NOT IN ?", "urgent", []string{models.TicketStatusResolved, models.TicketStatusClosed}).
-		Count(&stats.TicketsUrgent).Error; err != nil {
+		Count(&stats.TicketsUrgent).Error != nil {
 		stats.TicketsUrgent = 0
 	}
 	var resolved int64
-	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+	if ticketsAvailable && db.WithContext(ctx).Model(&models.Ticket{}).
 		Where("status IN ?", []string{models.TicketStatusResolved, models.TicketStatusClosed}).
-		Count(&resolved).Error; err == nil && stats.TicketsTotal > 0 {
+		Count(&resolved).Error == nil && stats.TicketsTotal > 0 {
 		stats.TicketResolveRate = float64(resolved) / float64(stats.TicketsTotal)
 	}
 	var satisfaction float64
-	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+	if ticketsAvailable && db.WithContext(ctx).Model(&models.Ticket{}).
 		Select("COALESCE(AVG(CASE WHEN satisfaction > 0 THEN satisfaction END), 0)").
-		Scan(&satisfaction).Error; err == nil {
+		Scan(&satisfaction).Error == nil {
 		stats.TicketSatisfaction = satisfaction
 	}
 	if err := db.WithContext(ctx).Model(&models.Activity{}).
@@ -310,7 +314,8 @@ func statSupport(ctx context.Context, db *gorm.DB, stats *DashboardStats, _ time
 		stats.ActivityParticipants = 0
 	}
 	if err := db.WithContext(ctx).Model(&models.Order{}).
-		Where("status = ? AND fulfillment_status = ?", "paid", "failed").
+		Where("status IN ? AND fulfillment_status IN ?",
+			paidOrderStatuses, []string{"pending", "waiting_stock", "plugin_pending", "failed"}).
 		Count(&stats.AutoDeliveryFailed).Error; err != nil {
 		stats.AutoDeliveryFailed = 0
 	}

@@ -41,6 +41,14 @@ const form = reactive({
 
 const isCard = computed(() => form.product_type === 'card')
 const invalid = computed(() => !form.name.trim() || !form.slug.trim() || Number(form.price) < 0)
+const invalidPriceHint = computed(() =>
+  form.original_price !== null &&
+  form.original_price !== undefined &&
+  Number(form.original_price) > 0 &&
+  Number(form.original_price) < Number(form.price)
+    ? '划线原价低于当前售价，前台会显示成“涨价”；请确认价格顺序。'
+    : '',
+)
 
 // The update endpoint replaces the whole row, so only these fields are sent back.
 function payload(): Partial<Product> {
@@ -77,10 +85,21 @@ function slugify(value: string): string {
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     categories.value = await listCategories()
     if (isEdit.value) {
       const product = await getProduct(productId.value)
+      let formFields: ProductFormField[] = []
+      if (product.form_schema) {
+        try {
+          const parsed = JSON.parse(product.form_schema) as unknown
+          if (Array.isArray(parsed)) formFields = parsed as ProductFormField[]
+          else error.value = '原购买表单不是有效的字段列表，已按空表单打开；保存前请重新核对。'
+        } catch {
+          error.value = '原购买表单数据无法解析，已按空表单打开；保存会覆盖这组字段，请重新填写。'
+        }
+      }
       Object.assign(form, {
         name: product.name,
         slug: product.slug,
@@ -99,7 +118,7 @@ async function load() {
         is_archived: product.is_archived ?? false,
         sort_order: product.sort_order ?? 0,
         category_id: product.category_id ?? null,
-        form_schema: product.form_schema ? JSON.parse(product.form_schema) : [],
+        form_schema: formFields,
       })
     }
   } catch (err) {
@@ -111,6 +130,10 @@ async function load() {
 
 async function save() {
   if (invalid.value) return
+  if (invalidPriceHint.value) {
+    error.value = invalidPriceHint.value
+    return
+  }
   saving.value = true
   error.value = ''
   try {
@@ -154,6 +177,7 @@ onMounted(load)
     </div>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
+    <p v-else-if="invalidPriceHint" class="alert alert-warning" role="status">{{ invalidPriceHint }}</p>
 
     <div class="grid gap-5 lg:grid-cols-3">
       <div class="space-y-5 lg:col-span-2">

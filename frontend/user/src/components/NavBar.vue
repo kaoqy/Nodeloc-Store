@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useInboxStore } from '../stores/inbox'
 import { useSiteStore } from '../stores/site'
@@ -10,8 +10,10 @@ const auth = useAuthStore()
 const site = useSiteStore()
 const theme = useThemeStore()
 const inbox = useInboxStore()
+const route = useRoute()
 const router = useRouter()
 const menuOpen = ref(false)
+const isHome = computed(() => route.path === '/')
 
 // The badge counts the whole inbox, not the page 个人中心 happens to show.
 onMounted(() => {
@@ -51,7 +53,7 @@ async function logout() {
         <RouterLink to="/activities" class="nav-item">活动</RouterLink>
         <template v-if="auth.isAuthenticated">
           <RouterLink to="/orders" class="nav-item">我的订单</RouterLink>
-          <RouterLink to="/support" class="nav-item">客服中心</RouterLink>
+          <RouterLink v-if="!isHome" to="/support" class="nav-item">客服中心</RouterLink>
           <RouterLink to="/profile" class="nav-item relative">
             个人中心
             <span
@@ -120,7 +122,7 @@ async function logout() {
       <RouterLink to="/activities" class="nav-item w-full">活动中心</RouterLink>
       <template v-if="auth.isAuthenticated">
         <RouterLink to="/orders" class="nav-item w-full">我的订单</RouterLink>
-        <RouterLink to="/support" class="nav-item w-full">客服中心</RouterLink>
+        <RouterLink v-if="!isHome" to="/support" class="nav-item w-full">客服中心</RouterLink>
         <RouterLink to="/profile" class="nav-item w-full">
           个人中心<span v-if="inbox.unread" class="nums ml-2 text-[var(--accent)]">{{ badge }} 未读</span>
         </RouterLink>

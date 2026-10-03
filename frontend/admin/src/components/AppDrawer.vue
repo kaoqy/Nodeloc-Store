@@ -57,6 +57,7 @@ onUnmounted(() => {
             </button>
           </header>
           <div class="min-h-0 flex-1 overflow-y-auto p-5">
+            <slot name="feedback" />
             <slot />
           </div>
           <footer v-if="$slots.footer" class="shrink-0 border-t border-[var(--stroke)] bg-[var(--surface)] p-4">

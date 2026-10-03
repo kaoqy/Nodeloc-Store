@@ -127,7 +127,12 @@ func (h *Handler) AdminListUsers(c *gin.Context) {
 	if err != nil || offset < 0 {
 		offset = 0
 	}
-	users, total, err := h.service.AdminListUsers(c.Request.Context(), limit, offset, c.Query("q"))
+	role := strings.TrimSpace(c.Query("role"))
+	if role != "" && role != "staff" && !domain.ValidRole(role) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未知的角色筛选值。", "code": "invalid_query"})
+		return
+	}
+	users, total, err := h.service.AdminListUsers(c.Request.Context(), limit, offset, c.Query("q"), role)
 	if err != nil {
 		writeError(c, err)
 		return

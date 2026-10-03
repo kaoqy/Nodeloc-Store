@@ -316,14 +316,14 @@ onUnmounted(() => {
         </RouterLink>
         <RouterLink to="/service?attention=pending_human" class="todo-card">
           <span class="min-w-0 flex-1">
-            <span class="quiet block text-xs">待人工处理</span>
-            <span class="nums mt-1 block text-lg font-bold">{{ ticketStats?.pending_human ?? 0 }}</span>
+            <span class="quiet block text-xs">人工处理中</span>
+            <span class="nums mt-1 block text-lg font-bold">{{ ticketStats?.human_handling ?? 0 }}</span>
           </span>
         </RouterLink>
-        <RouterLink to="/service?attention=pending_human" class="todo-card">
+        <RouterLink to="/service?attention=urgent" class="todo-card">
           <span class="min-w-0 flex-1">
-            <span class="quiet block text-xs">待人工处理</span>
-            <span class="nums accent-text mt-1 block text-lg font-bold">{{ ticketStats?.pending_human ?? 0 }}</span>
+            <span class="quiet block text-xs">紧急工单</span>
+            <span class="nums accent-text mt-1 block text-lg font-bold">{{ ticketStats?.urgent ?? 0 }}</span>
           </span>
         </RouterLink>
         <RouterLink to="/service?attention=overdue" class="todo-card">

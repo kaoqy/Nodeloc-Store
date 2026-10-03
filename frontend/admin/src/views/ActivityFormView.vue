@@ -393,15 +393,17 @@ async function save(nextStatus?: string) {
   try {
     const payload: Partial<Activity> = { ...form.value }
     if (nextStatus) payload.status = nextStatus
+    let savedID = editingID.value
     if (editingID.value) {
       await updateActivity(editingID.value, payload, rules.value)
     } else {
       const created = await createActivity(payload, rules.value)
+      savedID = created.id
       notice.value = '活动已创建。'
-      await router.replace('/activities/' + created.id + '/edit')
+      await router.replace('/activities/' + savedID + '/edit')
     }
     notice.value = notice.value || '活动已保存。'
-    form.value = { ...(await getActivity(editingID.value || Number(route.params.id))) }
+    form.value = { ...(await getActivity(savedID)) }
     rules.value = form.value.rule_list ?? []
   } catch (err) {
     error.value = errorMessage(err, '保存活动失败')

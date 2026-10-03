@@ -6,6 +6,7 @@ import StatusBadge from '../../components/StatusBadge.vue'
 import {
   assignTicket,
   autoAssignTicket,
+  claimTicket,
   getTicket,
   getTicketSummary,
   listAgents,
@@ -128,8 +129,8 @@ function autoAssign() {
   void run(() => autoAssignTicket(props.ticketId), '已自动分配给负载最低的在线客服')
 }
 
-function toHuman() {
-  changeStatus('pending_human')
+function claim() {
+  void run(() => claimTicket(props.ticketId), '已接管这张工单')
 }
 
 const senderMeta = (type: string) => {
@@ -161,7 +162,7 @@ onMounted(load)
           <h3 class="min-w-0 flex-1 truncate text-[15px] font-bold">{{ ticket.subject }}</h3>
           <StatusBadge :value="ticket.status" :label="ticketStatusLabels[ticket.status]" />
           <StatusBadge :value="ticket.priority" :label="ticketPriorityLabels[ticket.priority]" />
-          <span class="badge-neutral">{{ ticket.handler === 'human' ? '人工处理' : '待分派' }}</span>
+          <span class="badge-neutral">{{ ticket.handler === 'human' ? (ticket.assigned_agent_id ? '已指派客服' : '人工待分派') : '历史工单' }}</span>
         </div>
         <p class="mono quiet text-[11.5px]">
           {{ ticket.ticket_no }}
@@ -176,7 +177,7 @@ onMounted(load)
             v-if="ticket.handler !== 'human'"
             class="btn btn-primary btn-sm"
             :disabled="busy"
-            @click="toHuman"
+            @click="claim"
           >
             接管处理
           </button>

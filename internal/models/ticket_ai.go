@@ -72,7 +72,8 @@ type Ticket struct {
 	Priority string `gorm:"size:16;default:'normal';not null;index" json:"priority"`
 	// Handler 说明当前处理方：ai / human / system。
 	Handler string `gorm:"size:16;default:'ai';not null;index" json:"handler"`
-	// AssignedAgentID 是人工客服负责人的用户 ID，未转人工时为空。
+	// AssignedAgentID 指向客服坐席表（customer_service_agents）的主键，
+	// 不是登录用户 ID；未分派时为空。
 	AssignedAgentID *uint `gorm:"index" json:"assigned_agent_id,omitempty"`
 
 	AIEnabled bool `gorm:"default:true;not null" json:"ai_enabled"`
