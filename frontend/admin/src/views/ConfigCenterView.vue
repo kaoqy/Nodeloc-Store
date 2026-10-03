@@ -77,89 +77,170 @@ const templateDraft = ref<Partial<NotificationTemplate>>({
  * 开关给出开启/关闭后的实际含义，编号前缀直接预览生成结果。
  */
 interface FieldMeta {
+  /** 数值型字段后面的单位徽标。 */
   unit?: string
+  /** 一句话说明这项配置改了什么、影响到谁。 */
   hint?: string | ((config: SystemConfig) => string)
+  /** 当前取值会产生的实际结果，能算出来的都算给店家看。 */
   preview?: (config: SystemConfig) => string
+  /** 输入框里的示例值。 */
+  placeholder?: string
+  /** 建议取值范围；越界时在卡片上给出一条提醒。 */
+  range?: { min?: number; max?: number }
+  /** 开关打开 / 关闭后的实际含义。 */
   onLabel?: string
   offLabel?: string
+  /** 这一项在系统里管的是什么，用一句话点明，便于对照排查。 */
+  affects?: string
 }
 
 const FIELD_META: Record<string, FieldMeta> = {
   'ticket/ticket_no_prefix': {
-    hint: '买家在工单列表看到的编号前缀。',
+    hint: '买家在工单列表看到的编号前缀，工单创建时写入编号，之后不再变化。',
+    affects: '新建工单的编号',
+    placeholder: 'TK',
     preview: (c) => `${(c.value || 'TK').trim() || 'TK'}0001`,
   },
   'ticket/human_timeout_hours': {
     unit: '小时',
-    hint: (c) => `转人工后超过 ${c.value || '—'} 小时仍未处理，工单会标记为「即将超时」。`,
+    range: { min: 1, max: 720 },
+    affects: '工单列表的超时标记',
+    hint: (c) => `转人工后超过 ${c.value || '—'} 小时仍未处理，工单会标记为「即将超时」，并在客服工作台排到前面。`,
+    preview: (c) => {
+      const hours = Number(c.value)
+      if (!Number.isFinite(hours) || hours <= 0) return ''
+      return hours < 24 ? `约 ${hours} 小时后进入超时预警` : `约 ${Math.round((hours / 24) * 10) / 10} 天后进入超时预警`
+    },
   },
   'ticket/allow_reopen': {
     onLabel: '允许重开',
     offLabel: '不允许重开',
-    hint: '开启后，已解决或已关闭的工单买家可以重新打开继续追问。',
+    affects: '买家在「我的工单」里的可用操作',
+    hint: '开启后，已解决或已关闭的工单，买家可以重新打开继续追问；关闭后买家只能新建一张工单。',
+    preview: (c) => (isTruthy(c.value) ? '买家会看到「重新打开」按钮' : '买家只能新建工单'),
   },
   'ticket/allow_cancel': {
     onLabel: '允许撤销',
     offLabel: '不允许撤销',
-    hint: '开启后，买家可以自己撤销还没解决的工单。',
+    affects: '买家在「我的工单」里的可用操作',
+    hint: '开启后，买家可以自己撤销还没解决的工单；关闭后只能由客服结单或撤销。',
+    preview: (c) => (isTruthy(c.value) ? '买家会看到「撤销工单」按钮' : '撤销需要客服处理'),
   },
   'ticket/enable_rating': {
     onLabel: '邀请评价',
     offLabel: '不邀请评价',
-    hint: '开启后工单结束会邀请买家打分，分数进入满意度统计。',
+    affects: '工单结单流程与满意度统计',
+    hint: '开启后工单结束会请买家打分，分数进入总览页的满意度统计。',
+    preview: (c) => (isTruthy(c.value) ? '结单后请买家打分' : '结单直接结束，不打扰买家'),
   },
   'order/unpaid_cancel_hours': {
     unit: '小时',
-    hint: (c) => `下单后 ${c.value || '—'} 小时内未支付，订单自动关闭并释放库存。`,
+    range: { min: 1, max: 720 },
+    affects: '未支付订单的自动关单时间',
+    hint: (c) => `下单后 ${c.value || '—'} 小时内未支付，订单自动关闭并释放库存，买家需要重新下单。`,
+    preview: (c) => {
+      const hours = Number(c.value)
+      if (!Number.isFinite(hours) || hours <= 0) return ''
+      return hours < 24 ? `${hours} 小时后释放库存` : `${Math.round((hours / 24) * 10) / 10} 天后释放库存`
+    },
   },
   'order/auto_deliver_retry': {
     onLabel: '自动重试',
     offLabel: '不自动重试',
-    hint: '自动发货失败时后台定期重试，直到成功或需要人工介入。',
+    affects: '交付队列的后台重试',
+    hint: '自动发货失败时后台定期重试，直到成功或需要人工介入。关闭后失败的订单停在「待人工发货」。',
+    preview: (c) => (isTruthy(c.value) ? '失败订单会自动重试交付' : '失败订单停在「待人工发货」'),
   },
   'product/default_stock_alert': {
     unit: '张',
-    hint: (c) => `卡密剩余低于 ${c.value || '—'} 张时，总览页列入库存预警。`,
+    range: { min: 0, max: 100000 },
+    affects: '总览页的库存预警列表',
+    hint: (c) => `卡密剩余低于 ${c.value || '—'} 张时，总览页把商品列入库存预警，提醒补货。填 0 表示不做预警。`,
+    preview: (c) => {
+      const n = Number(c.value)
+      if (!Number.isFinite(n) || n <= 0) return '不产生库存预警'
+      return `剩余 ≤ ${n} 张时预警`
+    },
   },
   'product/show_sold_count': {
     onLabel: '显示销量',
     offLabel: '隐藏销量',
-    hint: '在前台商品卡片上显示已售数量。',
+    affects: '前台商品卡片',
+    hint: '在前台商品卡片上显示已售数量；关闭后只显示库存状态。',
+    preview: (c) => (isTruthy(c.value) ? '卡片上出现「已售 N」' : '卡片上不出现销量'),
   },
   'activity/default_per_user_limit': {
     unit: '次/人',
-    hint: (c) => (c.value === '0' ? '当前不限次，任何买家都可以反复参与。' : `每位买家最多参与 ${c.value || '—'} 次；填 0 表示不限次。`),
+    range: { min: 0, max: 9999 },
+    affects: '新建活动时预填的参与上限',
+    hint: '新建活动时预填的参与上限；填 0 表示不限次，任何买家都可以反复参与。',
+    preview: (c) => {
+      if (!c.value || c.value === '0') return '默认不限次'
+      const n = Number(c.value)
+      return Number.isFinite(n) ? `新建活动默认限 ${n} 次/人` : ''
+    },
   },
   'activity/block_activity_stacking': {
     onLabel: '禁止叠加',
     offLabel: '允许叠加',
-    hint: '一条订单只应用优惠最大的一项活动，避免折上折算出异常低价。',
+    affects: '结算时的优惠计算',
+    hint: '开启后一条订单只应用优惠最大的一项活动，避免折上折算出异常低价；关闭则按活动各自的叠加规则合并。',
+    preview: (c) => (isTruthy(c.value) ? '一单只取最优的一项活动' : '多项活动可以同时抵扣'),
   },
   'site/footer_show_version': {
     onLabel: '显示版本号',
     offLabel: '隐藏版本号',
+    affects: '店铺前台页脚',
     hint: '在店铺页脚展示当前版本，方便核对线上是否是最新构建。',
+    preview: (c) => (isTruthy(c.value) ? '页脚显示一行版本号' : '页脚不显示版本号'),
   },
   'risk/coupon_max_attempts': {
     unit: '次/分钟',
-    hint: (c) => `同一来源每分钟最多尝试 ${c.value || '—'} 次优惠码，超出会被限流。`,
+    range: { min: 1, max: 600 },
+    affects: '优惠码校验接口',
+    hint: (c) => `同一来源每分钟最多尝试 ${c.value || '—'} 次优惠码，超出会被限流，防止有人逐个猜码。`,
+    preview: (c) => {
+      const n = Number(c.value)
+      return Number.isFinite(n) && n > 0 ? `每分钟放行 ${n} 次校验` : ''
+    },
   },
   'risk/require_second_confirm': {
     onLabel: '需要二次确认',
     offLabel: '无需二次确认',
-    hint: '退款、发券这类写操作需要买家本人再确认一次。',
+    affects: '退款、发券等高金额写操作',
+    hint: '开启后，退款、发券这类写操作需要买家本人再确认一次；涉及金钱的活动卡片同样会强制二次确认。',
+    preview: (c) => (isTruthy(c.value) ? '高风险操作会先弹确认' : '高风险操作一步完成'),
   },
   'retention/audit_log_days': {
     unit: '天',
-    hint: (c) => `后台操作记录保留 ${c.value || '—'} 天，超期可由清理任务删除。`,
+    range: { min: 7, max: 3650 },
+    affects: '后台操作记录',
+    hint: (c) => `后台操作记录保留 ${c.value || '—'} 天，超期可由清理任务删除；排查纠纷时先看这里。`,
+    preview: (c) => {
+      const n = Number(c.value)
+      return Number.isFinite(n) && n > 0 ? `约保留 ${Math.round(n / 30)} 个月` : ''
+    },
   },
   'retention/ticket_days': {
     unit: '天',
-    hint: (c) => `已关闭工单保留 ${c.value || '—'} 天，便于日后复查。`,
+    range: { min: 7, max: 3650 },
+    affects: '已关闭工单',
+    hint: (c) => `已关闭工单保留 ${c.value || '—'} 天，便于日后复查；早于该期限的可由清理任务删除。`,
+    preview: (c) => {
+      const n = Number(c.value)
+      if (!Number.isFinite(n) || n <= 0) return ''
+      return `约保留 ${Math.round(n / 30)} 个月`
+    },
   },
   'upload/max_image_mb': {
     unit: 'MB',
-    hint: (c) => `商品封面与客服头像单张图片不超过 ${c.value || '—'} MB。`,
+    range: { min: 1, max: 20 },
+    affects: '商品封面与客服头像上传',
+    hint: (c) => `商品封面与客服头像单张图片不超过 ${c.value || '—'} MB，超过会被拒绝上传。`,
+    preview: (c) => {
+      const n = Number(c.value)
+      return Number.isFinite(n) && n > 0 ? `单张上限 ${n} MB` : ''
+    },
   },
 }
 
@@ -252,6 +333,11 @@ function metaOf(config: SystemConfig): FieldMeta {
   return FIELD_META[`${config.group}/${config.key}`] ?? {}
 }
 
+/** 库里存的是 'true' / '1' 这类字符串，统一在这里判断。 */
+function isTruthy(value?: string): boolean {
+  return value === 'true' || value === '1'
+}
+
 function hintOf(config: SystemConfig): string {
   const meta = metaOf(config)
   if (typeof meta.hint === 'function') return meta.hint(config)
@@ -275,7 +361,30 @@ function offLabelOf(config: SystemConfig): string {
 }
 
 function isOn(config: SystemConfig): boolean {
-  return config.value === 'true' || config.value === '1'
+  return isTruthy(config.value)
+}
+
+function placeholderOf(config: SystemConfig): string {
+  return metaOf(config).placeholder ?? ''
+}
+
+function affectsOf(config: SystemConfig): string {
+  return metaOf(config).affects ?? ''
+}
+
+/**
+ * 数值越界提醒。后端仍会保存，但这类值通常意味着打错了一个数量级，
+ * 与其悄悄生效，不如在卡片上点出来。
+ */
+function rangeWarnOf(config: SystemConfig): string {
+  const meta = metaOf(config)
+  if (!meta.range) return ''
+  const value = Number(config.value)
+  if (!Number.isFinite(value)) return ''
+  const { min, max } = meta.range
+  if (typeof min === 'number' && value < min) return `低于建议下限 ${min}`
+  if (typeof max === 'number' && value > max) return `高于建议上限 ${max}`
+  return ''
 }
 
 /** 提醒事件的分类，用于把模板按业务场景分组展示。 */
@@ -328,12 +437,10 @@ const currentBlocks = computed(() => {
     .filter((block) => block.parts.length > 0)
 })
 
-// 旧地址继续可用，落到合并后的新分组。
+/** 合并过的旧地址仍然认得，直接落到现在的新分组。 */
 const LEGACY_TABS: Record<string, TabKey> = {
   service: 'support',
   ticket: 'support',
-  ai: 'support',
-  knowledge: 'support',
   order: 'commerce',
   product: 'commerce',
   activity: 'activity',
@@ -345,10 +452,14 @@ const LEGACY_TABS: Record<string, TabKey> = {
   upload: 'safety',
 }
 
+/** 已经彻底下线的后台地址：老书签不再映射到任何分组。 */
+const RETIRED_TABS = new Set(['ai', 'knowledge', 'chat', 'chatbot', 'assistant'])
+
 function normaliseTab(value: unknown): TabKey {
   const key = typeof value === 'string' ? value : ''
   const found = TABS.find((item) => item.key === key)
   if (found) return found.key
+  if (RETIRED_TABS.has(key)) return 'support'
   return LEGACY_TABS[key] ?? 'support'
 }
 
@@ -436,13 +547,52 @@ async function saveTemplateDraft() {
   }
 }
 
+/**
+ * 收件人口径与后端 normalizeRecipients 对齐，并在文案里写清站内 / 邮件分别发到哪，
+ * 避免店主以为「订单异常」会发到买家，或者以为填了邮箱就等于加了收件人。
+ */
 function recipientsLabel(value?: string): string {
   const raw = (value || '').trim()
-  if (!raw) return '默认（买家）'
-  if (raw === 'staff') return '客服团队'
-  if (raw === 'user') return '站内用户'
-  if (raw === 'custom') return '自定义邮箱'
+  if (!raw) return '买家本人（站内信 + 买家邮箱）'
+  if (raw === 'staff') return '客服团队（员工站内信 + 员工邮箱）'
+  if (raw === 'user') return '买家本人（站内信 + 买家邮箱）'
+  if (raw === 'custom') return '指定邮箱（只发邮件，不产生站内信）'
   return raw
+}
+
+/** 只有「指定邮箱、纯邮件」的提醒事件才在卡片上提示去设置页确认 SMTP。 */
+function mailOnlyOf(item: NotificationTemplate): boolean {
+  const raw = (item.recipients || '').trim()
+  if (!raw || raw === 'staff' || raw === 'user') return false
+  return !item.in_app && item.mail
+}
+
+/** 事件标识（order_paid 之类）翻译成人话，店主不需要记内部事件名。 */
+const EVENT_LABELS: Record<string, string> = {
+  ticket_created: '买家提交工单时',
+  ticket_transfer: '工单转人工时',
+  agent_reply: '人工客服回复时',
+  ticket_status: '工单状态变化时',
+  ticket_timeout: '工单接近超时阈值时',
+  activity_started: '活动开始时',
+  coupon_claimed: '买家领取优惠券时',
+  coupon_expiring: '优惠券即将过期时',
+  order_exception: '订单支付或交付异常时',
+}
+
+function eventLabel(event?: string): string {
+  const raw = (event || '').trim()
+  if (!raw) return '手动触发或由后台任务触发'
+  return EVENT_LABELS[raw] || `事件 ${raw}`
+}
+
+/** 事件当前的实际触发方式，让「站内 / 邮件」两个开关有对照。 */
+function channelsLabel(item: NotificationTemplate): string {
+  const parts: string[] = []
+  if (item.in_app) parts.push('站内信')
+  if (item.mail) parts.push('邮件')
+  if (!parts.length) return '未开启任何渠道'
+  return `当前发出：${parts.join(' + ')}`
 }
 
 function editTemplate(template: NotificationTemplate) {
@@ -539,14 +689,30 @@ onMounted(() => {
                 <span class="quiet text-[11.5px]">{{ items.length }} 个事件</span>
               </div>
               <div class="config-rows">
-                <div v-for="item in items" :key="item.id" class="config-row">
+                <div
+                  v-for="item in items"
+                  :key="item.id"
+                  class="config-row"
+                  :class="item.is_enabled ? '' : 'config-row-off'"
+                >
                   <div class="config-row-label">
-                    <p class="text-sm font-semibold">{{ item.name }}</p>
-                    <p class="quiet mt-0.5 text-[12px]">
+                    <div class="config-row-head">
+                      <p class="text-sm font-semibold">{{ item.name }}</p>
+                      <span v-if="!item.is_enabled" class="config-kind">已停用</span>
+                      <span v-else-if="!item.in_app && !item.mail" class="config-kind">无渠道</span>
+                    </div>
+                    <p class="config-row-when">
+                      <span class="config-affects-tag">触发</span>
+                      <span>{{ eventLabel(item.event) }}</span>
+                    </p>
+                    <p class="quiet mt-1.5 text-[12px] leading-relaxed">
                       {{ item.title_template || item.content_template || '未设置文案' }}
                     </p>
-                    <p v-if="item.variables" class="mono quiet mt-0.5 text-[11px]">变量：{{ item.variables }}</p>
-                    <p class="quiet mt-0.5 text-[11px]">提醒收件人：{{ recipientsLabel(item.recipients) }}</p>
+                    <p class="config-row-meta">{{ channelsLabel(item) }}　·　收件人：{{ recipientsLabel(item.recipients) }}</p>
+                    <p v-if="item.variables" class="mono quiet mt-1 text-[11px]">可用变量：{{ item.variables }}</p>
+                    <p v-if="mailOnlyOf(item)" class="config-warn">
+                      只发邮件，请先在「邮件通知」里配好 SMTP 并发一封测试邮件。
+                    </p>
                   </div>
                   <div class="config-row-control">
                     <label class="config-switch">
@@ -657,11 +823,23 @@ onMounted(() => {
                     :class="config.value_type === 'bool' ? 'config-card-toggle' : ''"
                   >
                     <div class="config-card-body">
-                      <p class="config-card-label">{{ config.label || config.key }}</p>
+                      <div class="config-card-head">
+                        <p class="config-card-label">{{ config.label || config.key }}</p>
+                        <span v-if="config.value_type === 'bool'" class="config-kind">开关</span>
+                        <span v-else-if="unitOf(config)" class="config-kind">{{ unitOf(config) }}</span>
+                        <span v-else class="config-kind">文本</span>
+                      </div>
+                      <p v-if="affectsOf(config)" class="config-affects">
+                        <span class="config-affects-tag">影响</span>
+                        <span>{{ affectsOf(config) }}</span>
+                      </p>
                       <p class="config-card-hint">{{ hintOf(config) }}</p>
                       <p v-if="previewOf(config)" class="config-preview">
                         <span class="quiet text-[10.5px] tracking-wide">预览</span>
                         <span class="mono">{{ previewOf(config) }}</span>
+                      </p>
+                      <p v-if="rangeWarnOf(config)" class="config-warn">
+                        {{ rangeWarnOf(config) }}，请确认这是有意为之。
                       </p>
                     </div>
                     <div class="config-card-control">
@@ -683,10 +861,10 @@ onMounted(() => {
                             v-model="config.value"
                             class="input"
                             :type="config.value_type === 'int' ? 'number' : 'text'"
+                            :placeholder="placeholderOf(config)"
                             :disabled="!canManageSystem"
                             @keyup.enter="saveConfig(config)"
                           />
-                          <span v-if="unitOf(config)" class="config-unit">{{ unitOf(config) }}</span>
                         </div>
                         <button v-if="canManageSystem" class="btn btn-secondary btn-sm" :disabled="busy" @click="saveConfig(config)">
                           保存
@@ -759,6 +937,17 @@ onMounted(() => {
 }
 .config-row:hover { border-color: var(--stroke); }
 .config-row-label { min-width: 200px; flex: 1; }
+.config-row-off { opacity: 0.62; }
+.config-row-head { display: flex; align-items: baseline; gap: 8px; }
+.config-row-when {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.config-row-meta { margin-top: 6px; font-size: 11.5px; line-height: 1.6; color: var(--text-dim); }
 .config-row-control { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
 @media (max-width: 640px) {
   .config-row-control { margin-left: 0; width: 100%; }
@@ -769,8 +958,8 @@ onMounted(() => {
 .config-switch span { color: var(--text-dim); }
 
 /* ── 规则类配置的专属卡片 ──
-   每一项是一张带说明与当前取值预览的卡片；开关型排成紧凑网格，
-   数值型留出输入区与单位，避免所有字段长成同一个输入框。 */
+   每一项是一张带说明、影响范围与当前取值预览的卡片；开关型排成紧凑网格，
+   数值型留出输入区与单位，越界时在卡片上给出建议，避免长成一片同款输入框。 */
 .config-parts { display: flex; flex-direction: column; gap: 18px; }
 .config-part-title {
   font-size: 11px;
@@ -797,7 +986,40 @@ onMounted(() => {
 }
 .config-card:hover { border-color: var(--stroke); background: var(--surface-hi); }
 .config-card-body { flex: 1; min-width: 0; }
+.config-card-head { display: flex; align-items: baseline; gap: 8px; }
 .config-card-label { font-size: 13.5px; font-weight: 650; }
+.config-kind {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--stroke-quiet);
+  background: var(--surface);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-quiet);
+}
+.config-affects {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.config-affects-tag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+.config-warn {
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: var(--warn, #b45309);
+}
 .config-card-hint { margin-top: 3px; font-size: 12px; line-height: 1.6; color: var(--text-quiet); }
 .config-preview {
   display: inline-flex;
@@ -825,14 +1047,7 @@ onMounted(() => {
   flex: 1;
   min-width: 140px;
 }
-.config-input .input { padding-right: 58px; }
-.config-unit {
-  position: absolute;
-  right: 10px;
-  font-size: 11.5px;
-  color: var(--text-quiet);
-  pointer-events: none;
-}
+.config-input .input { padding-right: 12px; }
 @media (max-width: 640px) {
   .config-cards { grid-template-columns: 1fr; }
   .config-card-control .btn { margin-left: auto; }

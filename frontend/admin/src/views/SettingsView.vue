@@ -764,7 +764,30 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <p v-if="mailMessage" class="alert mt-3" :class="mailMessage.startsWith('失败') ? 'alert-danger' : 'alert-success'" role="status">{{ mailMessage }}</p>
-          <p class="hint mt-3">支持 SMTP 465 SSL 或 SMTP 587 STARTTLS。当前没有订单邮件模板或验证码业务，测试邮件只验证连接、TLS、认证和发信。</p>
+          <p class="hint mt-3">支持 SMTP 465 SSL 或 SMTP 587 STARTTLS。测试邮件只验证连接、TLS、认证和发信。</p>
+          <div class="smtp-notes">
+            <p class="smtp-note-title">填之前先确认三件事</p>
+            <ul class="smtp-note-list">
+              <li>
+                <strong>发件地址要和 SMTP 账号同域</strong>，否则多数邮箱服务商会拒收或被判为垃圾邮件。
+                例如用 QQ 邮箱发信，发件人就写你自己的 QQ 邮箱地址。
+              </li>
+              <li>
+                <strong>密码填授权码，不是网页登录密码。</strong>
+                QQ 邮箱在「设置 → 账户 → POP3/IMAP/SMTP 服务」里开启后生成授权码；
+                腾讯企业邮、网易、Gmail 同理，都要在邮箱后台单独开 SMTP 并复制授权码。
+              </li>
+              <li>
+                <strong>测试收件人先填你自己的邮箱</strong>，能收到再换成老板或客服组邮箱，
+                免得配错了还发不到人。
+              </li>
+            </ul>
+            <p class="hint mt-2">
+              提醒事件默认发到客服团队（员工站内信 + 员工邮箱）。若要把「订单异常」单独发到某个邮箱，
+              需要在提醒事件里把收件人写成该邮箱地址，并勾选「邮件」渠道；
+              目前配置中心还不支持在事件开关旁边直接指定邮箱地址。
+            </p>
+          </div>
         </div>
 
         <!-- 公告与页脚 -->
@@ -1017,4 +1040,31 @@ onBeforeUnmount(() => {
 .settings-nav-item:hover { background: var(--surface-hi); color: var(--text); }
 .settings-nav-active { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
 .settings-nav-active::before { height: 20px; }
+.smtp-notes {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--surface);
+}
+.smtp-note-title { font-size: 12.5px; font-weight: 650; color: var(--text-dim); }
+.smtp-note-list { margin-top: 8px; display: flex; flex-direction: column; gap: 7px; }
+.smtp-note-list li {
+  position: relative;
+  padding-left: 15px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-quiet);
+}
+.smtp-note-list li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 7px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--stroke);
+}
+.smtp-note-list strong { color: var(--text-dim); font-weight: 650; }
 </style>
