@@ -391,10 +391,15 @@ func (s *Service) priceWithRules(activity *domain.Activity, rules []domain.Activ
 		case domain.RuleFullReduce:
 			value = tierAmount(config, total, input.Quantity)
 		case domain.RuleFullQuantity:
+			// 满件优惠分两种口径：PerUnit > 0 时每件减多少（例如
+			// 每件减 5 元）；否则 Amount 是满足件数后一次性减的固定金额
+			// （例如 满 3 件减 5 元）。不能用 Amount 乘件数，否则卖得越多
+			// 亏得越多，这正是之前满件优惠算错的原因。
 			if config.Quantity > 0 && input.Quantity >= config.Quantity {
-				value = config.Amount * input.Quantity
 				if config.PerUnit > 0 {
 					value = config.PerUnit * input.Quantity
+				} else {
+					value = config.Amount
 				}
 			}
 		case domain.RuleBulkPrice:
@@ -405,15 +410,16 @@ func (s *Service) priceWithRules(activity *domain.Activity, rules []domain.Activ
 		if value <= 0 {
 			continue
 		}
-		if !stacking && value > discount {
-			// 不可叠加时取最大的一条，而不是累加。
-			discount = value
-			applied = []string{rule.RuleType}
+		if !stacking {
+			// 不可叠加时只取最大的一条。没有超过当前最优的规则不能记入
+			// AppliedRules，否则快照会声称应用了一条实际没生效的规则。
+			if value > discount {
+				discount = value
+				applied = []string{rule.RuleType}
+			}
 			continue
 		}
-		if stacking {
-			discount += value
-		}
+		discount += value
 		if !contains(applied, rule.RuleType) {
 			applied = append(applied, rule.RuleType)
 		}
@@ -647,6 +653,9 @@ func validateRuleConfig(ruleType string, config domain.RuleConfig) error {
 	case domain.RuleFullQuantity:
 		if config.Quantity <= 0 {
 			return fmt.Errorf("%w: 满件规则要填件数。", domain.ErrInvalidInput)
+		}
+		if config.Amount <= 0 && config.PerUnit <= 0 {
+			return fmt.Errorf("%w: 满件规则要填减免金额或每件优惠。", domain.ErrInvalidInput)
 		}
 	case domain.RuleCouponLock, domain.RuleGiftCoupon:
 		if config.CouponID == 0 {

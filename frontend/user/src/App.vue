@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import NavBar from './components/NavBar.vue'
-import SupportWidget from './components/SupportWidget.vue'
 import RouteProgress from './components/RouteProgress.vue'
 import { useAuthStore } from './stores/auth'
 import { useSiteStore } from './stores/site'
@@ -44,7 +43,6 @@ onMounted(async () => {
       </div>
     </main>
 
-    <SupportWidget />
 
     <footer class="mt-20 border-t border-[var(--stroke)] py-9">
       <div class="mx-auto flex w-full max-w-6xl flex-col items-center gap-3 px-4 text-center sm:px-6">

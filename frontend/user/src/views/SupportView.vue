@@ -45,7 +45,7 @@ const helpSections = [
   { id: 'card-issue', title: '卡密无效或已被使用', body: '带着订单号提交工单，客服会先核对交付记录。核实为无效卡后会按售后规则重新发货或退款。' },
   { id: 'refund', title: '退款与售后规则', body: '数字商品具有一次性交付属性，已交付且可正常使用的卡密原则上不支持退款。未交付、卡密无效或重复交付的情况可以申请售后。' },
   { id: 'oauth', title: 'NodeLoc 登录失败', body: '请从登录页重新发起一次授权。若持续失败，请把登录时间与页面提示提供给客服，不要提供 Client Secret、授权码或 Token。' },
-  { id: 'human', title: '需要人工客服', body: '在右下角打开客服窗口提交问题，或在本页「我的工单」里直接提交。客服会按顺序跟进。' },
+  { id: 'human', title: '需要人工客服', body: '在本页「我的工单」里提交问题，客服会按顺序跟进。提交时可以填写订单号，方便客服直接核对。' },
 ]
 
 const openHelp = ref('buy')
@@ -167,8 +167,11 @@ async function reopen() {
   }
 }
 
-function openWidget() {
-  window.dispatchEvent(new CustomEvent('nodeloc:open-support'))
+// 客服窗口已下线，联系客服统一走工单：切到工单标签并打开提交表单。
+function startTicket() {
+  tab.value = 'tickets'
+  ticketError.value = ''
+  showCreate.value = true
 }
 
 onMounted(() => {
@@ -193,13 +196,13 @@ onMounted(() => {
           先看下面的常见问题；没解决就提交工单，客服会带着你的描述和订单信息跟进。
         </p>
       </div>
-      <button class="btn btn-primary" @click="openWidget">
-        联系客服
+      <button class="btn btn-primary" @click="startTicket">
+        提交工单
       </button>
     </header>
 
     <div class="mt-6 grid gap-3 sm:grid-cols-3">
-      <button class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]" @click="openWidget">
+      <button class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]" @click="startTicket">
         <p class="font-semibold">联系客服</p>
         <p class="quiet mt-1 text-xs">描述问题，提交后由客服跟进</p>
       </button>
@@ -244,7 +247,7 @@ onMounted(() => {
       </article>
       <div class="card flex flex-wrap items-center gap-3">
         <p class="text-sm text-[var(--text-dim)]">没有找到答案？直接提交工单，客服会帮你查订单。</p>
-        <button class="btn btn-secondary btn-sm ml-auto" @click="openWidget">联系客服</button>
+        <button class="btn btn-secondary btn-sm ml-auto" @click="startTicket">提交工单</button>
       </div>
     </section>
 

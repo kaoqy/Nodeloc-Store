@@ -9,8 +9,6 @@ import (
 	"gorm.io/gorm"
 
 	activityapplication "github.com/kaoqy/Nodeloc-Store/internal/modules/activity/application"
-	paymentapplication "github.com/kaoqy/Nodeloc-Store/internal/modules/payment/application"
-	supportcontract "github.com/kaoqy/Nodeloc-Store/internal/modules/support/contract"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/app/stockwatch"
 	"github.com/kaoqy/Nodeloc-Store/internal/authz"
@@ -47,8 +45,8 @@ type Container struct {
 	// Activity is the promotion runtime: structured rules, server-side pricing
 	// and participation records. Payment prices orders through it.
 	Activity *activity.Module
-	// Support is the ticket + AI customer service runtime. Tickets default to AI
-	// handling, with a controlled tool layer and a human queue behind it.
+	// Support is the ticket runtime. New tickets land in the human queue;
+	// the tool layer below stays for legacy admin-side actions.
 	Support *support.Module
 	// Plugin is the extension runtime. It carries the providers this release
 	// ships and the shop's enrollments of them; the money side calls its Fulfill
@@ -151,11 +149,9 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		return nil, err
 	}
 	activityMod := activity.Wire(db)
+	// 工单模块只保留通知与邮件两条出口：原先供 AI 工具调用的订单 /
+	// 商品 / 活动适配器随 AI 客服一并下线。
 	supportMod := support.Wire(db, cfg, support.Dependencies{
-		Orders:     support.OrderAdapter{DB: db},
-		Users:      support.UserAdapter{Find: func(ctx context.Context, userID uint) (*models.User, error) { return identityFind(ctx, userID) }},
-		Catalog:    support.CatalogAdapter{DB: db},
-		Activities: support.ActivityAdapter{DB: db},
 		Notifier: support.NotifierAdapter{Send: func(ctx context.Context, notification *models.Notification) error {
 			return notificationMod.Service.Send(ctx, notification)
 		}},
@@ -165,12 +161,7 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 			Lookup: mailAddresses{identity: identityMod.Service},
 		},
 		// recipients=staff 的通知发到能看工单的管理端账号与本机邮箱。
-		Staff:    staffRoster{db: db, identity: identityMod.Service},
-		Refunder: refundBridge{payments: paymentMod.Service},
-		// 卡密读取与补发都走既有模块能力，AI 只是调用方。
-		Cards:       cardBridge{payments: paymentMod.Service},
-		Fulfillment: fulfillmentBridge{payments: paymentMod.Service},
-		Pricing:     pricingBridge{activity: activityMod.Service},
+		Staff: staffRoster{db: db, identity: identityMod.Service},
 	})
 	auditMod := audit.Wire(db)
 	pluginMod := plugin.Wire(db)
@@ -276,35 +267,6 @@ func (b activityPricerBridge) PriceFor(ctx context.Context, userID, productID ui
 		return 0, "", 0
 	}
 	return priced.DiscountAmount, priced.ActivityName, priced.Payable + priced.DiscountAmount
-}
-
-// refundBridge 把支付模块的退款能力接到 AI 客服上。
-// 它做两件事：把订单类型收敛成 support 契约里的形状，并保证只处理当前用户自己的单。
-type refundBridge struct {
-	payments *paymentapplication.Service
-}
-
-func (r refundBridge) RefundOrderForUser(ctx context.Context, userID uint, orderNo string) (int, string, error) {
-	amount, status, err := r.payments.RefundOrderForUser(ctx, userID, orderNo)
-	return amount, status, err
-}
-
-func (r refundBridge) RefundableOrders(ctx context.Context, userID uint, limit int) ([]supportcontract.OrderContext, error) {
-	orders, err := r.payments.RefundableOrders(ctx, userID, limit)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]supportcontract.OrderContext, 0, len(orders))
-	for _, order := range orders {
-		item := supportcontract.OrderContext{
-			OrderNo: order.OrderNo, Quantity: order.Quantity,
-			TotalAmount: order.TotalAmount, Status: order.Status,
-			FulfillmentStatus: order.FulfillmentStatus,
-			PaidAt:            order.PaidAt, DeliveredAt: order.DeliveredAt,
-		}
-		out = append(out, item)
-	}
-	return out, nil
 }
 
 // activityDefaults adapts the configuration centre to the activity handler's
@@ -508,54 +470,4 @@ func (mailSender) SendMail(config notificationcontract.MailConfig, to, subject, 
 		Secure: config.Secure,
 		From:   config.From,
 	}).Send(mail.Message{To: to, Subject: subject, Body: body})
-}
-
-// cardBridge 让 AI 在订单归属校验通过后读取该订单的交付卡密。
-// 它复用支付模块已有的 GetOrder（内部校验 userID 与订单归属），
-// 拿到的是这一单已经写好的交付内容，不额外查库、不改任何支付逻辑。
-type cardBridge struct {
-	payments *paymentapplication.Service
-}
-
-func (b cardBridge) CardsForOrder(ctx context.Context, userID uint, orderNo string) ([]string, error) {
-	order, err := b.payments.GetOrder(ctx, userID, orderNo)
-	if err != nil {
-		return nil, err
-	}
-	if order == nil || order.DeliveryContent == nil || strings.TrimSpace(*order.DeliveryContent) == "" {
-		return nil, nil
-	}
-	// 交付内容对多件商品是逐行写入的，按行拆成卡密列表。
-	lines := []string{}
-	for _, line := range strings.Split(*order.DeliveryContent, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			lines = append(lines, trimmed)
-		}
-	}
-	return lines, nil
-}
-
-// fulfillmentBridge 让 AI 对欠交付订单重跑既有交付流程。
-type fulfillmentBridge struct {
-	payments *paymentapplication.Service
-}
-
-func (b fulfillmentBridge) RetryDelivery(ctx context.Context, orderNo string) error {
-	_, err := b.payments.FulfillOrder(ctx, orderNo)
-	return err
-}
-
-// pricingBridge 把活动折扣计算暴露给 AI，保证它报的价与前台、结算同一个数。
-type pricingBridge struct {
-	activity *activityapplication.Service
-}
-
-func (b pricingBridge) PriceForProduct(ctx context.Context, userID, productID uint, unitPrice int) (int, string, error) {
-	priced, err := b.activity.Price(ctx, models.ActivityMatchInput{
-		UserID: userID, ProductID: productID, Quantity: 1, UnitPrice: unitPrice,
-	})
-	if err != nil || priced == nil || priced.DiscountAmount <= 0 {
-		return unitPrice, "", nil
-	}
-	return priced.Payable, priced.ActivityName, nil
 }

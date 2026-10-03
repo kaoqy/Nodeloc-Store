@@ -4,11 +4,10 @@ import (
 	"time"
 )
 
-// ── 工单与 AI 客服 ────────────────────────────────────────────────────
+// ── 工单与客服 ────────────────────────────────────────────────────────
 //
-// 工单默认先由 AI 接待：AI 读知识库、在授权范围内调用只读工具，能解决就
-// 解决，解决不了或用户主动要求时转人工。所有对话、工具调用、转人工和状态
-// 变化都留痕，客服接手时能看到完整的 AI 上下文。
+// 工单默认进入人工队列。AI 接待已下线，但 ai_processing / ai_solved 两个
+// 历史状态与对话、工具调用记录保留在表里，方便客服接手时看到完整历史。
 
 // 工单状态。
 const (
@@ -26,9 +25,9 @@ const (
 )
 
 var TicketStatusLabels = map[string]string{
-	TicketStatusAIProcessing:   "AI 处理中",
+	TicketStatusAIProcessing:   "处理中（历史）",
 	TicketStatusWaitingUser:    "等待用户回复",
-	TicketStatusAISolved:       "AI 已解决",
+	TicketStatusAISolved:       "已解决（历史）",
 	TicketStatusUserRequested:  "用户申请人工",
 	TicketStatusPendingHuman:   "待人工处理",
 	TicketStatusHumanHandling:  "人工处理中",
@@ -53,7 +52,7 @@ var TicketPriorityLabels = map[string]string{
 	"low": "低", "normal": "普通", "high": "高", "urgent": "紧急",
 }
 
-// Ticket 是一张工单。状态流转见 TicketStatusLabels，AI 接待是默认路径。
+// Ticket 是一张工单。新工单直接进入人工队列，状态流转见 TicketStatusLabels。
 type Ticket struct {
 	Base
 	TicketNo string `gorm:"size:64;uniqueIndex;not null" json:"ticket_no"`
@@ -167,7 +166,7 @@ type TicketAISession struct {
 	LastActiveAt   *time.Time `json:"last_active_at,omitempty"`
 }
 
-// AIConversation 是 AI 客服的一场对话（网站悬浮客服或工单内对话）。
+// AIConversation 是历史 AI 客服留下的一场对话（已下线，仅保留数据供客服查阅）。
 type AIConversation struct {
 	Base
 	// UserID 为空表示游客会话；游客受到更严格的频率限制。
@@ -187,7 +186,7 @@ type AIConversation struct {
 	LastMessageAt *time.Time `gorm:"index" json:"last_message_at,omitempty"`
 }
 
-// AIMessage 是 AI 对话的一条消息，role 取值 system/user/assistant/tool。
+// AIMessage 是历史 AI 对话的一条消息，role 取值 system/user/assistant/tool。
 type AIMessage struct {
 	Base
 	ConversationID uint   `gorm:"not null;index" json:"conversation_id"`
@@ -318,7 +317,7 @@ type AIFeedback struct {
 	Handled bool   `gorm:"default:false;not null" json:"handled"`
 }
 
-// AIConfig 是 AI 客服的总配置（单行）。APIKeyEnc 是加密后的密钥，
+// AIConfig 是历史 AI 客服的总配置（单行）。APIKeyEnc 是加密后的密钥，
 // 任何读接口都不会返回明文，只回 has_key。
 type AIConfig struct {
 	Base

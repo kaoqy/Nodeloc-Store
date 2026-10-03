@@ -8,153 +8,8 @@ import (
 	"time"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
-	"github.com/kaoqy/Nodeloc-Store/internal/modules/support/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/support/domain"
 )
-
-// ── 工单配置 ─────────────────────────────────────────────────────────
-
-// Config 读取 AI 配置与工作流配置；两张表都没有记录时给出默认值，
-// 保证第一次打开后台就能看到一份可编辑的配置。
-func (s *Service) Config(ctx context.Context) (*domain.AIConfig, error) {
-	config, err := s.repo.GetAIConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if config.ID == 0 {
-		defaults := DefaultAIConfig()
-		return &defaults, nil
-	}
-	return config, nil
-}
-
-func (s *Service) Workflow(ctx context.Context) (*domain.AIWorkflowConfig, error) {
-	config, err := s.repo.GetAIWorkflow(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if config.ID == 0 {
-		defaults := DefaultAIWorkflow()
-		return &defaults, nil
-	}
-	return config, nil
-}
-
-// SaveConfig 保存 AI 配置。API Key 传空表示保持原值，传 __clear__ 表示清除。
-func (s *Service) SaveConfig(ctx context.Context, config domain.AIConfig) (*domain.AIConfig, error) {
-	existing, err := s.repo.GetAIConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	config.ID = existing.ID
-	config.Base = existing.Base
-	if config.APIKeyEnc == "" {
-		config.APIKeyEnc = existing.APIKeyEnc
-	} else if config.APIKeyEnc == "__clear__" {
-		config.APIKeyEnc = ""
-	} else {
-		encrypted, err := s.EncryptSecret(config.APIKeyEnc)
-		if err != nil {
-			return nil, err
-		}
-		config.APIKeyEnc = encrypted
-	}
-	config.Provider = strings.TrimSpace(config.Provider)
-	if config.Provider == "" {
-		config.Provider = "openai-compatible"
-	}
-	if config.TimeoutMS < 1000 || config.TimeoutMS > 120000 {
-		return nil, fmt.Errorf("%w: 请求超时要在 1 到 120 秒之间。", domain.ErrInvalidInput)
-	}
-	if config.MaxContext <= 0 || config.MaxContext > 60 {
-		return nil, fmt.Errorf("%w: 最大上下文条数要在 1 到 60 之间。", domain.ErrInvalidInput)
-	}
-	if config.Temperature < 0 || config.Temperature > 2 {
-		return nil, fmt.Errorf("%w: 温度参数要在 0 到 2 之间。", domain.ErrInvalidInput)
-	}
-	if config.TopP <= 0 || config.TopP > 1 {
-		return nil, fmt.Errorf("%w: Top P 要在 0 到 1 之间。", domain.ErrInvalidInput)
-	}
-	if config.MaxMessageLen <= 0 {
-		config.MaxMessageLen = 2000
-	}
-	if config.AgentName == "" {
-		config.AgentName = "智能客服"
-	}
-	if config.IsEnabled {
-		if strings.TrimSpace(config.BaseURL) == "" || strings.TrimSpace(config.Model) == "" || config.APIKeyEnc == "" {
-			return nil, fmt.Errorf("%w: 启用 AI 客服前要填好 API 地址、模型名称和 API Key。", domain.ErrInvalidInput)
-		}
-	}
-	if err := s.repo.SaveAIConfig(ctx, &config); err != nil {
-		return nil, err
-	}
-	saved, err := s.repo.GetAIConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return s.maskConfig(saved), nil
-}
-
-// maskConfig 去掉密钥明文，只告诉前端「是否已配置」。
-func (s *Service) maskConfig(config *domain.AIConfig) *domain.AIConfig {
-	if config == nil {
-		return nil
-	}
-	masked := *config
-	hasKey := masked.APIKeyEnc != ""
-	masked.APIKeyEnc = ""
-	if hasKey {
-		masked.APIKeyEnc = "__saved__"
-	}
-	return &masked
-}
-
-// ConfigForAdmin 返回给后台的配置视图（密钥只回 has_key 标记）。
-func (s *Service) ConfigForAdmin(ctx context.Context) (map[string]any, error) {
-	config, err := s.Config(ctx)
-	if err != nil {
-		return nil, err
-	}
-	workflow, err := s.Workflow(ctx)
-	if err != nil {
-		return nil, err
-	}
-	hasKey := config.APIKeyEnc != "" && config.APIKeyEnc != "__saved__"
-	config.APIKeyEnc = ""
-	return map[string]any{"config": config, "workflow": workflow, "has_key": hasKey}, nil
-}
-
-func (s *Service) SaveWorkflow(ctx context.Context, config domain.AIWorkflowConfig) (*domain.AIWorkflowConfig, error) {
-	existing, err := s.repo.GetAIWorkflow(ctx)
-	if err != nil {
-		return nil, err
-	}
-	config.ID = existing.ID
-	config.Base = existing.Base
-	if config.DefaultHandleMinutes < 1 {
-		config.DefaultHandleMinutes = 10
-	}
-	if config.MaxFailures < 1 {
-		config.MaxFailures = 3
-	}
-	if config.TransferAfterFailures < 1 {
-		config.TransferAfterFailures = 2
-	}
-	if config.TransferAfterDownvotes < 1 {
-		config.TransferAfterDownvotes = 2
-	}
-	if config.HighAmountThreshold <= 0 {
-		config.HighAmountThreshold = 500
-	}
-	if config.EstimateReplyMinutes <= 0 {
-		config.EstimateReplyMinutes = 30
-	}
-	if err := s.repo.SaveAIWorkflow(ctx, &config); err != nil {
-		return nil, err
-	}
-	return s.repo.GetAIWorkflow(ctx)
-}
 
 // ── 工单 ─────────────────────────────────────────────────────────────
 
@@ -203,13 +58,10 @@ func (s *Service) CreateTicket(ctx context.Context, input CreateTicketInput) (*d
 	if err != nil {
 		return nil, err
 	}
-	workflow, _ := s.Workflow(ctx)
 	due := s.now().UTC()
 	estimate := s.SystemConfigInt(ctx, "ticket", "human_timeout_hours", 0)
 	if estimate > 0 {
 		due = due.Add(time.Duration(estimate) * time.Hour)
-	} else if workflow != nil && workflow.EstimateReplyMinutes > 0 {
-		due = due.Add(time.Duration(workflow.EstimateReplyMinutes) * time.Minute)
 	}
 	// 人工优先：新单一律进待人工队列，AI 不再自动接待。
 	// AIEnabled 置 false，工单里的自动应答分支因此不会触发。
@@ -268,15 +120,6 @@ func validPriority(value string) bool {
 	return false
 }
 
-// aiReady 判断是否真的配置好了 AI：开关打开且有模型客户端。
-func (s *Service) aiReady(ctx context.Context) bool {
-	config, err := s.Config(ctx)
-	if err != nil || config == nil || !config.IsEnabled {
-		return false
-	}
-	return s.model != nil
-}
-
 // ListTickets 是后台工单列表。
 func (s *Service) ListTickets(ctx context.Context, filter domain.TicketFilter) ([]domain.TicketView, int64, error) {
 	return s.repo.ListTickets(ctx, filter)
@@ -296,10 +139,6 @@ func (s *Service) TicketDetail(ctx context.Context, id uint, includeInternal boo
 	}
 	if logs, _, err := s.repo.ListTicketLogs(ctx, id, 200, 0); err == nil {
 		detail.Logs = logs
-	}
-	// 只取这张工单的调用记录：不带 ticket_id 会把别人的调用一并读出来。
-	if calls, _, err := s.repo.ListToolCalls(ctx, contract.ToolCallFilter{TicketID: id, Limit: 200}); err == nil {
-		detail.ToolCalls = calls
 	}
 	if assignments, err := s.repo.ListAssignments(ctx, id); err == nil {
 		detail.Assignments = assignments
@@ -481,7 +320,7 @@ func (s *Service) TransferToHuman(ctx context.Context, input domain.TransferInpu
 	}
 	message := &domain.TicketMessage{
 		TicketID: ticket.ID, SenderType: domain.SenderSystem,
-		Content: "用户申请转人工客服，AI 对话上下文已保留。原因：" + reason, ContentType: "text",
+		Content: "用户申请人工跟进。原因：" + reason, ContentType: "text",
 	}
 	_ = s.repo.CreateMessage(ctx, message)
 	_ = s.repo.AppendTicketLog(ctx, &domain.TicketLog{
@@ -493,23 +332,20 @@ func (s *Service) TransferToHuman(ctx context.Context, input domain.TransferInpu
 	if _, err := s.AutoAssign(ctx, ticket.ID, 0); err != nil && !errors.Is(err, domain.ErrHumanUnavailable) {
 		logf("ticket %s: auto assign failed: %v", ticket.TicketNo, err)
 	}
-	workflow, _ := s.Workflow(ctx)
 	result := &domain.TransferResult{
 		TicketNo: ticket.TicketNo, Summary: summary, SuggestedPlan: plan,
-		EstimateMinutes: 30, WorkingHours: "每天 09:00 - 21:00",
+		EstimateMinutes: s.SystemConfigInt(ctx, "ticket", "estimate_reply_minutes", 30),
+		WorkingHours:    s.SystemConfigValue(ctx, "ticket", "working_hours", "每天 09:00 - 21:00"),
 	}
-	if workflow != nil {
-		result.EstimateMinutes = workflow.EstimateReplyMinutes
-		if workflow.WorkingHours != "" {
-			result.WorkingHours = workflow.WorkingHours
-		}
+	if result.EstimateMinutes <= 0 {
+		result.EstimateMinutes = 30
 	}
 	s.notify(ctx, "ticket.transferred", map[string]string{
 		"ticket_no": ticket.TicketNo, "agent_name": "人工客服",
 	}, Notification{
 		UserID: input.UserID, TicketID: ticket.ID,
 		Title:   "工单 " + ticket.TicketNo + " 已转人工",
-		Content: "客服会尽快跟进，你的 AI 对话记录已经一并转过去了。",
+		Content: "客服会尽快跟进，你的历史留言已经一并转过去了。",
 	})
 	fresh, err := s.repo.GetTicket(ctx, ticket.ID)
 	if err == nil {
@@ -665,11 +501,37 @@ func (s *Service) MarkUserRead(ctx context.Context, ticketID uint) error {
 	return s.repo.UpdateTicket(ctx, ticket)
 }
 
-// toolCallKeys 只取工具标识，写进工单日志时不必记录完整结果。
-func toolCallKeys(calls []domain.ToolCallResult) []string {
-	keys := make([]string, 0, len(calls))
-	for _, call := range calls {
-		keys = append(keys, call.ToolKey)
+// HandleTicketMessage 是买家在工单里继续追问时的入口。AI 客服已下线，
+// 消息写入后直接留给人工跟进，不再触发自动应答。
+func (s *Service) HandleTicketMessage(ctx context.Context, ticketID, userID uint, content string) (*domain.TicketMessage, bool, error) {
+	message, err := s.AddMessage(ctx, ticketID, domain.SenderUser, userID, "", content, false)
+	if err != nil {
+		return nil, false, err
 	}
-	return keys
+	return message, false, nil
+}
+
+// SummaryForTicket 给客服看的问题摘要，转人工时调用。
+func (s *Service) SummaryForTicket(ctx context.Context, ticketID uint) (string, string, error) {
+	ticket, err := s.repo.GetTicket(ctx, ticketID)
+	if err != nil {
+		return "", "", err
+	}
+	summary, plan := s.summarize(ctx, ticket)
+	return summary, plan, nil
+}
+
+// ticketStatusLabel 给工单返回补上中文状态名。
+func ticketStatusLabel(status string) string {
+	if label, ok := ticketStatusLabels[status]; ok {
+		return label
+	}
+	return status
+}
+
+var ticketStatusLabels = map[string]string{
+	"ai_processing": "处理中（历史）", "waiting_user": "等待用户回复", "ai_solved": "已解决（历史）",
+	"user_requested_human": "用户申请人工", "pending_human": "待人工处理",
+	"human_handling": "人工处理中", "waiting_confirm": "等待用户确认",
+	"resolved": "已解决", "closed": "已关闭", "rejected": "已拒绝", "cancelled": "已撤销",
 }

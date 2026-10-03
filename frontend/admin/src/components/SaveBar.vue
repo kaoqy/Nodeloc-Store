@@ -7,14 +7,14 @@ import { useAuthStore } from '../stores/auth'
 // 有的页面干脆没有保存入口。
 const props = withDefaults(
   defineProps<{
-    /** 权限资源名，例如 ai / settings / config_center */
+    /** 权限资源名，例如 settings / config_center / orders */
     resource: string
     saving?: boolean
     /** 是否有未保存的改动；false 时保存按钮禁用但可见 */
     dirty?: boolean
     /** 保存按钮文案，默认「保存」 */
     saveLabel?: string
-    /** 已保存的说明，例如「已保存 AI 配置」 */
+    /** 已保存的说明，例如「已保存客服配置」 */
     hint?: string
     /** 是否显示取消修改 */
     cancellable?: boolean

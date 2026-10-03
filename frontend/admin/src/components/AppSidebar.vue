@@ -60,7 +60,7 @@ const roleLabel = computed(() => {
     super_admin: '超级管理员', admin: '管理员', operator: '运营', support: '客服',
     ops_manager: '运营管理员', product_manager: '商品管理员', order_manager: '订单管理员',
     finance: '财务', support_lead: '客服主管', support_agent: '普通客服',
-    ai_admin: 'AI 管理员', data_viewer: '数据查看员',
+    ai_admin: '管理员', data_viewer: '数据查看员',
   }
   return map[role] ?? '成员'
 })
@@ -236,7 +236,7 @@ onUnmounted(() => {
             ref="searchInput"
             v-model="query"
             class="flex-1 border-0 bg-transparent text-sm outline-none"
-            placeholder="输入页面名称，例如 订单、卡密、AI"
+            placeholder="输入页面名称，例如 订单、卡密、工单"
             aria-label="搜索页面"
             @keydown.enter="results[0] && go(results[0].path)"
           />

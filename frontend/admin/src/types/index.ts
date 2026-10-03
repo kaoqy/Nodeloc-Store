@@ -345,9 +345,8 @@ export interface DashboardStats {
   card_health: CardHealth
   engagement: Engagement
 
-  // 工单与 AI 客服指标
+  // 工单与客服指标
   tickets_total: number
-  tickets_ai_processing: number
   tickets_pending_human: number
   tickets_unread: number
   tickets_urgent: number
@@ -355,8 +354,6 @@ export interface DashboardStats {
   ticket_resolve_rate: number
   ticket_satisfaction: number
   ticket_avg_minutes: number
-  ai_tool_calls: number
-  ai_transfers: number
   activities_running: number
   activity_participants: number
   auto_delivery_failed: number

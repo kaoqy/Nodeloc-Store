@@ -134,7 +134,7 @@ function toHuman() {
 
 const senderMeta = (type: string) => {
   switch (type) {
-    case 'ai': return { label: '系统自动回复', tone: 'badge-info' }
+    case 'ai': return { label: '历史记录', tone: 'badge-neutral' }
     case 'agent': return { label: '人工客服', tone: 'badge-success' }
     case 'system': return { label: '系统', tone: 'badge-neutral' }
     default: return { label: '用户', tone: 'badge-warning' }
@@ -260,7 +260,7 @@ onMounted(load)
         </div>
         <div>
           <p class="eyebrow">推荐处理</p>
-          <p class="mt-1.5 text-[13px] leading-relaxed">{{ summary.suggested_plan || '按知识库售后规则处理' }}</p>
+          <p class="mt-1.5 text-[13px] leading-relaxed">{{ summary.suggested_plan || '按售后规则处理' }}</p>
         </div>
       </div>
       <p v-else class="quiet py-8 text-center text-sm">摘要暂时不可用</p>

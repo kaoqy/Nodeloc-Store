@@ -170,9 +170,8 @@ type DashboardStats struct {
 	CardHealth          CardHealth     `json:"card_health"`
 	Engagement          Engagement     `json:"engagement"`
 
-	// 工单与 AI 客服的实时指标。
+	// 工单与客服的实时指标。
 	TicketsTotal         int64   `json:"tickets_total"`
-	TicketsAI            int64   `json:"tickets_ai_processing"`
 	TicketsPendingHuman  int64   `json:"tickets_pending_human"`
 	TicketsUnread        int64   `json:"tickets_unread"`
 	TicketsUrgent        int64   `json:"tickets_urgent"`
@@ -180,8 +179,6 @@ type DashboardStats struct {
 	TicketResolveRate    float64 `json:"ticket_resolve_rate"`
 	TicketSatisfaction   float64 `json:"ticket_satisfaction"`
 	TicketAvgMinutes     float64 `json:"ticket_avg_minutes"`
-	AIToolCalls          int64   `json:"ai_tool_calls"`
-	AITransfers          int64   `json:"ai_transfers"`
 	ActivitiesRunning    int64   `json:"activities_running"`
 	ActivityParticipants int64   `json:"activity_participants"`
 	AutoDeliveryFailed   int64   `json:"auto_delivery_failed"`
@@ -257,7 +254,7 @@ func (s *Service) Stats(ctx context.Context, days int) (*DashboardStats, error) 
 	return stats, nil
 }
 
-// statSupport 汇总工单、AI 工具调用与活动的实时指标，供总览的卡片使用。
+// statSupport 汇总工单与活动的实时指标，供总览的卡片使用。
 // 任何一张表不存在时（老库尚未迁移）只跳过该段，不影响其它统计。
 func statSupport(ctx context.Context, db *gorm.DB, stats *DashboardStats, _ time.Time) error {
 	now := time.Now().UTC()
@@ -265,16 +262,10 @@ func statSupport(ctx context.Context, db *gorm.DB, stats *DashboardStats, _ time
 		return nil
 	}
 	type counts struct {
-		AI      int64
 		Pending int64
 		Overdue int64
 	}
 	var metric counts
-	if err := db.WithContext(ctx).Model(&models.Ticket{}).
-		Where("status IN ?", []string{models.TicketStatusAIProcessing, models.TicketStatusWaitingUser, models.TicketStatusAISolved}).
-		Count(&metric.AI).Error; err == nil {
-		stats.TicketsAI = metric.AI
-	}
 	if err := db.WithContext(ctx).Model(&models.Ticket{}).
 		Where("status IN ?", []string{models.TicketStatusPendingHuman, models.TicketStatusUserRequested}).
 		Count(&metric.Pending).Error; err == nil {
@@ -308,13 +299,6 @@ func statSupport(ctx context.Context, db *gorm.DB, stats *DashboardStats, _ time
 		Select("COALESCE(AVG(CASE WHEN satisfaction > 0 THEN satisfaction END), 0)").
 		Scan(&satisfaction).Error; err == nil {
 		stats.TicketSatisfaction = satisfaction
-	}
-	if err := db.WithContext(ctx).Model(&models.AIToolCall{}).Count(&stats.AIToolCalls).Error; err != nil {
-		stats.AIToolCalls = 0
-	}
-	if err := db.WithContext(ctx).Model(&models.Ticket{}).
-		Where("transfer_reason <> ''").Count(&stats.AITransfers).Error; err != nil {
-		stats.AITransfers = 0
 	}
 	if err := db.WithContext(ctx).Model(&models.Activity{}).
 		Where("status = ?", models.ActivityStatusRunning).Count(&stats.ActivitiesRunning).Error; err != nil {

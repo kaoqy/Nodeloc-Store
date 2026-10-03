@@ -17,7 +17,6 @@ const paths: Record<string, string> = {
   activities: '<path d="M4 12h4l2-5 3 10 2-5h5" /><path d="M4 20h16" />',
   plugins: '<path d="M10 4h4v3a2 2 0 1 0 4 0h2v5h-3a2 2 0 1 0 0 4h3v5H4v-5h3a2 2 0 1 0 0-4H4V7h2a2 2 0 1 0 4 0z" />',
   support: '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H12l-4.5 3.4V16H6.5A2.5 2.5 0 0 1 4 13.5z" /><path d="M8.5 9.5h7M8.5 12.5h4.5" />',
-  knowledge: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z" /><path d="M4 5.5v15M8 7.5h7M8 11h5" />',
   users: '<path d="M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20" /><circle cx="9.5" cy="7.5" r="3.5" /><path d="M17 11a3 3 0 1 0-2-5.2M21 20v-1.4a3.6 3.6 0 0 0-2.6-3.4" />',
   notifications: '<path d="M18 8A6 6 0 1 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" />',
   settings: '<circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M4.6 7.6l2 1.2M17.4 15.2l2 1.2M4.6 16.4l2-1.2M17.4 8.8l2-1.2" />',

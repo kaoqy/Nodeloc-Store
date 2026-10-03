@@ -34,7 +34,7 @@ const LEGACY_LABELS: Record<string, string> = {
   operator: '运营（旧）', support: '客服（旧）', ops_manager: '运营管理员（旧）',
   product_manager: '商品管理员（旧）', order_manager: '订单管理员（旧）',
   finance: '财务（旧）', support_lead: '客服主管（旧）', support_agent: '普通客服（旧）',
-  ai_admin: 'AI 管理员（旧）', data_viewer: '数据查看员（旧）',
+  ai_admin: '管理员（旧）', data_viewer: '数据查看员（旧）',
 }
 
 const draft = ref<Record<string, Set<string>>>({})

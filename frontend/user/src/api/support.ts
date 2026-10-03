@@ -16,7 +16,6 @@ export interface Ticket {
   status: string
   priority: string
   handler: string
-  ai_enabled: boolean
   summary?: string
   suggested_plan?: string
   transfer_reason?: string

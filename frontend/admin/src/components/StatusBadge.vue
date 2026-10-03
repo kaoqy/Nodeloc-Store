@@ -16,7 +16,7 @@ const TONES: Record<string, string> = {
   resolved: 'badge-success', closed: 'badge-neutral', used: 'badge-neutral',
   // 进行中
   pending: 'badge-warning', processing: 'badge-info', running: 'badge-success',
-  ai_processing: 'badge-info', waiting_user: 'badge-warning', human_handling: 'badge-info',
+  waiting_user: 'badge-warning', human_handling: 'badge-info',
   pending_human: 'badge-warning', user_requested_human: 'badge-warning',
   waiting_confirm: 'badge-warning', manual_pending: 'badge-warning',
   waiting_stock: 'badge-warning', plugin_pending: 'badge-info', scheduled: 'badge-info',

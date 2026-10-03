@@ -548,7 +548,7 @@ func Migrate(db *gorm.DB) error {
 		&ActivityLog{},
 		&CouponRecord{},
 
-		// 工单与 AI 客服
+		// 工单与客服
 		&Ticket{},
 		&TicketMessage{},
 		&TicketLog{},

@@ -4,8 +4,7 @@ import { listActivities, type Activity } from '../api/support'
 import { errorMessage } from '../api/client'
 
 // 首页活动横幅：只展示进行中、允许在首页露出的活动。
-// 它和右下角的 AI 客服窗口是两个不同的入口：这里讲「店里在促销什么」，
-// 客服窗口负责「有问题找谁」。两者分开，避免买家把促销当成客服入口。
+// 它只讲「店里在促销什么」，不承担客服入口；活动款式与计价均由服务端计算。
 const loading = ref(true)
 const error = ref('')
 const activities = ref<Activity[]>([])

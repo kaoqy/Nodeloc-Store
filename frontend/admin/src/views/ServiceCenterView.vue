@@ -294,7 +294,7 @@ onMounted(() => {
               <span class="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <StatusBadge :value="row.status" :label="ticketStatusLabels[row.status]" />
                 <StatusBadge :value="row.priority" :label="ticketPriorityLabels[row.priority]" />
-                <span class="badge-neutral">{{ row.handler === 'ai' ? 'AI' : '人工' }}</span>
+                <span class="badge-neutral">人工</span>
                 <span class="quiet ml-auto text-[11px]">{{ when(row.last_message_at || row.created_at) }}</span>
               </span>
             </button>

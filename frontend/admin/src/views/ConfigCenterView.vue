@@ -32,7 +32,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-type TabKey = 'support' | 'remind' | 'safety'
+type TabKey = 'support' | 'commerce' | 'activity' | 'site' | 'remind' | 'safety'
 
 interface TabDef {
   key: TabKey
@@ -42,7 +42,10 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
-  { key: 'support', label: '工单与客服', hint: '工单规则、坐席与快捷回复', resources: ['config_center', 'agents'] },
+  { key: 'support', label: '工单与客服', hint: '编号、时效与买家操作', resources: ['config_center', 'agents'] },
+  { key: 'commerce', label: '订单与商品', hint: '关单、交付与库存预警', resources: ['config_center'] },
+  { key: 'activity', label: '营销规则', hint: '参与限制与优惠叠加', resources: ['config_center', 'activities'] },
+  { key: 'site', label: '站点展示', hint: '前台露出的品牌信息', resources: ['config_center'] },
   { key: 'remind', label: '提醒事件', hint: '哪些事件要提醒、发给谁', resources: ['notification_templates', 'config_center'] },
   { key: 'safety', label: '风控与保留', hint: '限频、二次确认与数据保留', resources: ['config_center'] },
 ]
@@ -67,18 +70,212 @@ const templateDraft = ref<Partial<NotificationTemplate>>({
   mail: false, recipients: 'staff', title_template: '', content_template: '', retry_limit: 3, sort_order: 0,
 })
 
-const groupLabels: Record<string, string> = {
-  ticket: '工单规则',
-  risk: '风控与限频',
-  retention: '数据保留',
-  upload: '文件上传',
+/**
+ * 每一项配置的专属呈现方式。
+ *
+ * 配置中心不再把所有项渲染成同一种输入框：带单位的值拆出单位徽标，
+ * 开关给出开启/关闭后的实际含义，编号前缀直接预览生成结果。
+ */
+interface FieldMeta {
+  unit?: string
+  hint?: string | ((config: SystemConfig) => string)
+  preview?: (config: SystemConfig) => string
+  onLabel?: string
+  offLabel?: string
 }
 
-/** 一个标签页包含哪些配置分组。 */
-const TAB_GROUPS: Record<TabKey, string[]> = {
-  support: ['ticket'],
+const FIELD_META: Record<string, FieldMeta> = {
+  'ticket/ticket_no_prefix': {
+    hint: '买家在工单列表看到的编号前缀。',
+    preview: (c) => `${(c.value || 'TK').trim() || 'TK'}0001`,
+  },
+  'ticket/human_timeout_hours': {
+    unit: '小时',
+    hint: (c) => `转人工后超过 ${c.value || '—'} 小时仍未处理，工单会标记为「即将超时」。`,
+  },
+  'ticket/allow_reopen': {
+    onLabel: '允许重开',
+    offLabel: '不允许重开',
+    hint: '开启后，已解决或已关闭的工单买家可以重新打开继续追问。',
+  },
+  'ticket/allow_cancel': {
+    onLabel: '允许撤销',
+    offLabel: '不允许撤销',
+    hint: '开启后，买家可以自己撤销还没解决的工单。',
+  },
+  'ticket/enable_rating': {
+    onLabel: '邀请评价',
+    offLabel: '不邀请评价',
+    hint: '开启后工单结束会邀请买家打分，分数进入满意度统计。',
+  },
+  'order/unpaid_cancel_hours': {
+    unit: '小时',
+    hint: (c) => `下单后 ${c.value || '—'} 小时内未支付，订单自动关闭并释放库存。`,
+  },
+  'order/auto_deliver_retry': {
+    onLabel: '自动重试',
+    offLabel: '不自动重试',
+    hint: '自动发货失败时后台定期重试，直到成功或需要人工介入。',
+  },
+  'product/default_stock_alert': {
+    unit: '张',
+    hint: (c) => `卡密剩余低于 ${c.value || '—'} 张时，总览页列入库存预警。`,
+  },
+  'product/show_sold_count': {
+    onLabel: '显示销量',
+    offLabel: '隐藏销量',
+    hint: '在前台商品卡片上显示已售数量。',
+  },
+  'activity/default_per_user_limit': {
+    unit: '次/人',
+    hint: (c) => (c.value === '0' ? '当前不限次，任何买家都可以反复参与。' : `每位买家最多参与 ${c.value || '—'} 次；填 0 表示不限次。`),
+  },
+  'activity/block_activity_stacking': {
+    onLabel: '禁止叠加',
+    offLabel: '允许叠加',
+    hint: '一条订单只应用优惠最大的一项活动，避免折上折算出异常低价。',
+  },
+  'site/footer_show_version': {
+    onLabel: '显示版本号',
+    offLabel: '隐藏版本号',
+    hint: '在店铺页脚展示当前版本，方便核对线上是否是最新构建。',
+  },
+  'risk/coupon_max_attempts': {
+    unit: '次/分钟',
+    hint: (c) => `同一来源每分钟最多尝试 ${c.value || '—'} 次优惠码，超出会被限流。`,
+  },
+  'risk/require_second_confirm': {
+    onLabel: '需要二次确认',
+    offLabel: '无需二次确认',
+    hint: '退款、发券这类写操作需要买家本人再确认一次。',
+  },
+  'retention/audit_log_days': {
+    unit: '天',
+    hint: (c) => `后台操作记录保留 ${c.value || '—'} 天，超期可由清理任务删除。`,
+  },
+  'retention/ticket_days': {
+    unit: '天',
+    hint: (c) => `已关闭工单保留 ${c.value || '—'} 天，便于日后复查。`,
+  },
+  'upload/max_image_mb': {
+    unit: 'MB',
+    hint: (c) => `商品封面与客服头像单张图片不超过 ${c.value || '—'} MB。`,
+  },
+}
+
+/** 每个标签页由哪些分组组成，以及分组内的标题与说明。 */
+interface GroupBlock {
+  group: string
+  title: string
+  intro: string
+  parts: { title: string; keys: string[] }[]
+}
+
+const TAB_SECTIONS: Record<TabKey, GroupBlock[]> = {
+  support: [
+    {
+      group: 'ticket', title: '工单规则',
+      intro: '工单号怎么生成、多久算超时，以及买家能对工单做哪些操作。',
+      parts: [
+        { title: '编号方式', keys: ['ticket_no_prefix'] },
+        { title: '响应时效', keys: ['human_timeout_hours'] },
+        { title: '买家操作', keys: ['allow_reopen', 'allow_cancel'] },
+        { title: '满意度评价', keys: ['enable_rating'] },
+      ],
+    },
+  ],
+  commerce: [
+    {
+      group: 'order', title: '订单与交付',
+      intro: '未支付订单的保留时长，以及自动发货失败后的处理方式。',
+      parts: [
+        { title: '未支付订单', keys: ['unpaid_cancel_hours'] },
+        { title: '自动交付', keys: ['auto_deliver_retry'] },
+      ],
+    },
+    {
+      group: 'product', title: '商品规则',
+      intro: '库存预警阈值与前台展示方式。',
+      parts: [
+        { title: '库存预警', keys: ['default_stock_alert'] },
+        { title: '前台展示', keys: ['show_sold_count'] },
+      ],
+    },
+  ],
+  activity: [
+    {
+      group: 'activity', title: '营销规则',
+      intro: '新建活动时的默认值，以及一张订单能叠加多少优惠。',
+      parts: [
+        { title: '参与限制', keys: ['default_per_user_limit'] },
+        { title: '优惠叠加', keys: ['block_activity_stacking'] },
+      ],
+    },
+  ],
+  site: [
+    {
+      group: 'site', title: '站点展示',
+      intro: '店铺前台公开露出的信息。',
+      parts: [
+        { title: '页脚', keys: ['footer_show_version'] },
+      ],
+    },
+  ],
   remind: [],
-  safety: ['risk', 'retention', 'upload'],
+  safety: [
+    {
+      group: 'risk', title: '风控与限频',
+      intro: '防止优惠码被暴力猜测，以及高风险写操作的确认策略。',
+      parts: [
+        { title: '优惠码防刷', keys: ['coupon_max_attempts'] },
+        { title: '高风险操作', keys: ['require_second_confirm'] },
+      ],
+    },
+    {
+      group: 'retention', title: '数据保留',
+      intro: '各类记录保留多久，超期可由清理任务删除。',
+      parts: [
+        { title: '保留期限', keys: ['audit_log_days', 'ticket_days'] },
+      ],
+    },
+    {
+      group: 'upload', title: '文件上传',
+      intro: '图片上传的体积上限。',
+      parts: [
+        { title: '图片限制', keys: ['max_image_mb'] },
+      ],
+    },
+  ],
+}
+
+function metaOf(config: SystemConfig): FieldMeta {
+  return FIELD_META[`${config.group}/${config.key}`] ?? {}
+}
+
+function hintOf(config: SystemConfig): string {
+  const meta = metaOf(config)
+  if (typeof meta.hint === 'function') return meta.hint(config)
+  return meta.hint || config.description || ''
+}
+
+function previewOf(config: SystemConfig): string {
+  return metaOf(config).preview?.(config) ?? ''
+}
+
+function unitOf(config: SystemConfig): string {
+  return metaOf(config).unit ?? ''
+}
+
+function onLabelOf(config: SystemConfig): string {
+  return metaOf(config).onLabel ?? '已启用'
+}
+
+function offLabelOf(config: SystemConfig): string {
+  return metaOf(config).offLabel ?? '已停用'
+}
+
+function isOn(config: SystemConfig): boolean {
+  return config.value === 'true' || config.value === '1'
 }
 
 /** 提醒事件的分类，用于把模板按业务场景分组展示。 */
@@ -108,33 +305,44 @@ const templateGroups = computed(() => {
   return Array.from(map.entries())
 })
 
-const grouped = computed(() => {
-  const map = new Map<string, SystemConfig[]>()
-  for (const config of configs.value) {
-    const list = map.get(config.group) ?? []
-    list.push(config)
-    map.set(config.group, list)
-  }
-  const wanted = TAB_GROUPS[tab.value] ?? []
-  return wanted
-    .filter((group) => map.has(group))
-    .map((group) => [group, map.get(group) as SystemConfig[]] as [string, SystemConfig[]])
+/**
+ * 当前标签页的分组，按配置清单解析成可直接渲染的结构。
+ * 库里没有的配置项会被跳过，不会留下空壳分组。
+ */
+const currentBlocks = computed(() => {
+  const blocks = TAB_SECTIONS[tab.value] ?? []
+  return blocks
+    .map((block) => ({
+      group: block.group,
+      title: block.title,
+      intro: block.intro,
+      parts: block.parts
+        .map((part) => ({
+          title: part.title,
+          items: part.keys
+            .map((key) => configs.value.find((item) => item.group === block.group && item.key === key))
+            .filter((item): item is SystemConfig => Boolean(item)),
+        }))
+        .filter((part) => part.items.length > 0),
+    }))
+    .filter((block) => block.parts.length > 0)
 })
 
 // 旧地址继续可用，落到合并后的新分组。
 const LEGACY_TABS: Record<string, TabKey> = {
-  ai: 'support',
-  knowledge: 'support',
   service: 'support',
   ticket: 'support',
+  ai: 'support',
+  knowledge: 'support',
+  order: 'commerce',
+  product: 'commerce',
+  activity: 'activity',
+  site: 'site',
   notify: 'remind',
+  remind: 'remind',
   risk: 'safety',
   retention: 'safety',
   upload: 'safety',
-  order: 'safety',
-  product: 'safety',
-  activity: 'safety',
-  site: 'safety',
 }
 
 function normaliseTab(value: unknown): TabKey {
@@ -314,57 +522,6 @@ onMounted(() => {
           <div v-for="i in 5" :key="i" class="skeleton h-10 w-full" />
         </div>
 
-        <!-- 工单与客服 -->
-        <template v-else-if="tab === 'support'">
-          <SettingsSection
-            title="工单规则"
-            description="工单怎么编号、多久算超时、买家能不能撤销或重开。"
-            resource="config_center"
-          >
-            <p v-if="!grouped.length" class="card py-12 text-center text-sm text-[var(--text-quiet)]">
-              这个分组暂无配置项。
-            </p>
-            <section v-for="[group, items] in grouped" :key="group" class="config-group">
-              <div class="config-group-head">
-                <h3>{{ groupLabels[group] || group }}</h3>
-                <span class="quiet text-[11.5px]">{{ items.length }} 项</span>
-              </div>
-              <div class="config-rows">
-                <div v-for="config in items" :key="config.key" class="config-row">
-                  <div class="config-row-label">
-                    <p class="text-sm font-semibold">{{ config.label || config.key }}</p>
-                    <p v-if="config.description" class="quiet mt-0.5 text-[12px]">{{ config.description }}</p>
-                  </div>
-                  <div class="config-row-control">
-                    <label v-if="config.value_type === 'bool'" class="config-switch">
-                      <input
-                        type="checkbox"
-                        :checked="config.value === 'true' || config.value === '1'"
-                        :disabled="!canManageSystem"
-                        @change="toggleBool(config)"
-                      />
-                      <span>{{ config.value === 'true' || config.value === '1' ? '已启用' : '已停用' }}</span>
-                    </label>
-                    <template v-else>
-                      <input
-                        v-model="config.value"
-                        class="input"
-                        :type="config.value_type === 'int' ? 'number' : 'text'"
-                        :disabled="!canManageSystem"
-                        @keyup.enter="saveConfig(config)"
-                      />
-                      <button v-if="canManageSystem" class="btn btn-secondary btn-sm" :disabled="busy" @click="saveConfig(config)">
-                        保存
-                      </button>
-                    </template>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </SettingsSection>
-          <AgentPanel />
-        </template>
-
         <!-- 提醒事件 -->
         <template v-else-if="tab === 'remind'">
           <SettingsSection
@@ -476,43 +633,74 @@ onMounted(() => {
               </table>
             </div>
           </SettingsSection>
+
         </template>
 
-        <!-- 风控与保留 -->
-        <SettingsSection
-          v-else
-          :title="tabTitle"
-          description="限频、二次确认与各类记录保留多久。改动会写入操作审计。"
-          resource="config_center"
-        >
-          <p v-if="!grouped.length" class="card py-12 text-center text-sm text-[var(--text-quiet)]">
-            这个分组暂无配置项。
-          </p>
-          <section v-for="[group, items] in grouped" :key="group" class="config-group">
-            <div class="config-group-head">
-              <h3>{{ groupLabels[group] || group }}</h3>
-              <span class="quiet text-[11.5px]">{{ items.length }} 项</span>
-            </div>
-            <div class="config-rows">
-              <div v-for="config in items" :key="config.key" class="config-row">
-                <div class="config-row-label">
-                  <p class="text-sm font-semibold">{{ config.label || config.key }}</p>
-                  <p v-if="config.description" class="quiet mt-0.5 text-[12px]">{{ config.description }}</p>
+        <!-- 规则类配置：工单 / 订单商品 / 营销 / 站点 / 风控保留 -->
+        <!-- 每个分组单独成卡，字段按用途分区，值以「徽标 + 预览」呈现，不再是统一的表单列表。 -->
+        <template v-else>
+          <SettingsSection
+            v-for="block in currentBlocks"
+            :key="block.group"
+            :title="block.title"
+            :description="block.intro"
+            resource="config_center"
+          >
+            <div class="config-parts">
+              <section v-for="part in block.parts" :key="part.title" class="config-part">
+                <p class="config-part-title">{{ part.title }}</p>
+                <div class="config-cards">
+                  <article
+                    v-for="config in part.items"
+                    :key="config.key"
+                    class="config-card"
+                    :class="config.value_type === 'bool' ? 'config-card-toggle' : ''"
+                  >
+                    <div class="config-card-body">
+                      <p class="config-card-label">{{ config.label || config.key }}</p>
+                      <p class="config-card-hint">{{ hintOf(config) }}</p>
+                      <p v-if="previewOf(config)" class="config-preview">
+                        <span class="quiet text-[10.5px] tracking-wide">预览</span>
+                        <span class="mono">{{ previewOf(config) }}</span>
+                      </p>
+                    </div>
+                    <div class="config-card-control">
+                      <template v-if="config.value_type === 'bool'">
+                        <button
+                          type="button"
+                          class="switch"
+                          :class="isOn(config) ? 'switch-on' : ''"
+                          :disabled="!canManageSystem || busy"
+                          :aria-pressed="isOn(config)"
+                          :aria-label="config.label || config.key"
+                          @click="toggleBool(config)"
+                        />
+                        <span class="config-state">{{ isOn(config) ? onLabelOf(config) : offLabelOf(config) }}</span>
+                      </template>
+                      <template v-else>
+                        <div class="config-input">
+                          <input
+                            v-model="config.value"
+                            class="input"
+                            :type="config.value_type === 'int' ? 'number' : 'text'"
+                            :disabled="!canManageSystem"
+                            @keyup.enter="saveConfig(config)"
+                          />
+                          <span v-if="unitOf(config)" class="config-unit">{{ unitOf(config) }}</span>
+                        </div>
+                        <button v-if="canManageSystem" class="btn btn-secondary btn-sm" :disabled="busy" @click="saveConfig(config)">
+                          保存
+                        </button>
+                      </template>
+                    </div>
+                  </article>
                 </div>
-                <div class="config-row-control">
-                  <label v-if="config.value_type === 'bool'" class="config-switch">
-                    <input type="checkbox" :checked="config.value === 'true' || config.value === '1'" :disabled="!canManageSystem" @change="toggleBool(config)" />
-                    <span>{{ config.value === 'true' || config.value === '1' ? '已启用' : '已停用' }}</span>
-                  </label>
-                  <template v-else>
-                    <input v-model="config.value" class="input" :type="config.value_type === 'int' ? 'number' : 'text'" :disabled="!canManageSystem" @keyup.enter="saveConfig(config)" />
-                    <button v-if="canManageSystem" class="btn btn-secondary btn-sm" :disabled="busy" @click="saveConfig(config)">保存</button>
-                  </template>
-                </div>
-              </div>
+              </section>
             </div>
-          </section>
-        </SettingsSection>
+          </SettingsSection>
+          <AgentPanel v-if="tab === 'support'" />
+        </template>
+
       </div>
     </div>
   </section>
@@ -556,6 +744,7 @@ onMounted(() => {
   padding-bottom: 7px;
 }
 .config-group-head h3 { font-size: 13.5px; font-weight: 650; }
+/* 提醒事件列表仍在用的紧凑行。 */
 .config-rows { display: flex; flex-direction: column; gap: 8px; }
 .config-row {
   display: flex;
@@ -571,11 +760,81 @@ onMounted(() => {
 .config-row:hover { border-color: var(--stroke); }
 .config-row-label { min-width: 200px; flex: 1; }
 .config-row-control { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
-.config-row-control .input { max-width: 220px; }
-.config-switch { display: flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
-.config-switch span { color: var(--text-dim); }
 @media (max-width: 640px) {
   .config-row-control { margin-left: 0; width: 100%; }
-  .config-row-control .input { max-width: none; flex: 1; }
+}
+
+/* 提醒事件编辑器仍在用的紧凑行内开关。 */
+.config-switch { display: flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
+.config-switch span { color: var(--text-dim); }
+
+/* ── 规则类配置的专属卡片 ──
+   每一项是一张带说明与当前取值预览的卡片；开关型排成紧凑网格，
+   数值型留出输入区与单位，避免所有字段长成同一个输入框。 */
+.config-parts { display: flex; flex-direction: column; gap: 18px; }
+.config-part-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-quiet);
+  margin-bottom: 8px;
+}
+.config-cards {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+.config-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  padding: 13px 14px;
+  transition: border-color var(--fast), background var(--fast);
+}
+.config-card:hover { border-color: var(--stroke); background: var(--surface-hi); }
+.config-card-body { flex: 1; min-width: 0; }
+.config-card-label { font-size: 13.5px; font-weight: 650; }
+.config-card-hint { margin-top: 3px; font-size: 12px; line-height: 1.6; color: var(--text-quiet); }
+.config-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--stroke-quiet);
+  background: var(--surface);
+  font-size: 12px;
+}
+.config-card-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+}
+.config-card-toggle .config-card-control { gap: 10px; }
+.config-state { font-size: 12.5px; font-weight: 600; color: var(--text-dim); }
+.config-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 140px;
+}
+.config-input .input { padding-right: 58px; }
+.config-unit {
+  position: absolute;
+  right: 10px;
+  font-size: 11.5px;
+  color: var(--text-quiet);
+  pointer-events: none;
+}
+@media (max-width: 640px) {
+  .config-cards { grid-template-columns: 1fr; }
+  .config-card-control .btn { margin-left: auto; }
 }
 </style>

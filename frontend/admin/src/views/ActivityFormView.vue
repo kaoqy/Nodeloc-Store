@@ -11,6 +11,7 @@ import {
 } from '../api/activities'
 import { listProducts } from '../api/products'
 import { listCategories } from '../api/categories'
+import { listCoupons } from '../api/coupons'
 import { errorMessage } from '../utils/format'
 import type { Category, Product } from '../types'
 
@@ -56,7 +57,6 @@ const form = ref<Partial<Activity>>({
   notify_users: false,
 })
 
-const rule = ref<ActivityRule>({ rule_type: 'percent_off', config: '{"percent":90}', is_enabled: true, sort_order: 0 })
 const rules = ref<ActivityRule[]>([])
 
 // 不同活动类型默认给出对应的规则，减少管理员手填 JSON 的次数。
@@ -94,6 +94,222 @@ const typeRuleKind: Record<string, string> = {
   coupon_claim: 'gift_coupon',
 }
 
+// ── 规则编辑器 ────────────────────────────────────────────────────
+// 规则参数在库里是 JSON 字符串，直接让管理员手填既容易写错也看不出
+// 每种类型该填什么。这里按规则类型给出专门的输入项，输入后统一序列化成
+// 后端需要的 JSON，列表里再用中文摘要回显。
+type RuleKind =
+  | 'factor_off'
+  | 'percent_off'
+  | 'amount_off'
+  | 'fixed_price'
+  | 'full_reduce'
+  | 'full_quantity'
+  | 'bulk_price'
+  | 'coupon_lock'
+  | 'gift_coupon'
+
+interface RuleDraft {
+  kind: RuleKind
+  factor: number
+  percent: number
+  amount: number
+  price: number
+  threshold: number
+  quantity: number
+  perUnit: number
+  quantityMode: 'flat' | 'per_unit'
+  couponId: number
+  useTiers: boolean
+  tiersText: string
+}
+
+const ruleKindOptions: { value: RuleKind; label: string; hint: string }[] = [
+  { value: 'factor_off', label: '折扣系数', hint: '售价 × 系数，例如 0.85 表示 85 折' },
+  { value: 'percent_off', label: '百分比折扣', hint: '例如 90 表示 9 折（兼容旧规则）' },
+  { value: 'amount_off', label: '立减金额', hint: '每单直接减固定金额' },
+  { value: 'fixed_price', label: '固定折后价', hint: '把单价降到指定价格' },
+  { value: 'full_reduce', label: '满减', hint: '满 X 元减 Y 元，可配阶梯' },
+  { value: 'full_quantity', label: '满件优惠', hint: '满 N 件减固定金额，或满 N 件每件减 X' },
+  { value: 'bulk_price', label: '批量购买价', hint: '达到 N 件后按指定单价结算' },
+  { value: 'coupon_lock', label: '指定优惠码', hint: '锁定一张已有优惠券参与' },
+  { value: 'gift_coupon', label: '赠送优惠券', hint: '下单后赠送一张优惠券' },
+]
+
+const ruleKindLabel: Record<string, string> = {}
+for (const option of ruleKindOptions) ruleKindLabel[option.value] = option.label
+
+const draft = ref<RuleDraft>({
+  kind: 'percent_off',
+  factor: 0.9,
+  percent: 90,
+  amount: 5,
+  price: 9.9,
+  threshold: 100,
+  quantity: 3,
+  perUnit: 5,
+  quantityMode: 'flat',
+  couponId: 0,
+  useTiers: false,
+  tiersText: '[{"threshold":100,"amount":20}]',
+})
+const editingIndex = ref(-1)
+const coupons = ref<{ id: number; code: string }[]>([])
+
+function parseTiers(text: string): { threshold: number; amount: number }[] {
+  const tiers = JSON.parse(text || '[]') as { threshold?: number; amount?: number }[]
+  if (!Array.isArray(tiers) || tiers.length === 0) throw new Error('阶梯档位至少要有一档')
+  return tiers.map((tier) => ({
+    threshold: Number(tier.threshold) || 0,
+    amount: Number(tier.amount) || 0,
+  }))
+}
+
+function buildConfig(value: RuleDraft): string {
+  switch (value.kind) {
+    case 'factor_off':
+      return JSON.stringify({ factor: value.factor })
+    case 'percent_off':
+      return JSON.stringify({ percent: value.percent })
+    case 'amount_off':
+      return JSON.stringify({ amount: value.amount })
+    case 'fixed_price':
+      return JSON.stringify({ price: value.price })
+    case 'full_reduce':
+      if (value.useTiers) return JSON.stringify({ tiers: parseTiers(value.tiersText) })
+      return JSON.stringify({ threshold: value.threshold, amount: value.amount })
+    case 'full_quantity':
+      return value.quantityMode === 'per_unit'
+        ? JSON.stringify({ quantity: value.quantity, per_unit: value.perUnit })
+        : JSON.stringify({ quantity: value.quantity, amount: value.amount })
+    case 'bulk_price':
+      return JSON.stringify({ quantity: value.quantity, price: value.price })
+    case 'coupon_lock':
+    case 'gift_coupon':
+      return JSON.stringify({ coupon_id: value.couponId })
+    default:
+      return '{}'
+  }
+}
+
+function loadDraft(kind: string, config: string) {
+  const parsed = JSON.parse(config || '{}') as Record<string, unknown>
+  const num = (key: string, fallback: number) => {
+    const value = Number(parsed[key])
+    return Number.isFinite(value) && value !== 0 ? value : fallback
+  }
+  draft.value.kind = (ruleKindLabel[kind] ? kind : 'percent_off') as RuleKind
+  if (parsed.factor !== undefined) draft.value.factor = Number(parsed.factor) || draft.value.factor
+  if (parsed.percent !== undefined) draft.value.percent = Number(parsed.percent) || draft.value.percent
+  if (parsed.amount !== undefined) draft.value.amount = num('amount', draft.value.amount)
+  if (parsed.price !== undefined) draft.value.price = num('price', draft.value.price)
+  if (parsed.threshold !== undefined) draft.value.threshold = num('threshold', draft.value.threshold)
+  if (parsed.quantity !== undefined) draft.value.quantity = num('quantity', draft.value.quantity)
+  draft.value.perUnit = num('per_unit', draft.value.perUnit)
+  draft.value.quantityMode = parsed.per_unit !== undefined ? 'per_unit' : 'flat'
+  if (parsed.coupon_id !== undefined) draft.value.couponId = Number(parsed.coupon_id) || 0
+  if (Array.isArray(parsed.tiers) && parsed.tiers.length) {
+    draft.value.useTiers = true
+    draft.value.tiersText = JSON.stringify(parsed.tiers)
+  } else {
+    draft.value.useTiers = false
+  }
+}
+
+// 规则列表里用中文摘要说明参数，比裸露的 JSON 更容易核对。
+function ruleConfigSummary(item: ActivityRule) {
+  try {
+    const config = JSON.parse(item.config || '{}') as Record<string, number>
+    switch (item.rule_type) {
+      case 'factor_off':
+        return '售价 × ' + config.factor
+      case 'percent_off':
+        return config.percent + ' 折（' + config.percent + '%）'
+      case 'amount_off':
+        return '每单减 ' + config.amount + ' 元'
+      case 'fixed_price':
+        return '折后单价 ' + config.price + ' 元'
+      case 'full_reduce': {
+        const tiers = (JSON.parse(item.config).tiers ?? []) as { threshold: number; amount: number }[]
+        if (tiers.length) return tiers.map((tier) => '满 ' + tier.threshold + ' 减 ' + tier.amount).join('，')
+        return '满 ' + config.threshold + ' 元减 ' + config.amount + ' 元'
+      }
+      case 'full_quantity':
+        return config.per_unit
+          ? '满 ' + config.quantity + ' 件每件减 ' + config.per_unit + ' 元'
+          : '满 ' + config.quantity + ' 件减 ' + config.amount + ' 元'
+      case 'bulk_price':
+        return '满 ' + config.quantity + ' 件单价 ' + config.price + ' 元'
+      case 'coupon_lock':
+        return '指定优惠券 #' + config.coupon_id
+      case 'gift_coupon':
+        return '赠送优惠券 #' + config.coupon_id
+      default:
+        return item.config
+    }
+  } catch {
+    return item.config
+  }
+}
+
+function ruleKindHint(): string {
+  return ruleKindOptions.find((option) => option.value === draft.value.kind)?.hint ?? ''
+}
+
+function resetDraft() {
+  editingIndex.value = -1
+  draft.value.useTiers = false
+  draft.value.tiersText = '[{"threshold":100,"amount":20}]'
+  const kind = (typeRuleKind[form.value.type || ''] || 'percent_off') as RuleKind
+  const seed = typeRuleDefaults[form.value.type || ''] || '{}'
+  try {
+    loadDraft(kind, seed)
+  } catch {
+    draft.value.kind = kind
+  }
+  if (draft.value.kind === 'full_quantity') draft.value.quantityMode = 'flat'
+}
+
+function addRule() {
+  let config = '{}'
+  try {
+    config = buildConfig(draft.value)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '规则参数不合法。'
+    return
+  }
+  error.value = ''
+  const rule: ActivityRule = {
+    rule_type: draft.value.kind,
+    config,
+    is_enabled: true,
+    sort_order: editingIndex.value >= 0 ? editingIndex.value : rules.value.length,
+  }
+  if (editingIndex.value >= 0) rules.value.splice(editingIndex.value, 1, rule)
+  else rules.value.push(rule)
+  editingIndex.value = -1
+}
+
+function editRule(index: number) {
+  const item = rules.value[index]
+  try {
+    loadDraft(item.rule_type, item.config)
+    editingIndex.value = index
+  } catch {
+    error.value = '规则参数不是合法 JSON，无法编辑。'
+  }
+}
+
+function removeRule(index: number) {
+  rules.value.splice(index, 1)
+  if (editingIndex.value === index) editingIndex.value = -1
+  else if (editingIndex.value > index) editingIndex.value -= 1
+}
+
+function applyTypeDefaults() {
+  resetDraft()
+}
+
 const selectedProducts = computed({
   get: () => (form.value.product_ids ? (JSON.parse(form.value.product_ids) as number[]) : []),
   set: (value: number[]) => {
@@ -122,35 +338,19 @@ function toggleCategory(id: number) {
   selectedCategories.value = Array.from(next)
 }
 
-function ruleConfigLabel(item: ActivityRule) {
-  return item.rule_type + '：' + (item.config || '{}')
-}
-
-function addRule() {
-  rules.value.push({ ...rule.value, sort_order: rules.value.length })
-  rule.value.config = typeRuleDefaults[form.value.type || 'limited_discount'] || '{}'
-  rule.value.rule_type = typeRuleKind[form.value.type || 'limited_discount'] || 'percent_off'
-}
-
-function removeRule(index: number) {
-  rules.value.splice(index, 1)
-}
-
-function applyTypeDefaults() {
-  rule.value.rule_type = typeRuleKind[form.value.type || ''] || 'percent_off'
-  rule.value.config = typeRuleDefaults[form.value.type || ''] || '{}'
-}
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [productList, categoryList] = await Promise.all([
+    const [productList, categoryList, couponList] = await Promise.all([
       listProducts().catch(() => [] as Product[]),
       listCategories().catch(() => [] as Category[]),
+      listCoupons().catch(() => []),
     ])
     products.value = productList
     categories.value = categoryList
+    coupons.value = couponList.map((item) => ({ id: item.id, code: item.code }))
     if (editingID.value) {
       const activity = await getActivity(editingID.value)
       form.value = { ...activity }
@@ -293,34 +493,181 @@ onMounted(load)
       </template>
 
       <template v-else-if="step === 'rules'">
-        <div class="grid gap-3 md:grid-cols-3">
-          <div>
-            <label class="label" for="r-type">规则类型</label>
-            <select id="r-type" v-model="rule.rule_type" class="input">
-              <option value="percent_off">百分比折扣</option>
-              <option value="amount_off">立减金额</option>
-              <option value="fixed_price">固定折后价</option>
-              <option value="full_reduce">满减</option>
-              <option value="full_quantity">满件优惠</option>
-              <option value="bulk_price">批量购买价</option>
-              <option value="coupon_lock">指定优惠码</option>
-              <option value="gift_coupon">赠送优惠券</option>
-            </select>
+        <div class="rule-editor">
+          <div class="rule-editor-head">
+            <div>
+              <p class="font-semibold">{{ editingIndex >= 0 ? '编辑规则' : '添加规则' }}</p>
+              <p class="quiet text-xs">{{ ruleKindHint() }}</p>
+            </div>
+            <button v-if="editingIndex >= 0" class="btn btn-secondary btn-sm" @click="resetDraft">取消编辑</button>
           </div>
-          <div class="md:col-span-2">
-            <label class="label" for="r-config">规则参数（JSON）</label>
-            <input id="r-config" v-model="rule.config" class="input mono text-xs" placeholder='{"percent":90}' />
+
+          <div class="grid gap-3 md:grid-cols-3">
+            <div :class="draft.kind === 'percent_off' || draft.kind === 'amount_off' ? 'md:col-span-3' : ''">
+              <label class="label" for="r-kind">规则类型</label>
+              <select id="r-kind" v-model="draft.kind" class="input">
+                <option v-for="option in ruleKindOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+
+            <div v-if="draft.kind === 'factor_off' || draft.kind === 'percent_off'">
+              <label class="label" for="r-factor">
+                {{ draft.kind === 'factor_off' ? '折扣系数' : '折扣百分比' }}
+              </label>
+              <input
+                v-if="draft.kind === 'factor_off'"
+                id="r-factor"
+                v-model.number="draft.factor"
+                class="input nums"
+                type="number"
+                min="0.01"
+                max="0.99"
+                step="0.01"
+              />
+              <input
+                v-else
+                id="r-factor"
+                v-model.number="draft.percent"
+                class="input nums"
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+              />
+              <p class="hint">
+                {{ draft.kind === 'factor_off'
+                  ? '例如 0.85 表示按售价的 85% 结算，不会随数量放大。'
+                  : '例如 90 表示 9 折，仅用于兼容旧规则。' }}
+              </p>
+            </div>
+
+            <div v-else-if="draft.kind === 'amount_off'">
+              <label class="label" for="r-amount">立减金额（元）</label>
+              <input id="r-amount" v-model.number="draft.amount" class="input nums" type="number" min="0.01" step="0.01" />
+              <p class="hint">每单满足条件即减这个金额。</p>
+            </div>
+
+            <div v-else-if="draft.kind === 'fixed_price'">
+              <label class="label" for="r-price">折后单价（元）</label>
+              <input id="r-price" v-model.number="draft.price" class="input nums" type="number" min="0.01" step="0.01" />
+              <p class="hint">必须低于原价，否则规则不会生效。</p>
+            </div>
+
+            <div v-else-if="draft.kind === 'full_reduce'" class="md:col-span-3 space-y-3">
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model="draft.useTiers" type="checkbox" />
+                使用多档阶梯
+              </label>
+              <div v-if="draft.useTiers">
+                <label class="label" for="r-tiers">阶梯档位（JSON）</label>
+                <textarea id="r-tiers" v-model="draft.tiersText" class="input mono min-h-[80px] text-xs" />
+                <p class="hint">每档形如 {"threshold":100,"amount":20}，表示满 100 元减 20 元；命中最高一档生效。</p>
+              </div>
+              <div v-else class="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label class="label" for="r-threshold">门槛金额（元）</label>
+                  <input id="r-threshold" v-model.number="draft.threshold" class="input nums" type="number" min="0.01" step="0.01" />
+                </div>
+                <div>
+                  <label class="label" for="r-amount2">减免金额（元）</label>
+                  <input id="r-amount2" v-model.number="draft.amount" class="input nums" type="number" min="0.01" step="0.01" />
+                </div>
+              </div>
+            </div>
+
+            <div v-else-if="draft.kind === 'full_quantity'" class="md:col-span-3 space-y-3">
+              <div class="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label class="label" for="r-quantity">满件数量</label>
+                  <input id="r-quantity" v-model.number="draft.quantity" class="input nums" type="number" min="1" step="1" />
+                </div>
+                <div>
+                  <label class="label">优惠方式</label>
+                  <div class="segmented">
+                    <button
+                      class="segmented-item"
+                      :class="draft.quantityMode === 'flat' ? 'segmented-item-on' : ''"
+                      type="button"
+                      @click="draft.quantityMode = 'flat'"
+                    >
+                      减固定金额
+                    </button>
+                    <button
+                      class="segmented-item"
+                      :class="draft.quantityMode === 'per_unit' ? 'segmented-item-on' : ''"
+                      type="button"
+                      @click="draft.quantityMode = 'per_unit'"
+                    >
+                      每件减
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label class="label" for="r-amount3">
+                  {{ draft.quantityMode === 'per_unit' ? '每件减免（元）' : '减免金额（元）' }}
+                </label>
+                <input
+                  v-if="draft.quantityMode === 'per_unit'"
+                  id="r-amount3"
+                  v-model.number="draft.perUnit"
+                  class="input nums"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                />
+                <input
+                  v-else
+                  id="r-amount3"
+                  v-model.number="draft.amount"
+                  class="input nums"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                />
+                <p class="hint">
+                  {{ draft.quantityMode === 'per_unit'
+                    ? '满件后按实际件数每件减，例如满 3 件每件减 5 元。'
+                    : '满件后一次性减固定金额，不随件数变化。' }}
+                </p>
+              </div>
+            </div>
+
+            <div v-else-if="draft.kind === 'bulk_price'" class="md:col-span-3 grid gap-3 md:grid-cols-2">
+              <div>
+                <label class="label" for="r-bulk-qty">达到件数</label>
+                <input id="r-bulk-qty" v-model.number="draft.quantity" class="input nums" type="number" min="1" step="1" />
+              </div>
+              <div>
+                <label class="label" for="r-bulk-price">折后单价（元）</label>
+                <input id="r-bulk-price" v-model.number="draft.price" class="input nums" type="number" min="0.01" step="0.01" />
+              </div>
+              <p class="hint md:col-span-2">达到件数后整单按这个单价结算。</p>
+            </div>
+
+            <div v-else class="md:col-span-3">
+              <label class="label" for="r-coupon">选择优惠券</label>
+              <select id="r-coupon" v-model.number="draft.couponId" class="input">
+                <option :value="0">请选择优惠券</option>
+                <option v-for="item in coupons" :key="item.id" :value="item.id">{{ item.code }}（#{{ item.id }}）</option>
+              </select>
+              <p class="hint">列表为空时请先到「优惠券」页创建。</p>
+            </div>
           </div>
+
+          <button class="btn btn-sm" @click="addRule">{{ editingIndex >= 0 ? '保存修改' : '+ 添加规则' }}</button>
         </div>
-        <button class="btn btn-secondary btn-sm" @click="addRule">+ 添加规则</button>
 
         <div v-if="!rules.length" class="card-quiet text-center text-sm text-[var(--text-quiet)]">
           还没有规则。自动应用的活动至少要有一条规则。
         </div>
         <ul v-else class="space-y-2">
-          <li v-for="(item, index) in rules" :key="index" class="card-quiet flex items-center gap-3">
-            <span class="badge">{{ item.rule_type }}</span>
-            <span class="mono min-w-0 flex-1 truncate text-xs">{{ item.config }}</span>
+          <li v-for="(item, index) in rules" :key="index" class="rule-row">
+            <span class="badge">{{ ruleKindLabel[item.rule_type] ?? item.rule_type }}</span>
+            <span class="min-w-0 flex-1 text-sm">{{ ruleConfigSummary(item) }}</span>
+            <button class="btn btn-secondary btn-sm" @click="editRule(index)">编辑</button>
             <button class="btn btn-danger btn-sm" @click="removeRule(index)">删除</button>
           </li>
         </ul>
@@ -445,3 +792,57 @@ onMounted(load)
     </div>
   </section>
 </template>
+
+<style scoped>
+.rule-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.rule-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hi);
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+}
+
+.segmented-item {
+  padding: 0.35rem 0.85rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-quiet);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast);
+}
+
+.segmented-item-on {
+  background: var(--surface-hi);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+</style>

@@ -171,3 +171,72 @@ func TestValidateRejectsBadRules(t *testing.T) {
 		t.Fatalf("plain draft was refused: %v", err)
 	}
 }
+
+// TestPriceFullQuantityIsFlat pins the meaning of the 满件优惠 rule: with only
+// an Amount configured it is a one-off reduction once the threshold is reached
+// (满 3 件减 5 元), never Amount x quantity. Multiplying turned a 5 元 saving
+// into a per-item rebate and is the bug the shop reported for 满件 activities.
+func TestPriceFullQuantityIsFlat(t *testing.T) {
+	repo := activeActivity(10, []domain.ActivityRule{{RuleType: domain.RuleFullQuantity, Config: "{\"quantity\":3,\"amount\":5}", IsEnabled: true}}, nil)
+	service := newPricingService(t, repo)
+	pricing, err := service.Price(context.Background(), domain.MatchInput{UserID: 3, ProductID: 10, Quantity: 3, UnitPrice: 100})
+	if err != nil {
+		t.Fatalf("price: %v", err)
+	}
+	if pricing.DiscountAmount != 5 || pricing.Payable != 295 {
+		t.Fatalf("full-quantity discount = %d payable = %d, want 5 / 295", pricing.DiscountAmount, pricing.Payable)
+	}
+	if len(pricing.AppliedRules) != 1 || pricing.AppliedRules[0] != domain.RuleFullQuantity {
+		t.Fatalf("applied rules = %v, want [full_quantity]", pricing.AppliedRules)
+	}
+	// Below the threshold nothing applies.
+	if _, err := service.Price(context.Background(), domain.MatchInput{UserID: 3, ProductID: 10, Quantity: 2, UnitPrice: 100}); err == nil {
+		t.Fatal("full-quantity rule fired below its threshold")
+	}
+}
+
+// TestPriceFullQuantityPerUnitKeepsPerItemSemantics covers the explicit
+// per-item form: 每件减 5 元 still scales with quantity.
+func TestPriceFullQuantityPerUnitKeepsPerItemSemantics(t *testing.T) {
+	repo := activeActivity(11, []domain.ActivityRule{{RuleType: domain.RuleFullQuantity, Config: "{\"quantity\":3,\"per_unit\":5}", IsEnabled: true}}, nil)
+	service := newPricingService(t, repo)
+	pricing, err := service.Price(context.Background(), domain.MatchInput{UserID: 3, ProductID: 10, Quantity: 4, UnitPrice: 100})
+	if err != nil {
+		t.Fatalf("price: %v", err)
+	}
+	if pricing.DiscountAmount != 20 {
+		t.Fatalf("per-unit discount = %d, want 20", pricing.DiscountAmount)
+	}
+}
+
+// TestPriceAppliedRulesOnlyListsWinner guards the non-stacking snapshot: a rule
+// that loses to a bigger one must not appear in AppliedRules, otherwise the
+// stored order snapshot claims a discount that was never granted.
+func TestPriceAppliedRulesOnlyListsWinner(t *testing.T) {
+	rules := []domain.ActivityRule{
+		{RuleType: domain.RulePercentOff, Config: "{\"percent\":90}", IsEnabled: true},
+		{RuleType: domain.RuleAmountOff, Config: "{\"amount\":5}", IsEnabled: true},
+	}
+	repo := activeActivity(12, rules, nil)
+	service := newPricingService(t, repo)
+	pricing, err := service.Price(context.Background(), domain.MatchInput{UserID: 3, ProductID: 10, Quantity: 1, UnitPrice: 100})
+	if err != nil {
+		t.Fatalf("price: %v", err)
+	}
+	if pricing.DiscountAmount != 10 {
+		t.Fatalf("discount = %d, want 10", pricing.DiscountAmount)
+	}
+	if len(pricing.AppliedRules) != 1 || pricing.AppliedRules[0] != domain.RulePercentOff {
+		t.Fatalf("applied rules = %v, want [percent_off]", pricing.AppliedRules)
+	}
+}
+
+// TestValidateFullQuantityNeedsAmount rejects a 满件 rule with no reduction,
+// which would otherwise look configured but price at zero.
+func TestValidateFullQuantityNeedsAmount(t *testing.T) {
+	service := newPricingService(t, &fakeRepo{})
+	activity := domain.Activity{Name: "x", Type: models.ActivityTypeStoreDiscount, Status: models.ActivityStatusDraft, AutoApply: true}
+	if err := service.validate(&activity, []domain.ActivityRule{{RuleType: domain.RuleFullQuantity, Config: "{\"quantity\":3}"}}, true); err == nil {
+		t.Fatal("full-quantity rule without amount or per_unit was accepted")
+	}
+}

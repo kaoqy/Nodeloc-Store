@@ -18,7 +18,6 @@ export interface Ticket {
   priority: string
   handler: string
   assigned_agent_id?: number
-  ai_enabled: boolean
   transfer_reason?: string
   summary?: string
   suggested_plan?: string
@@ -73,19 +72,6 @@ export interface TicketLog {
   created_at?: string
 }
 
-export interface TicketToolCall {
-  id: number
-  tool_key: string
-  tool_name?: string
-  params?: string
-  result?: string
-  status: string
-  error?: string
-  duration_ms: number
-  risk_level: string
-  created_at?: string
-}
-
 export interface TicketAssignment {
   id: number
   ticket_id: number
@@ -99,7 +85,6 @@ export interface TicketDetail {
   ticket: Ticket
   messages: TicketMessage[]
   logs: TicketLog[]
-  tool_calls: TicketToolCall[]
   assignments?: TicketAssignment[]
   quick_replies?: QuickReply[]
   related?: Ticket[]
@@ -109,8 +94,6 @@ export interface TicketDetail {
 
 export interface TicketStats {
   total: number
-  ai_processing: number
-  ai_solved: number
   pending_human: number
   human_handling: number
   resolved: number
@@ -135,10 +118,12 @@ export interface TicketListQuery {
   offset?: number
 }
 
+// ai_processing / ai_solved 是旧版智能客服遗留的工单状态，只为了让
+// 历史工单仍能正常显示才保留，新工单不会再产生这两个状态。
 export const ticketStatusLabels: Record<string, string> = {
-  ai_processing: 'AI 处理中',
+  ai_processing: '处理中',
   waiting_user: '等待用户回复',
-  ai_solved: 'AI 已解决',
+  ai_solved: '已结束',
   user_requested_human: '用户申请人工',
   pending_human: '待人工处理',
   human_handling: '人工处理中',

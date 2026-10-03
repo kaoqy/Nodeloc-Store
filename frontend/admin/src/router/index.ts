@@ -33,7 +33,7 @@ const routes = [
   { path: '/service', component: () => import('../views/ServiceCenterView.vue'), meta: { permission: 'tickets:view', title: '工单列表' } },
   { path: '/config', component: () => import('../views/ConfigCenterView.vue'), meta: { permission: 'config_center:view', title: '业务配置' } },
   // 旧地址保留为跳转：已发出或收藏的链接不会变成 404。
-  // AI 与知识库相关页面已下线，统一落到「业务配置」的对应分组。
+  // 旧页面地址统一落到「业务配置」的对应分组，收藏的链接不会变成 404。
   { path: '/knowledge', redirect: { path: '/config', query: { tab: 'support' } } },
   { path: '/service/agents', redirect: { path: '/config', query: { tab: 'support' } } },
   { path: '/notifications', redirect: { path: '/config', query: { tab: 'remind' } } },
