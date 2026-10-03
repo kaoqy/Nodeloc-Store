@@ -296,7 +296,7 @@ onUnmounted(() => {
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p class="eyebrow">工单中心</p>
-          <p class="quiet mt-1 text-xs">AI 先接待，需要人工时在这里接手</p>
+          <p class="quiet mt-1 text-xs">买家提交的工单在这里处理</p>
         </div>
         <div class="flex flex-wrap gap-2">
           <button class="btn btn-quiet btn-sm" :disabled="ticketsLoading" @click="loadTickets">
@@ -314,10 +314,10 @@ onUnmounted(() => {
             <span class="nums mt-1 block text-lg font-bold">{{ ticketStats?.unread ?? 0 }}</span>
           </span>
         </RouterLink>
-        <RouterLink to="/service?attention=ai" class="todo-card">
+        <RouterLink to="/service?attention=pending_human" class="todo-card">
           <span class="min-w-0 flex-1">
-            <span class="quiet block text-xs">AI 处理中</span>
-            <span class="nums mt-1 block text-lg font-bold">{{ ticketStats?.ai_processing ?? 0 }}</span>
+            <span class="quiet block text-xs">待人工处理</span>
+            <span class="nums mt-1 block text-lg font-bold">{{ ticketStats?.pending_human ?? 0 }}</span>
           </span>
         </RouterLink>
         <RouterLink to="/service?attention=pending_human" class="todo-card">
@@ -414,8 +414,8 @@ onUnmounted(() => {
         <p class="hint mt-1.5">购买 {{ stats.active_buyers_period }} 人 · 复购 {{ stats.repeat_buyers_period }} 人</p>
       </div>
       <div class="card !p-5">
-        <p class="eyebrow">AI 处理中工单</p>
-        <p class="nums mt-2 text-2xl font-bold">{{ stats.tickets_ai_processing }}</p>
+        <p class="eyebrow">待人工处理工单</p>
+        <p class="nums mt-2 text-2xl font-bold">{{ stats.tickets_pending_human }}</p>
         <p class="hint mt-1.5">工单 {{ stats.tickets_total }} 张</p>
       </div>
       <div class="card !p-5">

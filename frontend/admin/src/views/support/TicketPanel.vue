@@ -23,7 +23,7 @@ import { useAuthStore } from '../../stores/auth'
 
 /**
  * 工单处理面板：左侧队列只负责选一张单，全部上下文都在这里——
- * 对话、AI 工具调用、内部备注、时间线、快捷回复、转交与状态流转。
+ * 对话、内部备注、时间线、快捷回复、转交与状态流转。
  */
 
 const props = defineProps<{ ticketId: number }>()
@@ -42,7 +42,7 @@ const summary = ref<{ summary: string; suggested_plan: string } | null>(null)
 const agents = ref<{ agent: CustomerServiceAgent; current_load: number }[]>([])
 const reply = ref('')
 const internal = ref(false)
-const tab = ref<'timeline' | 'tools' | 'logs'>('timeline')
+const tab = ref<'timeline' | 'logs'>('timeline')
 const showSummary = ref(false)
 const showAssign = ref(false)
 
@@ -134,7 +134,7 @@ function toHuman() {
 
 const senderMeta = (type: string) => {
   switch (type) {
-    case 'ai': return { label: 'AI 客服', tone: 'badge-info' }
+    case 'ai': return { label: '系统自动回复', tone: 'badge-info' }
     case 'agent': return { label: '人工客服', tone: 'badge-success' }
     case 'system': return { label: '系统', tone: 'badge-neutral' }
     default: return { label: '用户', tone: 'badge-warning' }
@@ -161,7 +161,7 @@ onMounted(load)
           <h3 class="min-w-0 flex-1 truncate text-[15px] font-bold">{{ ticket.subject }}</h3>
           <StatusBadge :value="ticket.status" :label="ticketStatusLabels[ticket.status]" />
           <StatusBadge :value="ticket.priority" :label="ticketPriorityLabels[ticket.priority]" />
-          <span class="badge-neutral">{{ ticket.handler === 'ai' ? 'AI 处理' : '人工处理' }}</span>
+          <span class="badge-neutral">{{ ticket.handler === 'human' ? '人工处理' : '待分派' }}</span>
         </div>
         <p class="mono quiet text-[11.5px]">
           {{ ticket.ticket_no }}
@@ -173,12 +173,12 @@ onMounted(load)
           <!-- 按一天的处理顺序排：先接单，再流转，最后结单。
                主操作（接管）在前，转交类在中间，结单类靠右。 -->
           <button
-            v-if="ticket.handler === 'ai'"
+            v-if="ticket.handler !== 'human'"
             class="btn btn-primary btn-sm"
             :disabled="busy"
             @click="toHuman"
           >
-            转人工
+            接管处理
           </button>
           <button
             v-if="ticket.status !== 'human_handling'"
@@ -192,9 +192,6 @@ onMounted(load)
           <button v-if="canAssign" class="btn btn-quiet btn-sm" :disabled="busy" @click="autoAssign">自动分配</button>
           <button class="btn btn-quiet btn-sm" @click="openSummary">问题摘要</button>
           <button class="btn btn-secondary btn-sm" :disabled="busy" @click="changeStatus('resolved')">标记已解决</button>
-          <button v-if="ticket.handler === 'human'" class="btn btn-quiet btn-sm" :disabled="busy" @click="changeStatus('ai_processing')">
-            交回 AI
-          </button>
           <button class="btn btn-quiet btn-sm" :disabled="busy" @click="changeStatus('closed')">关闭</button>
         </div>
       </div>
@@ -203,9 +200,6 @@ onMounted(load)
       <div class="flex gap-1.5">
         <button class="chip" :class="tab === 'timeline' ? 'chip-active' : ''" @click="tab = 'timeline'">
           对话 <span class="nums opacity-70">{{ messages.length }}</span>
-        </button>
-        <button class="chip" :class="tab === 'tools' ? 'chip-active' : ''" @click="tab = 'tools'">
-          AI 工具 <span class="nums opacity-70">{{ detail?.tool_calls?.length ?? 0 }}</span>
         </button>
         <button class="chip" :class="tab === 'logs' ? 'chip-active' : ''" @click="tab = 'logs'">时间线</button>
       </div>
@@ -225,29 +219,6 @@ onMounted(load)
           </div>
           <p class="mt-2 whitespace-pre-line text-[13px] leading-relaxed">{{ message.content }}</p>
         </article>
-      </div>
-
-      <div v-else-if="tab === 'tools'" class="card max-h-[420px] overflow-y-auto !p-0">
-        <table class="table">
-          <thead>
-            <tr><th>工具</th><th>参数</th><th>结果</th><th>状态</th><th class="nums">耗时</th></tr>
-          </thead>
-          <tbody>
-            <tr v-if="!detail?.tool_calls?.length">
-              <td colspan="5" class="quiet py-10 text-center">这次工单没有调用工具</td>
-            </tr>
-            <tr v-for="call in detail?.tool_calls ?? []" :key="call.id">
-              <td>
-                <p class="text-[12.5px] font-semibold">{{ call.tool_name || call.tool_key }}</p>
-                <p class="mono quiet text-[11px]">{{ call.tool_key }}</p>
-              </td>
-              <td class="mono max-w-[170px] truncate text-[11px]">{{ call.params || '—' }}</td>
-              <td class="mono max-w-[200px] truncate text-[11px]">{{ call.result || call.error || '—' }}</td>
-              <td><StatusBadge :value="call.status" /></td>
-              <td class="nums text-xs">{{ call.duration_ms }} ms</td>
-            </tr>
-          </tbody>
-        </table>
       </div>
 
       <div v-else-if="tab === 'logs'" class="card max-h-[420px] space-y-2 overflow-y-auto">

@@ -51,7 +51,7 @@ const canView = computed(() => auth.allows('tickets', 'view'))
 
 const QUICK = [
   { key: '', label: '全部' },
-  { key: 'ai', label: 'AI 处理中', countKey: 'ai_processing' as const },
+  { key: 'pending_human', label: '待人工处理', countKey: 'pending_human' as const },
   { key: 'pending_human', label: '待人工处理', countKey: 'pending_human' as const },
   { key: 'unread', label: '未读', countKey: 'unread' as const },
   { key: 'overdue', label: '即将超时', countKey: 'overdue' as const },
@@ -186,8 +186,8 @@ onMounted(() => {
 <template>
   <section class="space-y-4">
     <PageHeader
-      title="客服中心"
-      description="工单默认由 AI 接待，需要时转人工。这里处理队列；模型与工具配置在配置中心。"
+      title="工单列表"
+      description="买家提交的工单在这里处理：查看内容、回复、分派与流转，完整沟通记录一并保留。"
       bordered
     >
       <template #actions>
@@ -208,8 +208,8 @@ onMounted(() => {
       <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <RouterLink to="/service?attention=ai" class="todo-card">
           <span class="min-w-0 flex-1">
-            <span class="quiet block text-xs">AI 处理中</span>
-            <span class="nums mt-1 block text-xl font-bold">{{ stats?.ai_processing ?? 0 }}</span>
+            <span class="quiet block text-xs">待人工处理</span>
+            <span class="nums mt-1 block text-xl font-bold">{{ stats?.pending_human ?? 0 }}</span>
           </span>
           <AdminIcon name="chevronRight" :size="15" class="text-[var(--text-quiet)]" />
         </RouterLink>

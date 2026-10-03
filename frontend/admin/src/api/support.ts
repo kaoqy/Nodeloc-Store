@@ -109,9 +109,7 @@ export interface TicketDetail {
 
 export interface TicketStats {
   total: number
-  /** AI 仍在处理或等用户回复的工单数 */
   ai_processing: number
-  /** AI 已经给出结论、等用户确认的工单数 */
   ai_solved: number
   pending_human: number
   human_handling: number
@@ -216,126 +214,7 @@ export const getTicketSummary = (id: number) =>
     .get<{ summary: string; suggested_plan: string }>('/admin/tickets/' + id + '/summary')
     .then((r) => r.data)
 
-// ── AI 客服配置 ──────────────────────────────────────────────────────
-
-export interface AIConfig {
-  id?: number
-  provider: string
-  base_url: string
-  model: string
-  timeout_ms: number
-  max_context: number
-  max_reply_len: number
-  temperature: number
-  top_p: number
-  is_enabled: boolean
-  guest_allowed: boolean
-  guest_daily_limit: number
-  user_daily_limit: number
-  ip_rate_limit: number
-  max_message_len: number
-  system_prompt: string
-  greeting: string
-  fallback_reply: string
-  transfer_tip: string
-  ticket_tip: string
-  sensitive_tip: string
-  avatar: string
-  agent_name: string
-  rating_enabled: boolean
-  log_enabled: boolean
-  mail_enabled: boolean
-}
-
-export interface AIWorkflow {
-  id?: number
-  default_handle_minutes: number
-  max_failures: number
-  transfer_after_failures: number
-  transfer_after_downvotes: number
-  transfer_on_explicit: boolean
-  transfer_high_amount: boolean
-  high_amount_threshold: number
-  transfer_refund: boolean
-  transfer_card_dispute: boolean
-  transfer_payment_issue: boolean
-  transfer_abuse: boolean
-  can_create_ticket: boolean
-  can_update_ticket: boolean
-  can_notify: boolean
-  can_query_order: boolean
-  can_query_shipping: boolean
-  can_recommend_activity: boolean
-  can_grant_coupon: boolean
-  can_refund: boolean
-  require_human_refund: boolean
-  transfer_notice: string
-  working_hours: string
-  estimate_reply_minutes: number
-}
-
-export interface AIToolPermission {
-  id?: number
-  tool_id: number
-  role: string
-  allowed: boolean
-}
-
-export interface AITool {
-  id: number
-  key: string
-  name: string
-  description?: string
-  category: string
-  method: string
-  kind: string
-  require_login: boolean
-  own_data_only: boolean
-  require_approval: boolean
-  allow_auto: boolean
-  require_confirm: boolean
-  is_enabled: boolean
-  rate_limit: number
-  timeout_ms: number
-  failure_mode: string
-  risk_level: string
-  builtin: boolean
-  sort_order: number
-}
-
-export interface AIToolRow {
-  tool: AITool
-  permissions: AIToolPermission[]
-}
-
-export interface AIToolCall {
-  id: number
-  conversation_id?: number
-  ticket_id?: number
-  user_id?: number
-  tool_key: string
-  tool_name?: string
-  params?: string
-  result?: string
-  status: string
-  error?: string
-  duration_ms: number
-  risk_level: string
-  created_at?: string
-}
-
-export interface AIQuickQuestion {
-  id?: number
-  title: string
-  content?: string
-  position: string
-  pages?: string
-  sort_order: number
-  is_enabled: boolean
-  require_login: boolean
-  knowledge_id?: number
-  tool_key?: string
-}
+// ── 客服坐席与快捷回复 ────────────────────────────────────────────────
 
 export interface CustomerServiceAgent {
   id?: number
@@ -369,154 +248,15 @@ export interface QuickReply {
   use_count?: number
 }
 
-export interface KnowledgeArticle {
-  id?: number
-  category_id: number
-  title: string
-  slug: string
-  summary?: string
-  content: string
-  keywords?: string
-  tags?: string
-  priority: number
-  status: string
-  version?: number
-  source?: string
-  builtin?: boolean
-  created_at?: string
-}
-
-export interface KnowledgeCategory {
-  id?: number
-  name: string
-  slug: string
-  description?: string
-  sort_order: number
-  is_enabled: boolean
-}
-
-export const getAIConfig = () =>
-  client
-    .get<{ config: AIConfig; workflow: AIWorkflow; has_key: boolean }>('/admin/ai/config')
-    .then((r) => r.data)
-
-export const saveAIConfig = (config: Partial<AIConfig> & { api_key?: string }) =>
-  client.put('/admin/ai/config', config).then((r) => r.data)
-
-export const saveAIWorkflow = (workflow: Partial<AIWorkflow>) =>
-  client.put('/admin/ai/workflow', workflow).then((r) => r.data.workflow as AIWorkflow)
-
-export const listAITools = () =>
-  client.get<{ data: AIToolRow[] }>('/admin/ai-tool-index').then((r) => r.data.data ?? [])
-
-export const saveAITool = (id: number, tool: Partial<AITool>) =>
-  client.put<{ data: AITool }>('/admin/ai-tools/' + id, tool).then((r) => r.data.data)
-
-export const setAIToolPermission = (toolId: number, role: string, allowed: boolean) =>
-  client.post('/admin/ai-tools/' + toolId + '/permissions', { role, allowed })
-
-export const listAIToolCalls = (params: { tool?: string; status?: string; limit?: number; offset?: number } = {}) =>
-  client
-    .get<{ data: AIToolCall[]; total: number }>('/admin/ai-tool-index/calls', { params })
-    .then((r) => ({ data: r.data.data ?? [], total: r.data.total ?? 0 }))
-
-// AI 实际可调用的工具清单（按角色过滤后），用于后台核对权限与提示词。
-export interface AIToolSummary {
-  key: string
-  name: string
-  description: string
-  params?: string[]
-}
-
-export const listAIToolCatalogue = (role = 'user') =>
-  client
-    .get<{ role: string; data: AIToolSummary[] }>('/admin/ai-tool-index/catalogue', { params: { role } })
-    .then((r) => r.data.data ?? [])
-
-export interface AIConversationRow {
-  id: number
-  user_id?: number
-  ticket_id?: number
-  channel: string
-  status: string
-  agent_name?: string
-  page_context?: string
-  message_count: number
-  handed_to_human: boolean
-  last_message_at?: string
-  created_at?: string
-}
-
-export interface AIFeedbackRow {
-  id: number
-  conversation_id: number
-  message_id?: number
-  ticket_id?: number
-  user_id?: number
-  rating: number
-  reason?: string
-  comment?: string
-  created_at?: string
-}
-
-export const listAIConversations = (params: { user_id?: number; limit?: number; offset?: number } = {}) =>
-  client
-    .get<{ data: AIConversationRow[]; total: number }>('/admin/ai/conversations', { params })
-    .then((r) => ({ data: r.data.data ?? [], total: r.data.total ?? 0 }))
-
-export const listAIFeedback = (limit = 50) =>
-  client.get<{ data: AIFeedbackRow[] }>('/admin/ai/feedback', { params: { limit } }).then((r) => r.data.data ?? [])
-
-export const listAIRoles = () =>
-  client.get<{ data: string[] }>('/admin/ai-tool-index/roles').then((r) => r.data.data ?? [])
-
-export const listQuickQuestions = () =>
-  client.get<{ data: AIQuickQuestion[] }>('/admin/ai/quick-questions').then((r) => r.data.data ?? [])
-
-export const saveQuickQuestion = (question: Partial<AIQuickQuestion>) =>
-  question.id
-    ? client.put('/admin/ai/quick-questions/' + question.id, question).then((r) => r.data.data)
-    : client.post('/admin/ai/quick-questions', question).then((r) => r.data.data)
-
-export const deleteQuickQuestion = (id: number) => client.delete('/admin/ai/quick-questions/' + id)
-
-export const listKnowledge = (params: { q?: string; status?: string; category_id?: number; limit?: number; offset?: number } = {}) =>
-  client
-    .get<{ data: KnowledgeArticle[]; total: number }>('/admin/knowledge-index', { params })
-    .then((r) => ({ data: r.data.data ?? [], total: r.data.total ?? 0 }))
-
-export const getKnowledge = (id: number) =>
-  client.get<{ data: KnowledgeArticle }>('/admin/knowledge/' + id).then((r) => r.data.data)
-
-export const saveKnowledge = (article: Partial<KnowledgeArticle>) =>
-  article.id
-    ? client.put('/admin/knowledge/' + article.id, article).then((r) => r.data.data)
-    : client.post('/admin/knowledge-index', article).then((r) => r.data.data)
-
-export const deleteKnowledge = (id: number) => client.delete('/admin/knowledge/' + id)
-
-export const listKnowledgeCategories = () =>
-  client.get<{ data: KnowledgeCategory[] }>('/admin/knowledge-index/categories').then((r) => r.data.data ?? [])
-
-export const saveKnowledgeCategory = (category: Partial<KnowledgeCategory>) =>
-  client.post('/admin/knowledge-index/categories', category).then((r) => r.data.data)
-
-export const deleteKnowledgeCategory = (id: number) =>
-  client.delete('/admin/knowledge-index/categories/' + id)
-
-export const importKnowledge = (text: string, categoryId = 0) =>
-  client.post('/admin/knowledge-index/import', { text, category_id: categoryId }).then((r) => r.data)
-
-export const testKnowledge = (id: number, question = '') =>
-  client.post('/admin/knowledge/' + id + '/test', { question }).then((r) => r.data)
-
 export const listAgents = () =>
-  client.get<{ data: { agent: CustomerServiceAgent; current_load: number }[] }>('/admin/agents').then((r) => r.data.data ?? [])
+  client
+    .get<{ data: { agent: CustomerServiceAgent; current_load: number }[] }>('/admin/agents')
+    .then((r) => r.data.data ?? [])
 
 export const saveAgent = (agent: Partial<CustomerServiceAgent>) =>
   agent.id
-    ? client.put('/admin/agents/' + agent.id, agent).then((r) => r.data.data)
-    : client.post('/admin/agents', agent).then((r) => r.data.data)
+    ? client.put('/admin/agents/' + agent.id, agent).then((r) => r.data.agent as CustomerServiceAgent)
+    : client.post('/admin/agents', agent).then((r) => r.data.agent as CustomerServiceAgent)
 
 export const deleteAgent = (id: number) => client.delete('/admin/agents/' + id)
 
@@ -525,8 +265,8 @@ export const listQuickReplies = () =>
 
 export const saveQuickReply = (reply: Partial<QuickReply>) =>
   reply.id
-    ? client.put('/admin/quick-replies/' + reply.id, reply).then((r) => r.data.data)
-    : client.post('/admin/quick-replies', reply).then((r) => r.data.data)
+    ? client.put('/admin/quick-replies/' + reply.id, reply).then((r) => r.data.data as QuickReply)
+    : client.post('/admin/quick-replies', reply).then((r) => r.data.data as QuickReply)
 
 export const deleteQuickReply = (id: number) => client.delete('/admin/quick-replies/' + id)
 
