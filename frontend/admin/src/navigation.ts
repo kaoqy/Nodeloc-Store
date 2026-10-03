@@ -37,95 +37,49 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: '概览',
     items: [
-      {
-        path: '/', label: '总览', hint: '今天的生意与待办', icon: 'dashboard',
-        permission: 'stats:view', keywords: ['dashboard', 'home', '首页'],
-      },
+      { path: '/', label: '数据看板', hint: '今日经营与待办', icon: 'dashboard',
+        permission: 'stats:view', keywords: ['dashboard', 'home', '首页', '看板'] },
     ],
   },
   {
     label: '经营',
     items: [
-      {
-        path: '/orders', label: '订单管理', hint: '支付、发货与退款', icon: 'orders',
-        permission: 'orders:view', keywords: ['order', '订单', '发货'],
-      },
-      {
-        path: '/products', label: '商品管理', hint: '上架、定价与详情', icon: 'products',
-        permission: 'products:view', keywords: ['product', '商品'],
-      },
-      {
-        path: '/cards', label: '卡密库存', hint: '导入、生成与补货', icon: 'cards',
-        permission: 'cards:view', keywords: ['card', '卡密', '库存', '补货'],
-      },
-      {
-        path: '/categories', label: '分类管理', hint: '商品分类与排序', icon: 'categories',
-        permission: 'categories:view', keywords: ['category', '分类'],
-      },
-      {
-        path: '/coupons', label: '优惠券', hint: '优惠码与使用范围', icon: 'coupons',
-        permission: 'coupons:view', keywords: ['coupon', '优惠码', '折扣'],
-      },
-      {
-        path: '/activities', label: '活动营销', hint: '折扣、满减与领券', icon: 'activities',
-        permission: 'activities:view', keywords: ['activity', '活动', '促销'],
-      },
-      {
-        path: '/plugins', label: '插件管理', hint: '交付提供者与映射', icon: 'plugins',
-        permission: 'plugins:view', keywords: ['plugin', '插件'],
-      },
+      { path: '/orders', label: '订单管理', hint: '支付、交付与售后', icon: 'orders',
+        permission: 'orders:view', keywords: ['order', '订单', '发货'] },
+      { path: '/products', label: '商品管理', hint: '上架、定价与交付方式', icon: 'products',
+        permission: 'products:view', keywords: ['product', '商品'] },
+      { path: '/cards', label: '卡密管理', hint: '按商品导入与库存', icon: 'cards',
+        permission: 'cards:view', keywords: ['card', '卡密', '库存'] },
+      { path: '/categories', label: '分组管理', hint: '商品分类与排序', icon: 'categories',
+        permission: 'categories:view', keywords: ['category', '分组', '分类'] },
+      { path: '/coupons', label: '优惠券', hint: '优惠码与使用范围', icon: 'coupons',
+        permission: 'coupons:view', keywords: ['coupon', '优惠码'] },
+      { path: '/activities', label: '活动管理', hint: '折扣活动与适用范围', icon: 'activities',
+        permission: 'activities:view', keywords: ['activity', '活动', '促销'] },
+      { path: '/plugins', label: '插件管理', hint: '交付提供者与映射', icon: 'plugins',
+        permission: 'plugins:view', keywords: ['plugin', '插件'] },
     ],
   },
   {
-    label: '工单与知识库',
+    label: '客户服务',
     items: [
-      {
-        // 工单是唯一的接待入口：用户发起工单后由 AI 先处理，需要时再转人工。
-        path: '/service', label: '工单中心', hint: 'AI 先接待，可转人工', icon: 'support',
-        permission: 'tickets:view', altPermission: 'ai:view',
-        keywords: ['ticket', '工单', '客服', 'ai'],
-      },
-      {
-        path: '/knowledge', label: '知识库', hint: 'AI 回答的依据', icon: 'knowledge',
-        permission: 'knowledge:view', keywords: ['knowledge', '知识库', '文档'],
-      },
-    ],
-  },
-  {
-    label: '客户',
-    items: [
-      {
-        path: '/users', label: '用户管理', hint: '账号、积分与转账', icon: 'users',
-        permission: 'users:view', keywords: ['user', '用户', '会员'],
-      },
-      {
-        path: '/notifications', label: '通知中心', hint: '站内信与广播', icon: 'notifications',
-        permission: 'notifications:view', keywords: ['notification', '通知'],
-      },
+      { path: '/service', label: '工单列表', hint: '人工处理与沟通记录', icon: 'support',
+        permission: 'tickets:view', keywords: ['ticket', '工单', '客服'] },
+      { path: '/users', label: '用户管理', hint: '账号、积分与转账', icon: 'users',
+        permission: 'users:view', keywords: ['user', '用户', '会员'] },
     ],
   },
   {
     label: '系统',
     items: [
-      {
-        // 站点、登录、支付、SMTP 与 AI、工单、通知同属「怎么运作」，
-        // 以前分成两个侧栏入口，店家改一项设置要先想「这属于哪边」。
-        path: '/settings', label: '系统设置', hint: '站点、登录、支付与邮件', icon: 'settings',
-        permission: 'settings:view', keywords: ['settings', '设置', 'oauth', 'payment', 'smtp'],
-      },
-      {
-        path: '/config', label: '业务配置', hint: 'AI 客服、知识库、工单与通知', icon: 'settings',
-        permission: 'config_center:view', altPermission: 'ai:view',
-        keywords: ['config', '配置', 'ai', '工单', '通知'],
-      },
-      {
-        path: '/roles', label: '权限与管理员', hint: '角色与权限矩阵', icon: 'roles',
-        permission: 'roles:view', keywords: ['role', '角色', '权限', '管理员'],
-      },
-      {
-        path: '/logs', label: '操作日志', hint: '谁改了什么', icon: 'logs',
-        permission: 'logs:view', keywords: ['log', '日志', '审计'],
-      },
+      { path: '/settings', label: '系统配置', hint: '站点、登录、支付与邮件', icon: 'settings',
+        permission: 'settings:view', keywords: ['settings', '设置', 'oauth', 'payment', 'smtp'] },
+      { path: '/config', label: '业务配置', hint: '工单规则与提醒事件', icon: 'settings',
+        permission: 'config_center:view', keywords: ['config', '配置', '提醒'] },
+      { path: '/roles', label: '权限与管理员', hint: '角色与权限矩阵', icon: 'roles',
+        permission: 'roles:view', keywords: ['role', '角色', '权限'] },
+      { path: '/logs', label: '操作审计', hint: '谁改了什么', icon: 'logs',
+        permission: 'logs:view', keywords: ['log', '日志', '审计'] },
     ],
   },
 ]
