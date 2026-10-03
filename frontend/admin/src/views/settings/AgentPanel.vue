@@ -12,6 +12,7 @@ import {
   type QuickReply,
 } from '../../api/support'
 import { errorMessage } from '../../utils/format'
+import SaveBar from '../../components/SaveBar.vue'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
@@ -144,6 +145,15 @@ onMounted(load)
 
 <template>
   <div class="space-y-4">
+    <SaveBar
+      resource="agents"
+      :saving="busy"
+      :dirty="tab === 'agents' ? Boolean(agentDraft.user_id) : Boolean(replyDraft.title && replyDraft.content)"
+      :save-label="tab === 'agents' ? '保存客服' : '保存快捷回复'"
+      hint="保存当前正在编辑的一行"
+      @save="tab === 'agents' ? saveAgentDraft() : saveReplyDraft()"
+    />
+
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 

@@ -121,13 +121,31 @@ function onPanelClosed() {
   void load()
 }
 
-// 总览的待办卡片会带 attention 参数过来，直接落到对应筛选上。
+// 总览与各处快捷入口会带参数过来，这里把地址栏当成筛选条件的唯一来源：
+// attention 是「业务视角」（未读/超时/紧急/退款…），status/handler/mine/q
+// 是列表自己的筛选。两者都要支持，否则首页的「待人工工单」点进来会落到
+// 全部工单上，看起来就是按钮没生效。
 function syncFromRoute() {
-  const incoming = typeof route.query.attention === 'string' ? route.query.attention : ''
-  attention.value = incoming
+  const query = route.query
+  attention.value = typeof query.attention === 'string' ? query.attention : ''
+  status.value = typeof query.status === 'string' && query.status ? query.status : 'all'
+  mine.value = query.mine === '1'
+  if (typeof query.q === 'string') search.value = query.q
+  // 处理方筛选（ai / human）走快速筛选里的语义，这里落到状态上。
+  const handler = typeof query.handler === 'string' ? query.handler : ''
+  if (handler === 'human' && status.value === 'all') {
+    status.value = 'pending_human'
+  }
 }
 
-watch(() => route.query.attention, syncFromRoute)
+watch(
+  () => [route.query.attention, route.query.status, route.query.mine, route.query.q, route.query.handler].join('|'),
+  () => {
+    syncFromRoute()
+    page.value = 1
+    void load()
+  },
+)
 
 onMounted(() => {
   syncFromRoute()

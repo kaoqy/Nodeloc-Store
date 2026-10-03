@@ -174,6 +174,8 @@ type DashboardStats struct {
 	TicketsTotal         int64   `json:"tickets_total"`
 	TicketsAI            int64   `json:"tickets_ai_processing"`
 	TicketsPendingHuman  int64   `json:"tickets_pending_human"`
+	TicketsUnread        int64   `json:"tickets_unread"`
+	TicketsUrgent        int64   `json:"tickets_urgent"`
 	TicketsOverdue       int64   `json:"tickets_overdue"`
 	TicketResolveRate    float64 `json:"ticket_resolve_rate"`
 	TicketSatisfaction   float64 `json:"ticket_satisfaction"`
@@ -282,6 +284,18 @@ func statSupport(ctx context.Context, db *gorm.DB, stats *DashboardStats, _ time
 		Where("due_at IS NOT NULL AND due_at < ? AND status NOT IN ?", now, []string{models.TicketStatusResolved, models.TicketStatusClosed}).
 		Count(&metric.Overdue).Error; err == nil {
 		stats.TicketsOverdue = metric.Overdue
+	}
+	// 未读与紧急是工单中心两个最常用的入口，总览直接把数字带出来，
+	// 卡片点进去时也能带上同样的筛选条件。
+	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+		Where("unread_for_staff = ?", true).
+		Count(&stats.TicketsUnread).Error; err != nil {
+		stats.TicketsUnread = 0
+	}
+	if err := db.WithContext(ctx).Model(&models.Ticket{}).
+		Where("priority = ? AND status NOT IN ?", "urgent", []string{models.TicketStatusResolved, models.TicketStatusClosed}).
+		Count(&stats.TicketsUrgent).Error; err != nil {
+		stats.TicketsUrgent = 0
 	}
 	var resolved int64
 	if err := db.WithContext(ctx).Model(&models.Ticket{}).

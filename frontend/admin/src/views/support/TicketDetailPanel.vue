@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import {
   assignTicket,
+  autoAssignTicket,
   getTicket,
   getTicketSummary,
   markTicketRead,
@@ -126,6 +127,36 @@ async function assign(agentId: number) {
   }
 }
 
+// 自动分配：不用知道具体是哪位客服，按在线状态与并发量挑一个。
+async function autoAssign() {
+  busy.value = true
+  error.value = ''
+  try {
+    await autoAssignTicket(props.ticketId)
+    notice.value = '已自动分配给负载最低的在线客服。'
+    detail.value = await getTicket(props.ticketId)
+  } catch (err) {
+    error.value = errorMessage(err, '自动分配失败')
+  } finally {
+    busy.value = false
+  }
+}
+
+// 转人工：把 AI 处理中的工单推进人工队列，保留完整上下文。
+async function toHuman() {
+  busy.value = true
+  error.value = ''
+  try {
+    await setTicketStatus(props.ticketId, 'pending_human', '客服手动转人工')
+    notice.value = '工单已转入人工队列。'
+    detail.value = await getTicket(props.ticketId)
+  } catch (err) {
+    error.value = errorMessage(err, '转人工失败')
+  } finally {
+    busy.value = false
+  }
+}
+
 async function useQuickReply(replyId: number) {
   try {
     reply.value = await renderQuickReply(replyId, {
@@ -180,6 +211,15 @@ onMounted(load)
           <button v-if="canManage" class="btn btn-secondary btn-sm" :disabled="busy" @click="changeStatus('resolved')">标记已解决</button>
           <button v-if="canManage" class="btn btn-secondary btn-sm" :disabled="busy" @click="changeStatus('closed')">关闭</button>
           <button v-if="canManage" class="btn btn-quiet btn-sm" :disabled="busy" @click="changeStatus('ai_processing')">重新交给 AI</button>
+          <button
+            v-if="canManage && ticket.handler === 'ai'"
+            class="btn btn-secondary btn-sm"
+            :disabled="busy"
+            @click="toHuman"
+          >
+            转人工
+          </button>
+          <button v-if="canAssign" class="btn btn-quiet btn-sm" :disabled="busy" @click="autoAssign">自动分配</button>
           <select
             v-if="canAssign && agents.length"
             class="input !w-auto !py-1.5 text-[12px]"

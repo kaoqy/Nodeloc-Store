@@ -13,6 +13,7 @@ import {
   type KnowledgeCategory,
 } from '../../api/support'
 import { errorMessage, when } from '../../utils/format'
+import SaveBar from '../../components/SaveBar.vue'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
@@ -178,6 +179,15 @@ onMounted(load)
         <button class="btn btn-secondary btn-sm" @click="load">查询</button>
       </div>
     </div>
+
+    <SaveBar
+      resource="knowledge"
+      :saving="busy"
+      :dirty="Boolean(draft.title || draft.content)"
+      save-label="保存文章"
+      hint="保存右侧正在编辑的文章"
+      @save="save"
+    />
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>

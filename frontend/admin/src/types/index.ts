@@ -349,6 +349,8 @@ export interface DashboardStats {
   tickets_total: number
   tickets_ai_processing: number
   tickets_pending_human: number
+  tickets_unread: number
+  tickets_urgent: number
   tickets_overdue: number
   ticket_resolve_rate: number
   ticket_satisfaction: number

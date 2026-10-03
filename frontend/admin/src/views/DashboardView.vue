@@ -4,6 +4,14 @@ import StatCard from '../components/StatCard.vue'
 import { listAuditLogs } from '../api/logs'
 import { alertLowStock } from '../api/products'
 import { getStats } from '../api/system'
+import {
+  getTicketStats,
+  listTickets,
+  ticketPriorityLabels,
+  ticketStatusLabels,
+  type TicketStats,
+  type TicketView,
+} from '../api/support'
 import { errorMessage, fulfillmentStatus, money, orderStatus, when, dayLabel } from '../utils/format'
 import { readDashboardCards, writeDashboardCards, type DashboardCardPref } from '../api/configCenter'
 import { useAuthStore } from '../stores/auth'
@@ -64,6 +72,12 @@ const days = ref(prefs.days)
 const metric = ref<Metric>(prefs.metric)
 const auto = ref(prefs.auto)
 const stats = ref<DashboardStats | null>(null)
+// 工单中心：总览不只显示数字，也把最近需要处理的工单列出来，
+// 每个入口都带着筛选条件跳到客服中心，点进去就是同一个结果集。
+const ticketStats = ref<TicketStats | null>(null)
+const recentTickets = ref<TicketView[]>([])
+const ticketsLoading = ref(false)
+const ticketsError = ref('')
 const cardPrefs = ref<DashboardCardPref[]>(readDashboardCards())
 const showCardSettings = ref(false)
 const logs = ref<AuditLog[]>([])
@@ -163,9 +177,11 @@ const backlog = computed(() => {
     { to: '/orders?status=pending', label: '待支付订单', count: s.orders_pending, tone: 'warning', permission: ['orders', 'view'] },
     { to: '/orders?status=paid', label: '等待人工发货', count: s.orders_manual_pending, tone: 'info', permission: ['orders', 'view'] },
     { to: '/cards', label: '等待补货', count: s.orders_waiting, tone: 'danger', permission: ['cards', 'view'] },
-    { to: '/orders', label: '期间退款', count: s.refunded_period, tone: 'neutral', permission: ['orders', 'view'] },
+    { to: '/orders?status=refunded', label: '期间退款', count: s.refunded_period, tone: 'neutral', permission: ['orders', 'view'] },
     // 新增待办：工单和发货异常比「已经卖出去多少」更值得第一眼看到。
-    { to: '/service', label: '待人工工单', count: s.tickets_pending_human, tone: 'danger', permission: ['tickets', 'view'] },
+    { to: '/service?status=pending_human', label: '待人工工单', count: s.tickets_pending_human, tone: 'danger', permission: ['tickets', 'view'] },
+    { to: '/service?attention=unread', label: '未读工单', count: s.tickets_unread, tone: 'info', permission: ['tickets', 'view'] },
+    { to: '/service?attention=urgent', label: '紧急工单', count: s.tickets_urgent, tone: 'danger', permission: ['tickets', 'view'] },
     { to: '/service?attention=overdue', label: '即将超时工单', count: s.tickets_overdue, tone: 'warning', permission: ['tickets', 'view'] },
     { to: '/orders?attention=undelivered', label: '自动发货异常', count: s.auto_delivery_failed, tone: 'danger', permission: ['orders', 'view'] },
   ].filter((item) => item.count > 0 && auth.allows(item.permission[0], item.permission[1]))
@@ -193,6 +209,39 @@ async function load(silent = false) {
   } finally {
     loading.value = false
   }
+}
+
+// 加载工单中心区块。没有工单查看权限的角色直接跳过请求，不产生 403。
+async function loadTickets() {
+  if (!auth.allows('tickets', 'view')) return
+  ticketsLoading.value = true
+  ticketsError.value = ''
+  try {
+    const [metric, page] = await Promise.all([
+      getTicketStats(false).catch(() => null),
+      listTickets({ limit: 6, offset: 0, attention: 'unread' }).catch(() => ({ data: [], total: 0 })),
+    ])
+    ticketStats.value = metric
+    // 「未读」可能有几十条，这里展示最近需要处理的：优先未读，不足时补最新。
+    const rows: TicketView[] = [...page.data]
+    if (rows.length < 6) {
+      const latest = await listTickets({ limit: 6, offset: 0 }).catch(() => ({ data: [], total: 0 }))
+      const seen = new Set(rows.map((r) => r.id))
+      for (const row of latest.data) {
+        if (rows.length >= 6) break
+        if (!seen.has(row.id)) { rows.push(row); seen.add(row.id) }
+      }
+    }
+    recentTickets.value = rows
+  } catch (err) {
+    ticketsError.value = errorMessage(err, '工单数据加载失败')
+  } finally {
+    ticketsLoading.value = false
+  }
+}
+
+async function refreshAll() {
+  await Promise.all([load(), loadTickets()])
 }
 
 async function switchRange(value: number) {
@@ -235,6 +284,7 @@ function syncAutoRefresh() {
   refreshTimer = window.setInterval(() => {
     if (document.hidden || loading.value) return
     void load(true)
+    void loadTickets()
   }, AutoRefreshMs)
 }
 
@@ -244,7 +294,10 @@ watch([days, metric, auto], () => {
 })
 
 function onVisible() {
-  if (!document.hidden && auto.value && !loading.value) void load(true)
+  if (!document.hidden && auto.value && !loading.value) {
+    void load(true)
+    void loadTickets()
+  }
 }
 
 // 卡片偏好保存在本地：拖拽顺序与显示开关都是这台机器的个人偏好，
@@ -282,6 +335,7 @@ function onDrop(target: string) {
 
 onMounted(() => {
   void load()
+  void loadTickets()
   syncAutoRefresh()
   document.addEventListener('visibilitychange', onVisible)
 })
@@ -321,8 +375,8 @@ onUnmounted(() => {
         <button class="btn btn-quiet btn-sm" :aria-pressed="showCardSettings" @click="showCardSettings = !showCardSettings">
           卡片
         </button>
-        <button class="btn btn-quiet btn-sm" :disabled="loading" @click="load()">
-          {{ loading ? '加载中…' : '刷新' }}
+        <button class="btn btn-quiet btn-sm" :disabled="loading || ticketsLoading" @click="refreshAll()">
+          {{ loading || ticketsLoading ? '加载中…' : '刷新' }}
         </button>
       </div>
     </div>
@@ -379,6 +433,83 @@ onUnmounted(() => {
           <span class="quiet block truncate text-xs">补货与等待发货</span>
         </span>
       </RouterLink>
+    </div>
+
+    <!-- 快捷操作：新建商品、导入卡密、创建活动这些是店主每天要做的动作，
+         每一项都指向真正存在的页面并预先打开对应状态。 -->
+    <div class="card space-y-3">
+      <p class="eyebrow">快捷操作</p>
+      <div class="flex flex-wrap gap-2">
+        <RouterLink v-if="auth.allows('products','manage')" to="/products/new" class="btn btn-secondary btn-sm">新增商品</RouterLink>
+        <RouterLink v-if="auth.allows('cards','view')" to="/cards" class="btn btn-secondary btn-sm">导入卡密</RouterLink>
+        <RouterLink v-if="auth.allows('activities','manage')" to="/activities/new" class="btn btn-secondary btn-sm">创建活动</RouterLink>
+        <RouterLink v-if="auth.allows('orders','view')" to="/orders" class="btn btn-secondary btn-sm">全部订单</RouterLink>
+        <RouterLink v-if="auth.allows('tickets','view')" to="/service" class="btn btn-secondary btn-sm">工单中心</RouterLink>
+        <RouterLink v-if="auth.allows('ai','view')" to="/config?tab=ai" class="btn btn-secondary btn-sm">AI 客服配置</RouterLink>
+        <RouterLink v-if="auth.allows('knowledge','view')" to="/config?tab=knowledge" class="btn btn-secondary btn-sm">知识库</RouterLink>
+        <RouterLink v-if="auth.allows('settings','view')" to="/settings" class="btn btn-secondary btn-sm">系统设置</RouterLink>
+      </div>
+    </div>
+
+    <!-- 工单中心：数字 + 最近工单 + 每个都能点进筛选后的列表。 -->
+    <div v-if="auth.allows('tickets', 'view')" class="card space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p class="eyebrow">工单中心</p>
+          <p class="quiet mt-1 text-xs">AI 先接待，需要人工时在这里接手</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button class="btn btn-quiet btn-sm" :disabled="ticketsLoading" @click="loadTickets">
+            {{ ticketsLoading ? '刷新中…' : '刷新工单' }}
+          </button>
+          <RouterLink to="/service" class="btn btn-secondary btn-sm">查看全部工单</RouterLink>
+        </div>
+      </div>
+
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <RouterLink to="/service?attention=unread" class="card-quiet transition-colors hover:border-[var(--stroke-hi)]">
+          <p class="quiet text-xs">未读工单</p>
+          <p class="nums mt-1 text-xl font-bold">{{ ticketStats?.unread ?? 0 }}</p>
+        </RouterLink>
+        <RouterLink to="/service" class="card-quiet transition-colors hover:border-[var(--stroke-hi)]">
+          <p class="quiet text-xs">AI 处理中</p>
+          <p class="nums mt-1 text-xl font-bold">{{ ticketStats?.ai_processing ?? 0 }}</p>
+        </RouterLink>
+        <RouterLink to="/service?status=pending_human" class="card-quiet transition-colors hover:border-[var(--stroke-hi)]">
+          <p class="quiet text-xs">待人工处理</p>
+          <p class="nums mt-1 text-xl font-bold accent-text">{{ ticketStats?.pending_human ?? 0 }}</p>
+        </RouterLink>
+        <RouterLink to="/service?attention=overdue" class="card-quiet transition-colors hover:border-[var(--stroke-hi)]">
+          <p class="quiet text-xs">即将超时</p>
+          <p class="nums mt-1 text-xl font-bold">{{ ticketStats?.overdue ?? 0 }}</p>
+        </RouterLink>
+      </div>
+
+      <p v-if="ticketsError" class="alert alert-danger" role="alert">
+        {{ ticketsError }}
+        <button class="btn btn-secondary btn-sm ml-2" @click="loadTickets">重试</button>
+      </p>
+
+      <div v-if="ticketsLoading" class="space-y-2">
+        <div v-for="i in 3" :key="i" class="skeleton h-10 w-full" />
+      </div>
+      <div v-else-if="!recentTickets.length" class="card-quiet py-8 text-center text-sm text-[var(--text-quiet)]">
+        当前没有待处理的工单
+      </div>
+      <ul v-else class="space-y-2">
+        <li v-for="ticket in recentTickets" :key="ticket.id">
+          <RouterLink
+            :to="'/service?q=' + encodeURIComponent(ticket.ticket_no)"
+            class="card-quiet flex flex-wrap items-center gap-2 transition-colors hover:border-[var(--stroke-hi)]"
+          >
+            <span v-if="ticket.unread" class="badge-info">未读</span>
+            <span class="min-w-0 flex-1 truncate text-sm font-semibold">{{ ticket.subject }}</span>
+            <span class="badge">{{ ticketStatusLabels[ticket.status] || ticket.status }}</span>
+            <span class="badge-warning">{{ ticketPriorityLabels[ticket.priority] || ticket.priority }}</span>
+            <span class="mono quiet text-xs">{{ ticket.ticket_no }}</span>
+          </RouterLink>
+        </li>
+      </ul>
     </div>
 
     <div v-if="loading && !stats" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

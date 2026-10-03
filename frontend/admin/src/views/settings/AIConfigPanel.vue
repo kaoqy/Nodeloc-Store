@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   getAIConfig,
   saveAIConfig,
@@ -12,6 +12,7 @@ import {
   type AIQuickQuestion,
 } from '../../api/support'
 import { errorMessage } from '../../utils/format'
+import SaveBar from '../../components/SaveBar.vue'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
@@ -24,6 +25,17 @@ const notice = ref('')
 const tab = ref<'basic' | 'prompt' | 'workflow' | 'quick'>('basic')
 const hasKey = ref(false)
 const apiKey = ref('')
+// 未保存状态：加载时记下服务端返回的配置，任何字段改动都会让 dirty 变真，
+// 保存成功后重新快照。这样「保存」在没有改动时是禁用的，不会白提交一次。
+const snapshot = ref('')
+const dirty = computed(() => {
+  if (apiKey.value.trim()) return true
+  return snapshot.value !== '' && JSON.stringify({ c: config.value, w: workflow.value }) !== snapshot.value
+})
+
+function takeSnapshot() {
+  snapshot.value = JSON.stringify({ c: config.value, w: workflow.value })
+}
 
 const config = ref<Partial<AIConfig>>({})
 const workflow = ref<Partial<AIWorkflow>>({})
@@ -46,6 +58,7 @@ async function load() {
     workflow.value = { ...payload.workflow }
     hasKey.value = payload.has_key
     questions.value = await listQuickQuestions().catch(() => [])
+    takeSnapshot()
   } catch (err) {
     error.value = errorMessage(err, '加载 AI 配置失败')
   } finally {
@@ -137,6 +150,14 @@ onMounted(load)
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
     <p v-if="!canManage" class="alert" role="status">当前角色只能查看 AI 配置，修改需要「AI 客服」管理权限。</p>
+
+    <SaveBar
+      resource="ai"
+      :saving="saving"
+      :dirty="dirty"
+      :save-label="tab === 'workflow' ? '保存工作流' : tab === 'quick' ? '保存快捷问题' : '保存配置'"
+      @save="tab === 'workflow' ? saveFlow() : tab === 'quick' ? saveQuestion() : saveBasic()"
+    />
 
     <div class="flex flex-wrap gap-1.5">
       <button class="chip" :class="tab === 'basic' ? 'chip-active' : ''" @click="tab = 'basic'">基础配置</button>
