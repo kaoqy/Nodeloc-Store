@@ -26,11 +26,10 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-type TabKey =
-  | 'ai' | 'knowledge' | 'service'
-  | 'ticket' | 'notify' | 'risk'
-  | 'order' | 'product' | 'activity' | 'site'
-  | 'retention' | 'upload'
+// 五个分组按「店家要做的决定」划分，而不是按数据表划分。
+// 之前 12 个标签页里有 8 个各自只有 1–3 行配置，店家为了改一个数字要在
+// 侧栏里翻半天；现在同类决策放在一起。
+type TabKey = 'ai' | 'knowledge' | 'support' | 'shop' | 'notify'
 
 interface TabDef {
   key: TabKey
@@ -40,18 +39,11 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
-  { key: 'ai', label: 'AI 基础与工作流', hint: '模型、提示词、转人工策略', resources: ['ai'] },
-  { key: 'knowledge', label: '知识库', hint: 'AI 参考的回答依据', resources: ['knowledge'] },
-  { key: 'service', label: '客服与快捷回复', hint: '坐席、分配与回复模板', resources: ['agents'] },
-  { key: 'ticket', label: '工单配置', hint: '编号、超时与关闭策略', resources: ['config_center'] },
-  { key: 'notify', label: '通知模板', hint: '站内与邮件的文案与渠道', resources: ['notification_templates'] },
-  { key: 'order', label: '订单配置', hint: '待支付保留与自动重试', resources: ['config_center'] },
-  { key: 'product', label: '商品配置', hint: '库存预警与销量展示', resources: ['config_center'] },
-  { key: 'activity', label: '活动配置', hint: '默认限次与叠加策略', resources: ['config_center'] },
-  { key: 'site', label: '站点展示', hint: '公告位置与页脚版本号', resources: ['config_center'] },
-  { key: 'risk', label: '风控配置', hint: '限频与二次确认', resources: ['config_center'] },
-  { key: 'retention', label: '数据保留', hint: '日志与对话保留天数', resources: ['config_center'] },
-  { key: 'upload', label: '文件上传', hint: '图片与附件上限', resources: ['config_center'] },
+  { key: 'ai', label: 'AI 客服', hint: '模型、提示词与转人工策略', resources: ['ai'] },
+  { key: 'knowledge', label: '知识库', hint: 'AI 回答买家问题的依据', resources: ['knowledge'] },
+  { key: 'support', label: '工单与客服', hint: '工单规则、坐席与快捷回复', resources: ['config_center', 'agents'] },
+  { key: 'shop', label: '经营规则', hint: '订单、商品、活动与站点', resources: ['config_center'] },
+  { key: 'notify', label: '通知与风控', hint: '通知模板、限频与数据保留', resources: ['notification_templates', 'config_center'] },
 ]
 
 const visibleTabs = computed(() =>
@@ -68,7 +60,6 @@ const logs = ref<NotificationLogRow[]>([])
 const logTotal = ref(0)
 const logStatus = ref('')
 const configs = ref<SystemConfig[]>([])
-const groupFilter = ref('')
 
 const templateDraft = ref<Partial<NotificationTemplate>>({
   key: '', name: '', event: '', category: 'ticket', is_enabled: true, in_app: true,
@@ -76,19 +67,34 @@ const templateDraft = ref<Partial<NotificationTemplate>>({
 })
 
 const groupLabels: Record<string, string> = {
-  ticket: '工单配置',
-  risk: '风控配置',
-  retention: '数据保留策略',
-  upload: '文件上传配置',
-  order: '订单配置',
-  product: '商品配置',
-  activity: '活动配置',
+  ticket: '工单规则',
+  order: '订单规则',
+  product: '商品规则',
+  activity: '营销规则',
   site: '站点展示',
+  risk: '风控与限频',
+  retention: '数据保留',
+  upload: '文件上传',
 }
+
+// 一个标签页可以包含多个配置分组：同类决策放在同一屏，店家改完一处
+// 不必再去别处找第二处。
+const TAB_GROUPS: Record<TabKey, string[]> = {
+  ai: [],
+  knowledge: [],
+  // 工单规则和客服坐席是同一件事的两面：先定规则，再定谁来处理。
+  support: ['ticket'],
+  shop: ['order', 'product', 'activity', 'site'],
+  notify: ['risk', 'retention', 'upload'],
+}
+
+const currentTab = computed(() => TABS.find((item) => item.key === tab.value))
+const tabTitle = computed(() => currentTab.value?.label ?? '系统配置')
 
 const canManageTemplates = computed(() => auth.allows('notification_templates', 'manage'))
 const canManageSystem = computed(() => auth.allows('config_center', 'manage'))
 
+/** 当前标签页要显示的配置分组，按 TAB_GROUPS 里声明的顺序排列。 */
 const grouped = computed(() => {
   const map = new Map<string, SystemConfig[]>()
   for (const config of configs.value) {
@@ -96,29 +102,41 @@ const grouped = computed(() => {
     list.push(config)
     map.set(config.group, list)
   }
-  return Array.from(map.entries()).filter(([group]) => {
-    if (groupFilter.value) return group === groupFilter.value
-    // 选项卡与配置分组一一对应，避免一个页面里堆所有配置。
-    // 除 AI/知识库/客服这些专用面板外，其余分组都直接映射同名配置组。
-    if (['ticket', 'risk', 'retention', 'upload', 'order', 'product', 'activity', 'site'].includes(tab.value)) {
-      return group === tab.value
-    }
-    return false
-  })
+  const wanted = TAB_GROUPS[tab.value] ?? []
+  return wanted
+    .filter((group) => map.has(group))
+    .map((group) => [group, map.get(group) as SystemConfig[]] as [string, SystemConfig[]])
 })
 
 // 旧地址（/knowledge、/service/agents）仍然可用：路径本身就能决定落在哪个分组，
 // 已发出链接的管理员不会点进一个空页面。
+// 旧地址继续可用：路径本身决定落在哪个分组。
+// 已发出或收藏的链接不会变成空页面，只是落到合并后的新分组里。
 const PATH_TABS: Record<string, TabKey> = {
   '/knowledge': 'knowledge',
-  '/service/agents': 'service',
+  '/service/agents': 'support',
+}
+
+// 旧 ?tab= 参数同样收敛到新分组。
+const LEGACY_TABS: Record<string, TabKey> = {
+  service: 'support',
+  ticket: 'support',
+  order: 'shop',
+  product: 'shop',
+  activity: 'shop',
+  site: 'shop',
+  risk: 'notify',
+  retention: 'notify',
+  upload: 'notify',
 }
 
 function normaliseTab(value: unknown): TabKey {
-  const found = TABS.find((item) => item.key === value)
+  const key = typeof value === 'string' ? value : ''
+  const found = TABS.find((item) => item.key === key)
   if (found) return found.key
-  const byPath = PATH_TABS[route.path]
-  return byPath ?? 'ai'
+  const legacy = LEGACY_TABS[key]
+  if (legacy) return legacy
+  return PATH_TABS[route.path] ?? 'ai'
 }
 
 async function load() {
@@ -249,10 +267,61 @@ onMounted(() => {
 
         <AIConfigPanel v-else-if="tab === 'ai'" />
         <KnowledgePanel v-else-if="tab === 'knowledge'" />
-        <AgentPanel v-else-if="tab === 'service'" />
 
+        <!-- 工单与客服：上半屏是「规则」，下半屏是「谁来处理」，
+             两件事本来就该一起看，所以放在同一页。 -->
+        <div v-else-if="tab === 'support'" class="space-y-4">
+          <SettingsSection
+            title="工单规则"
+            description="工单怎么编号、多久算超时、买家能不能撤销或重开。"
+            resource="config_center"
+          >
+            <p v-if="!grouped.length" class="card py-12 text-center text-sm text-[var(--text-quiet)]">
+              这个分组暂无配置项。
+            </p>
+            <section v-for="[group, items] in grouped" :key="group" class="config-group">
+              <div class="config-group-head">
+                <h3>{{ groupLabels[group] || group }}</h3>
+                <span class="quiet text-[11.5px]">{{ items.length }} 项</span>
+              </div>
+              <div class="config-rows">
+                <div v-for="config in items" :key="config.key" class="config-row">
+                  <div class="config-row-label">
+                    <p class="text-sm font-semibold">{{ config.label || config.key }}</p>
+                    <p v-if="config.description" class="quiet mt-0.5 text-[12px]">{{ config.description }}</p>
+                  </div>
+                  <div class="config-row-control">
+                    <label v-if="config.value_type === 'bool'" class="config-switch">
+                      <input
+                        type="checkbox"
+                        :checked="config.value === 'true' || config.value === '1'"
+                        :disabled="!canManageSystem"
+                        @change="toggleBool(config)"
+                      />
+                      <span>{{ config.value === 'true' || config.value === '1' ? '已启用' : '已停用' }}</span>
+                    </label>
+                    <template v-else>
+                      <input
+                        v-model="config.value"
+                        class="input"
+                        :type="config.value_type === 'int' ? 'number' : 'text'"
+                        :disabled="!canManageSystem"
+                        @keyup.enter="saveConfig(config)"
+                      />
+                      <button v-if="canManageSystem" class="btn btn-secondary btn-sm" :disabled="busy" @click="saveConfig(config)">
+                        保存
+                      </button>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </SettingsSection>
+          <AgentPanel />
+        </div>
+
+        <div v-else-if="tab === 'notify'" class="space-y-4">
         <SettingsSection
-          v-else-if="tab === 'notify'"
           title="通知模板"
           description="每一种通知的标题、正文与渠道都可以改；发送结果记在下方日志里。"
           resource="notification_templates"
@@ -353,52 +422,105 @@ onMounted(() => {
         </SettingsSection>
 
         <SettingsSection
-          v-else
-          :title="groupLabels[tab] || '系统配置'"
-          description="这些参数直接决定店铺的运行规则，保存后会写入审计日志。"
+          title="风控与数据"
+          description="限频、二次确认与各类记录保留多久。"
           resource="config_center"
         >
-          <div class="flex flex-wrap items-center gap-2">
-            <select v-model="groupFilter" class="input !w-auto">
-              <option value="">全部分组</option>
-              <option v-for="[group] in grouped" :key="group" :value="group">{{ groupLabels[group] || group }}</option>
-            </select>
-          </div>
+          <section v-for="[group, items] in grouped" :key="group" class="config-group">
+            <div class="config-group-head">
+              <h3>{{ groupLabels[group] || group }}</h3>
+              <span class="quiet text-[11.5px]">{{ items.length }} 项</span>
+            </div>
+            <div class="config-rows">
+              <div v-for="config in items" :key="config.key" class="config-row">
+                <div class="config-row-label">
+                  <p class="text-sm font-semibold">{{ config.label || config.key }}</p>
+                  <p v-if="config.description" class="quiet mt-0.5 text-[12px]">{{ config.description }}</p>
+                </div>
+                <div class="config-row-control">
+                  <label v-if="config.value_type === 'bool'" class="config-switch">
+                    <input
+                      type="checkbox"
+                      :checked="config.value === 'true' || config.value === '1'"
+                      :disabled="!canManageSystem"
+                      @change="toggleBool(config)"
+                    />
+                    <span>{{ config.value === 'true' || config.value === '1' ? '已启用' : '已停用' }}</span>
+                  </label>
+                  <template v-else>
+                    <input
+                      v-model="config.value"
+                      class="input"
+                      :type="config.value_type === 'int' ? 'number' : 'text'"
+                      :disabled="!canManageSystem"
+                      @keyup.enter="saveConfig(config)"
+                    />
+                    <button v-if="canManageSystem" class="btn btn-secondary btn-sm" :disabled="busy" @click="saveConfig(config)">
+                      保存
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </section>
+        </SettingsSection>
+        </div>
+
+        <SettingsSection
+          v-else
+          :title="tabTitle"
+          description="这些参数直接决定店铺怎么运转。改动会写入操作日志，出问题可以追溯到人和时间。"
+          resource="config_center"
+        >
           <p v-if="!grouped.length" class="card py-12 text-center text-sm text-[var(--text-quiet)]">
             这个分组暂无配置项。
           </p>
-          <div v-for="[group, items] in grouped" :key="group" class="card space-y-3">
-            <div v-for="config in items" :key="config.key" class="flex flex-wrap items-center gap-3">
-              <div class="min-w-[200px] flex-1">
-                <p class="text-sm font-semibold">{{ config.label || config.key }}</p>
-                <p class="quiet mono text-[11px]">{{ config.key }}</p>
-              </div>
-              <label v-if="config.value_type === 'bool'" class="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  :checked="config.value === 'true' || config.value === '1'"
-                  :disabled="!canManageSystem"
-                  @change="toggleBool(config)"
-                />
-                {{ config.value === 'true' || config.value === '1' ? '启用' : '停用' }}
-              </label>
-              <input
-                v-else
-                v-model="config.value"
-                class="input max-w-[280px]"
-                :type="config.value_type === 'int' ? 'number' : 'text'"
-                :disabled="!canManageSystem"
-              />
-              <button
-                v-if="canManageSystem && config.value_type !== 'bool'"
-                class="btn btn-secondary btn-sm"
-                :disabled="busy"
-                @click="saveConfig(config)"
-              >
-                保存
-              </button>
+
+          <section v-for="[group, items] in grouped" :key="group" class="config-group">
+            <div class="config-group-head">
+              <h3>{{ groupLabels[group] || group }}</h3>
+              <span class="quiet text-[11.5px]">{{ items.length }} 项</span>
             </div>
-          </div>
+
+            <div class="config-rows">
+              <div v-for="config in items" :key="config.key" class="config-row">
+                <div class="config-row-label">
+                  <p class="text-sm font-semibold">{{ config.label || config.key }}</p>
+                  <p v-if="config.description" class="quiet mt-0.5 text-[12px]">{{ config.description }}</p>
+                </div>
+
+                <div class="config-row-control">
+                  <label v-if="config.value_type === 'bool'" class="config-switch">
+                    <input
+                      type="checkbox"
+                      :checked="config.value === 'true' || config.value === '1'"
+                      :disabled="!canManageSystem"
+                      @change="toggleBool(config)"
+                    />
+                    <span>{{ config.value === 'true' || config.value === '1' ? '已启用' : '已停用' }}</span>
+                  </label>
+
+                  <template v-else>
+                    <input
+                      v-model="config.value"
+                      class="input"
+                      :type="config.value_type === 'int' ? 'number' : 'text'"
+                      :disabled="!canManageSystem"
+                      @keyup.enter="saveConfig(config)"
+                    />
+                    <button
+                      v-if="canManageSystem"
+                      class="btn btn-secondary btn-sm"
+                      :disabled="busy"
+                      @click="saveConfig(config)"
+                    >
+                      保存
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </section>
         </SettingsSection>
       </div>
     </div>
@@ -440,4 +562,41 @@ onMounted(() => {
   font-weight: 650;
 }
 .config-nav-active::before { height: 20px; }
+
+/* ── 配置分组 ─────────────────────────────────────────────────────
+   一个分组一张卡：组名在卡头上，逐行列出「名称 + 说明 + 控件」。
+   以前每项之间没有边界，十几个输入框连成一片，改哪一项全凭眼力。 */
+.config-group { display: flex; flex-direction: column; gap: 10px; }
+.config-group + .config-group { margin-top: 6px; }
+.config-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--stroke-quiet);
+  padding-bottom: 7px;
+}
+.config-group-head h3 { font-size: 13.5px; font-weight: 650; }
+.config-rows { display: flex; flex-direction: column; gap: 8px; }
+.config-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  padding: 10px 12px;
+  transition: border-color var(--fast);
+}
+.config-row:hover { border-color: var(--stroke); }
+.config-row-label { min-width: 200px; flex: 1; }
+.config-row-control { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.config-row-control .input { max-width: 220px; }
+.config-switch { display: flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
+.config-switch span { color: var(--text-dim); }
+@media (max-width: 640px) {
+  .config-row-control { margin-left: 0; width: 100%; }
+  .config-row-control .input { max-width: none; flex: 1; }
+}
 </style>

@@ -668,7 +668,39 @@ func (s *Service) SystemConfigs(ctx context.Context, group string) ([]domain.Sys
 	if err := s.seedSystemConfigs(ctx); err != nil {
 		logf("seed system configs: %v", err)
 	}
-	return s.repo.ListSystemConfigs(ctx, group)
+	rows, err := s.repo.ListSystemConfigs(ctx, group)
+	if err != nil {
+		return nil, err
+	}
+	// 老库里可能留着已经下线的配置行（例如只存在于代码里、从未生效的开关）。
+	// 这里按内置清单过滤，而不是删数据：店主的旧值仍在库里，
+	// 万一将来需要恢复某一项，数据还在。
+	return filterActiveConfigs(rows), nil
+}
+
+// filterActiveConfigs 只保留仍在 defaultSystemConfigs 里的配置项。
+func filterActiveConfigs(rows []domain.SystemConfig) []domain.SystemConfig {
+	active := make(map[string]bool, len(rows))
+	for _, config := range defaultSystemConfigs() {
+		active[config.Group+"/"+config.Key] = true
+	}
+	out := make([]domain.SystemConfig, 0, len(rows))
+	for _, config := range rows {
+		if !active[config.Group+"/"+config.Key] {
+			continue
+		}
+		// 补充说明文字：老库里没有 Description 列，用内置文案兜住。
+		if strings.TrimSpace(config.Description) == "" {
+			for _, preset := range defaultSystemConfigs() {
+				if preset.Group == config.Group && preset.Key == config.Key {
+					config.Description = preset.Description
+					break
+				}
+			}
+		}
+		out = append(out, config)
+	}
+	return out
 }
 
 func (s *Service) SaveSystemConfig(ctx context.Context, config domain.SystemConfig, actorID uint) (*domain.SystemConfig, error) {
@@ -737,32 +769,59 @@ func (s *Service) seedSystemConfigs(ctx context.Context) error {
 // defaultSystemConfigs 是配置中心的首批可编辑项，覆盖工单、风控与数据保留。
 func defaultSystemConfigs() []domain.SystemConfig {
 	return []domain.SystemConfig{
-		{Group: "ticket", Key: "ticket_no_prefix", Value: "TK", ValueType: "string", Label: "工单编号前缀", SortOrder: 0},
-		{Group: "ticket", Key: "auto_close_days", Value: "7", ValueType: "int", Label: "自动关闭时间（天）", SortOrder: 1},
-		{Group: "ticket", Key: "human_timeout_hours", Value: "24", ValueType: "int", Label: "人工响应超时（小时）", SortOrder: 2},
-		{Group: "ticket", Key: "allow_reopen", Value: "true", ValueType: "bool", Label: "允许用户重新打开", SortOrder: 3},
-		{Group: "ticket", Key: "allow_cancel", Value: "true", ValueType: "bool", Label: "允许用户撤销工单", SortOrder: 4},
-		{Group: "ticket", Key: "enable_rating", Value: "true", ValueType: "bool", Label: "启用工单评价", SortOrder: 5},
-		{Group: "ticket", Key: "attachment_types", Value: "jpg,png,webp,pdf", ValueType: "string", Label: "允许的附件类型", SortOrder: 6},
-		{Group: "ticket", Key: "attachment_max_mb", Value: "8", ValueType: "int", Label: "附件大小上限（MB）", SortOrder: 7},
-		{Group: "risk", Key: "coupon_max_attempts", Value: "10", ValueType: "int", Label: "优惠码每分钟尝试上限", SortOrder: 0},
-		{Group: "risk", Key: "ai_message_rate", Value: "30", ValueType: "int", Label: "AI 消息每分钟上限", SortOrder: 1},
-		{Group: "risk", Key: "require_second_confirm", Value: "true", ValueType: "bool", Label: "高风险操作二次确认", SortOrder: 2},
-		{Group: "retention", Key: "audit_log_days", Value: "180", ValueType: "int", Label: "操作日志保留天数", SortOrder: 0},
-		{Group: "retention", Key: "ai_conversation_days", Value: "90", ValueType: "int", Label: "AI 对话保留天数", SortOrder: 1},
-		{Group: "retention", Key: "ticket_days", Value: "365", ValueType: "int", Label: "工单保留天数", SortOrder: 2},
-		{Group: "upload", Key: "max_image_mb", Value: "8", ValueType: "int", Label: "图片上传上限（MB）", SortOrder: 0},
-		// 订单与商品：这些开关影响买家下单与库存提醒，不再只存在于代码里。
-		{Group: "order", Key: "unpaid_cancel_hours", Value: "2", ValueType: "int", Label: "待支付订单保留小时数", SortOrder: 0},
-		{Group: "order", Key: "allow_guest_checkout", Value: "false", ValueType: "bool", Label: "允许未登录下单", SortOrder: 1},
-		{Group: "order", Key: "auto_deliver_retry", Value: "true", ValueType: "bool", Label: "交付失败自动重试", SortOrder: 2},
-		{Group: "product", Key: "default_stock_alert", Value: "5", ValueType: "int", Label: "默认库存预警阈值", SortOrder: 0},
-		{Group: "product", Key: "show_sold_count", Value: "true", ValueType: "bool", Label: "前台显示销量", SortOrder: 1},
-		{Group: "product", Key: "allow_restock_notify", Value: "true", ValueType: "bool", Label: "缺货时通知补货人", SortOrder: 2},
-		{Group: "activity", Key: "default_per_user_limit", Value: "1", ValueType: "int", Label: "活动默认每人限次", SortOrder: 0},
-		{Group: "activity", Key: "block_activity_stacking", Value: "true", ValueType: "bool", Label: "默认禁止活动叠加", SortOrder: 1},
-		{Group: "site", Key: "announcement_position", Value: "home", ValueType: "string", Label: "公告展示位置", SortOrder: 0},
-		{Group: "site", Key: "footer_show_version", Value: "true", ValueType: "bool", Label: "页脚显示版本号", SortOrder: 1},
+		// ── 工单规则 ──────────────────────────────────────────────
+		{Group: "ticket", Key: "ticket_no_prefix", Value: "TK", ValueType: "string",
+			Label: "工单编号前缀", Description: "买家看到的工单号前缀，例如 TK 生成 TK0001。", SortOrder: 0},
+		{Group: "ticket", Key: "human_timeout_hours", Value: "24", ValueType: "int",
+			Label: "人工响应超时（小时）", Description: "转人工后超过这个时间未处理，工单会标记为即将超时。", SortOrder: 1},
+		{Group: "ticket", Key: "allow_reopen", Value: "true", ValueType: "bool",
+			Label: "允许买家重新打开", Description: "关闭或已解决的工单，买家可以重新打开继续追问。", SortOrder: 2},
+		{Group: "ticket", Key: "allow_cancel", Value: "true", ValueType: "bool",
+			Label: "允许买家撤销工单", Description: "买家可以自己撤销还没解决的工单。", SortOrder: 3},
+		{Group: "ticket", Key: "enable_rating", Value: "true", ValueType: "bool",
+			Label: "启用工单评价", Description: "工单结束后邀请买家打分，分数会进满意度统计。", SortOrder: 4},
+
+		// ── 订单规则 ──────────────────────────────────────────────
+		{Group: "order", Key: "unpaid_cancel_hours", Value: "2", ValueType: "int",
+			Label: "待支付订单保留时长（小时）", Description: "超过这个时间仍未支付的订单会自动关闭，库存释放给其他买家。", SortOrder: 0},
+		{Group: "order", Key: "auto_deliver_retry", Value: "true", ValueType: "bool",
+			Label: "交付失败自动重试", Description: "自动发货出错时后台会定期重试，直到成功或需要人工介入。", SortOrder: 1},
+
+		// ── 商品规则 ──────────────────────────────────────────────
+		{Group: "product", Key: "default_stock_alert", Value: "5", ValueType: "int",
+			Label: "库存预警阈值", Description: "卡密剩余数量低于这个值时，总览页列入库存预警。", SortOrder: 0},
+		{Group: "product", Key: "show_sold_count", Value: "true", ValueType: "bool",
+			Label: "前台显示销量", Description: "在商品卡片上显示已售数量。", SortOrder: 1},
+
+		// ── 营销规则 ──────────────────────────────────────────────
+		{Group: "activity", Key: "default_per_user_limit", Value: "1", ValueType: "int",
+			Label: "活动默认每人限次", Description: "新建活动时默认的每人参与次数；0 表示不限次。", SortOrder: 0},
+		{Group: "activity", Key: "block_activity_stacking", Value: "true", ValueType: "bool",
+			Label: "默认禁止活动叠加", Description: "一条订单只应用优惠最大的一项活动，避免折上折算出异常低价。", SortOrder: 1},
+
+		// ── 站点展示 ──────────────────────────────────────────────
+		{Group: "site", Key: "footer_show_version", Value: "true", ValueType: "bool",
+			Label: "页脚显示版本号", Description: "在店铺页脚展示当前版本，方便你核对线上是否是最新构建。", SortOrder: 0},
+
+		// ── 风控与限频 ────────────────────────────────────────────
+		{Group: "risk", Key: "coupon_max_attempts", Value: "10", ValueType: "int",
+			Label: "优惠码每分钟尝试上限", Description: "同一个来源每分钟最多尝试几次优惠码，防止被暴力猜码。", SortOrder: 0},
+		{Group: "risk", Key: "ai_message_rate", Value: "30", ValueType: "int",
+			Label: "AI 消息每分钟上限", Description: "单个来源每分钟最多发几条消息给 AI，防止刷接口。", SortOrder: 1},
+		{Group: "risk", Key: "require_second_confirm", Value: "true", ValueType: "bool",
+			Label: "高风险操作二次确认", Description: "退款、发券这类写操作需要买家本人再确认一次。", SortOrder: 2},
+
+		// ── 数据保留 ──────────────────────────────────────────────
+		{Group: "retention", Key: "audit_log_days", Value: "180", ValueType: "int",
+			Label: "操作日志保留天数", Description: "后台操作记录保留多久，超期可由清理任务删除。", SortOrder: 0},
+		{Group: "retention", Key: "ai_conversation_days", Value: "90", ValueType: "int",
+			Label: "AI 对话保留天数", Description: "AI 客服会话记录保留多久。", SortOrder: 1},
+		{Group: "retention", Key: "ticket_days", Value: "365", ValueType: "int",
+			Label: "工单保留天数", Description: "已关闭工单保留多久，便于日后复查。", SortOrder: 2},
+
+		// ── 文件上传 ──────────────────────────────────────────────
+		{Group: "upload", Key: "max_image_mb", Value: "8", ValueType: "int",
+			Label: "图片上传上限（MB）", Description: "商品封面与客服头像单张图片的体积上限。", SortOrder: 0},
 	}
 }
 

@@ -18,15 +18,15 @@ const auth = useAuthStore()
 
 // 设置分组：站点与品牌、NodeLoc 登录、支付、邮件、公告、功能开关、外观、运行时。
 // 每一组都是同一份表单的一部分，切换分组不会丢改动，保存仍然是一次提交。
+// 五个分组按「店家要配置什么」划分。
+// 原来 8 个标签里有「运行时信息」这种纯展示页，还有把公告和页脚拆出去、
+// 让店主在两个标签之间来回跳的写法；现在同类内容放在同一屏。
 const SETTINGS_TABS = [
-  { key: 'site', label: '站点与品牌', hint: '站名、域名与 Logo' },
+  { key: 'site', label: '站点与品牌', hint: '站名、域名、Logo 与外观' },
   { key: 'oauth', label: 'NodeLoc 登录', hint: 'OAuth 凭据与登录记录' },
   { key: 'payment', label: '支付设置', hint: 'Nodeloc Payments 凭据' },
+  { key: 'content', label: '内容与开关', hint: '公告、页脚与功能开关' },
   { key: 'smtp', label: '邮件通知', hint: 'SMTP 与发信测试' },
-  { key: 'content', label: '公告与页脚', hint: '首页横幅与页脚文案' },
-  { key: 'features', label: '功能开关', hint: '注册、签到、优惠码' },
-  { key: 'theme', label: '外观主题', hint: '品牌色与语言' },
-  { key: 'runtime', label: '运行时信息', hint: '版本与存储说明' },
 ] as const
 
 const settingsTab = ref<(typeof SETTINGS_TABS)[number]['key']>('site')
@@ -852,7 +852,7 @@ onBeforeUnmount(() => {
 
       <!-- 右侧栏 -->
       <fieldset class="m-0 min-w-0 space-y-5 border-0 p-0" :disabled="!canManage">
-        <div v-show="settingsTab === 'features'" class="card">
+        <div v-show="settingsTab === 'content'" class="card">
           <h3 class="mb-4 font-semibold">功能开关</h3>
           <div class="space-y-4">
             <div class="flex items-center justify-between gap-4">
@@ -917,7 +917,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-show="settingsTab === 'theme'" class="card">
+        <div v-show="settingsTab === 'site'" class="card">
           <h3 class="mb-4 font-semibold">外观</h3>
           <div class="space-y-4">
             <div class="flex items-center justify-between gap-4">
@@ -944,26 +944,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-show="settingsTab === 'runtime'" class="card card-quiet">
-          <h3 class="mb-4 font-semibold">运行时</h3>
-          <dl class="space-y-2.5 text-sm">
-            <div class="flex items-center justify-between gap-3">
-              <dt class="quiet">版本</dt>
-              <dd class="mono">v1.0.0</dd>
-            </div>
-            <div class="flex items-center justify-between gap-3">
-              <dt class="quiet">数据库</dt>
-              <dd class="mono">SQLite / MySQL</dd>
-            </div>
-            <div class="flex items-center justify-between gap-3">
-              <dt class="quiet">配置来源</dt>
-              <dd>应用内设置</dd>
-            </div>
-          </dl>
-          <p class="hint mt-4 leading-relaxed">
-            配置写入数据库中的运行时记录，不依赖任何 yml 文件；备份数据库即备份全部设置。
-          </p>
-        </div>
       </fieldset>
     </div>
 

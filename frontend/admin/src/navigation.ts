@@ -108,13 +108,15 @@ export const NAV_GROUPS: NavGroup[] = [
     label: '系统',
     items: [
       {
-        path: '/config', label: '配置中心', hint: 'AI、通知、风控与保留策略', icon: 'settings',
-        permission: 'config_center:view', altPermission: 'ai:view',
-        keywords: ['config', '配置', '设置'],
+        // 站点、登录、支付、SMTP 与 AI、工单、通知同属「怎么运作」，
+        // 以前分成两个侧栏入口，店家改一项设置要先想「这属于哪边」。
+        path: '/settings', label: '系统设置', hint: '站点、登录、支付与邮件', icon: 'settings',
+        permission: 'settings:view', keywords: ['settings', '设置', 'oauth', 'payment', 'smtp'],
       },
       {
-        path: '/settings', label: '系统设置', hint: '站点、登录与支付凭据', icon: 'settings',
-        permission: 'settings:view', keywords: ['settings', '设置', 'oauth', 'payment'],
+        path: '/config', label: '业务配置', hint: 'AI 客服、知识库、工单与通知', icon: 'settings',
+        permission: 'config_center:view', altPermission: 'ai:view',
+        keywords: ['config', '配置', 'ai', '工单', '通知'],
       },
       {
         path: '/roles', label: '权限与管理员', hint: '角色与权限矩阵', icon: 'roles',
