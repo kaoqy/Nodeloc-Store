@@ -5,7 +5,6 @@ import AdminIcon from './AdminIcon.vue'
 import { NAV_GROUPS, searchNav, type NavItem } from '../navigation'
 import { useAuthStore } from '../stores/auth'
 import { useInboxStore } from '../stores/inbox'
-import { useRecentStore } from '../stores/recent'
 import { shopInitials, shopLogo, shopName } from '../utils/identity'
 
 const props = withDefaults(defineProps<{ open: boolean; collapsed: boolean }>(), { collapsed: false })
@@ -13,9 +12,16 @@ const emit = defineEmits<{ close: []; toggleCollapse: [] }>()
 
 const auth = useAuthStore()
 const inbox = useInboxStore()
-const recent = useRecentStore()
 const route = useRoute()
 const router = useRouter()
+
+// 桌面端侧栏常驻、可折叠；移动端是抽屉。用同一个断点判断，
+// 避免在桌面宽度下把常驻侧栏误设成 inert 而点不动。
+const isDesktop = ref(false)
+let media: MediaQueryList | undefined
+function syncDesktop(event?: MediaQueryListEvent) {
+  isDesktop.value = event ? event.matches : Boolean(media?.matches)
+}
 
 // 全局搜索：按标题、路径与关键词匹配，只列出当前角色真有权限打开的页面。
 const query = ref('')
@@ -85,15 +91,25 @@ function onKeydown(event: KeyboardEvent) {
 watch(
   () => route.fullPath,
   () => {
-    recent.visit(route.path)
+    // 切页时关掉搜索面板并清空关键词，避免下次打开还停在上一次的查询上。
     searchOpen.value = false
     query.value = ''
+    // 移动端抽屉：点完菜单就自动收起，不再是「点了菜单还要再点一次关闭」。
+    if (props.open) emit('close')
   },
   { immediate: true },
 )
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+onMounted(() => {
+  media = window.matchMedia('(min-width: 1024px)')
+  syncDesktop()
+  media.addEventListener('change', syncDesktop)
+  window.addEventListener('keydown', onKeydown)
+})
+onUnmounted(() => {
+  media?.removeEventListener('change', syncDesktop)
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
@@ -101,11 +117,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
   <aside
     :class="[
-      'fixed inset-y-0 left-0 z-40 flex flex-col border-r border-[var(--stroke)] bg-[var(--surface)] transition-[transform,width] duration-300',
+      'admin-aside fixed inset-y-0 left-0 z-40 flex flex-col border-r border-[var(--stroke)] bg-[var(--surface)] transition-[transform,width] duration-300',
       collapsed ? 'lg:w-[72px]' : 'lg:w-[248px]',
-      'w-[248px]',
+      'w-[min(280px,86vw)]',
       open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
     ]"
+    :aria-hidden="!open && !isDesktop"
+    :inert="!open && !isDesktop"
     aria-label="后台导航"
   >
     <!-- 品牌区：折叠后只留标记 -->
@@ -152,7 +170,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       </button>
     </div>
 
-    <nav class="flex-1 overflow-y-auto px-3 py-3">
+    <nav class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
       <div v-for="group in groups" :key="group.label" class="mb-4 last:mb-0">
         <p v-if="!collapsed" class="eyebrow mb-1.5 px-2">{{ group.label }}</p>
         <ul class="space-y-0.5">
@@ -177,18 +195,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         </ul>
       </div>
 
-      <!-- 最近访问：只出现在展开状态，折叠时图标已经够密了 -->
-      <div v-if="!collapsed && recent.list.length" class="mb-4">
-        <p class="eyebrow mb-1.5 px-2">最近访问</p>
-        <ul class="space-y-0.5">
-          <li v-for="item in recent.list" :key="item.path">
-            <RouterLink :to="item.path" class="side-link" @click="emit('close')">
-              <AdminIcon name="history" :size="15" class="side-icon" />
-              <span class="truncate">{{ item.label }}</span>
-            </RouterLink>
-          </li>
-        </ul>
-      </div>
     </nav>
 
     <!-- 底部：折叠开关 + 身份 -->

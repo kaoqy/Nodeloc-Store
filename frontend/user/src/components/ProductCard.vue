@@ -1,86 +1,97 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { Product } from '../types'
 import { money } from '../utils/format'
 import { useSiteStore } from '../stores/site'
 
-defineProps<{ product: Product }>()
-// 店家可以在配置中心关掉前台销量展示，卡片要跟着走。
+const props = defineProps<{ product: Product }>()
 const site = useSiteStore()
 const imageFailed = ref(false)
+
+/**
+ * 价格区只有三件事，必须一眼分清：
+ *   pay    —— 现在真正要付的钱（有活动就是活动价）
+ *   was    —— 划线价：活动前的价格，或店家标记的原价
+ *   saving —— 比划线价省下的金额
+ * 活动价优先于原价：活动的计算基础就是当前售价，两者同时存在时
+ * 只讲这次活动，避免同屏出现两个「原价」互相打架。
+ */
+const onSale = computed(() => Number(props.product.activity_saving ?? 0) > 0 && Number(props.product.activity_price ?? 0) > 0)
+const pay = computed(() => (onSale.value ? Number(props.product.activity_price) : props.product.price))
+const was = computed(() => {
+  if (onSale.value) return props.product.price
+  const original = Number(props.product.original_price ?? 0)
+  return original > props.product.price ? original : 0
+})
+const saving = computed(() => (onSale.value ? Number(props.product.activity_saving) : was.value ? was.value - props.product.price : 0))
+const offPercent = computed(() => (was.value > 0 ? Math.round((saving.value / was.value) * 100) : 0))
+
+const soldOut = computed(
+  () => props.product.stock_visible && props.product.product_type === 'card' && props.product.auto_deliver && props.product.stock_count <= 0,
+)
 </script>
 
 <template>
   <RouterLink
     :to="`/products/${product.slug}`"
-    class="card-hover group flex flex-col overflow-hidden !p-0"
+    class="product-card group"
+    :class="{ 'product-card-out': soldOut }"
   >
-    <div class="relative aspect-[16/9] overflow-hidden border-b border-[var(--stroke-quiet)] bg-[var(--surface-sunken)]">
+    <div class="product-media">
       <img
         v-if="product.image_path && !imageFailed"
         :src="product.image_path"
         :alt="product.name"
-        class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+        class="product-media-img"
+        loading="lazy"
         @error="imageFailed = true"
       />
-      <div v-if="!product.image_path" class="grid h-full place-items-center">
-        <span class="mono text-2xl font-bold tracking-[0.2em] text-[var(--text-quiet)]/50">
-          {{ product.name.slice(0, 2).toUpperCase() }}
-        </span>
+      <div v-else class="product-media-fallback" aria-hidden="true">
+        <span>{{ product.name.slice(0, 2).toUpperCase() }}</span>
       </div>
-      <span
-        v-if="product.stock_visible && product.product_type === 'card' && product.auto_deliver && product.stock_count <= 0"
-        class="badge badge-neutral absolute left-3 top-3"
-      >暂时缺货</span>
-      <span v-if="product.is_featured" class="badge badge-accent absolute right-3 top-3">推荐</span>
+
+      <div class="pointer-events-none absolute left-3 top-3 flex flex-col items-start gap-1.5">
+        <span v-if="soldOut" class="badge badge-neutral">暂时缺货</span>
+        <span v-else-if="onSale" class="badge badge-danger">省 {{ offPercent }}%</span>
+        <span v-if="product.is_featured" class="badge badge-accent">推荐</span>
+      </div>
+
+      <span class="product-delivery">
+        {{ product.product_type === 'card' ? '自动发货' : '人工交付' }}
+      </span>
     </div>
 
-    <div class="flex flex-1 flex-col p-5">
-      <div class="flex items-start justify-between gap-3">
-        <h3 class="line-clamp-2 min-w-0 break-words text-[15px] font-semibold">{{ product.name }}</h3>
+    <div class="product-body">
+      <div class="flex items-start justify-between gap-2.5">
+        <h3 class="product-name">{{ product.name }}</h3>
         <span v-if="product.category" class="badge badge-neutral shrink-0">{{ product.category.name }}</span>
       </div>
 
-      <p class="mt-2 line-clamp-2 min-h-[2.6em] text-[13px] leading-relaxed text-[var(--text-dim)]">
-        {{ product.summary || product.description || '暂无简介' }}
-      </p>
+      <p class="product-summary">{{ product.summary || product.description || '暂无简介' }}</p>
 
-      <div class="mt-auto flex items-end justify-between gap-3 pt-4">
-        <div class="flex flex-wrap items-baseline gap-2">
-          <!-- 有活动时显示活动价，原价划线；没有活动就显示正常售价。 -->
-          <span class="nums text-lg font-bold accent-text">
-            {{ money(product.activity_price || product.price) }}
-          </span>
-          <span
-            v-if="product.activity_saving && product.activity_saving > 0"
-            class="nums text-xs text-[var(--text-quiet)] line-through"
-          >
-            {{ money(product.price) }}
-          </span>
-          <span
-            v-else-if="product.original_price && product.original_price > product.price"
-            class="nums text-xs text-[var(--text-quiet)] line-through"
-          >
-            {{ money(product.original_price) }}
-          </span>
-          <span v-if="product.activity_name" class="badge-warning">{{ product.activity_name }}</span>
+      <div class="product-price">
+        <div class="min-w-0">
+          <span class="product-price-label">{{ onSale ? '活动价' : '现价' }}</span>
+          <span class="product-price-pay">{{ money(pay) }}</span>
         </div>
-        <span class="badge" :class="product.product_type === 'card' ? 'badge-teal' : 'badge-accent'">
-          {{ product.product_type === 'card' ? '自动发货' : '人工交付' }}
-        </span>
+        <div v-if="was > 0" class="product-price-was">
+          <span class="nums line-through">{{ money(was) }}</span>
+          <span class="product-price-save">省 {{ money(saving) }}</span>
+        </div>
       </div>
 
-      <!-- 销量 is delivered volume from the server, so it counts goods that
-           actually left the shop rather than orders that were abandoned. -->
-      <p class="hint mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span v-if="site.showSoldCount">
-          已售 <span class="nums">{{ product.sold_count ?? 0 }}</span> 件
+      <div class="product-meta">
+        <span v-if="product.activity_name" class="badge badge-warning">{{ product.activity_name }}</span>
+        <span v-if="site.showSoldCount" class="quiet">
+          已售 <span class="nums">{{ product.sold_count ?? 0 }}</span>
         </span>
-        <span v-if="product.stock_visible && product.stock_count > 0">
-          现货 <span class="nums">{{ product.stock_count }}</span> 件
+        <span v-if="product.stock_visible && product.stock_count > 0" class="quiet">
+          现货 <span class="nums">{{ product.stock_count }}</span>
         </span>
-        <span v-else-if="product.stock_visible && product.product_type === 'card'" class="text-[var(--warning)]">库存紧张或暂时缺货</span>
-      </p>
+        <span v-else-if="product.stock_visible && product.product_type === 'card'" class="text-[var(--warning)]">
+          库存紧张
+        </span>
+      </div>
     </div>
   </RouterLink>
 </template>

@@ -70,6 +70,15 @@ const buyLabel = computed(() => {
 // 优惠码再叠加在这之上。没有活动时 activity_price 为空，退回正常售价。
 const unitPrice = computed(() => product.value?.activity_price || product.value?.price || 0)
 const activitySaving = computed(() => Number(product.value?.activity_saving || 0))
+// 划线价只保留一条：有活动时是活动前售价，否则是店家标的原价。
+// 两个都显示会让买家看到两个「原价」，不知道该信哪个。
+const wasPrice = computed(() => {
+  const item = product.value
+  if (!item) return 0
+  if (activitySaving.value > 0) return item.price
+  const original = Number(item.original_price ?? 0)
+  return original > item.price ? original : 0
+})
 const gross = computed(() => unitPrice.value * quantity.value)
 /** What NodeLoc is asked to collect: the quoted discount is already off it. */
 const payable = computed(() => (quote.value?.accepted ? quote.value.payable : gross.value))
@@ -420,18 +429,17 @@ watch(
       </section>
 
       <aside class="card lg:sticky lg:top-24">
-        <div class="flex items-baseline justify-between gap-3">
-          <span class="label !mb-0">单价</span>
-          <span class="nums text-2xl font-bold">{{ money(unitPrice) }}</span>
+        <div class="detail-price">
+          <span class="detail-price-label">{{ activitySaving > 0 ? '活动价' : '现价' }}</span>
+          <div class="detail-price-row">
+            <span class="detail-price-pay">{{ money(unitPrice) }}</span>
+            <span v-if="wasPrice > 0" class="detail-price-was">{{ money(wasPrice) }}</span>
+          </div>
+          <div v-if="activitySaving > 0 || wasPrice > 0" class="detail-price-tags">
+            <span v-if="product.activity_name" class="badge badge-warning">{{ product.activity_name }}</span>
+            <span v-if="activitySaving > 0" class="badge badge-danger">已省 {{ money(activitySaving) }}</span>
+          </div>
         </div>
-        <p v-if="activitySaving > 0" class="mt-1 flex flex-wrap items-center justify-end gap-2">
-          <span class="nums hint line-through">{{ money(product.price) }}</span>
-          <span class="badge-warning">{{ product.activity_name || '活动价' }}</span>
-          <span class="hint">已省 {{ money(activitySaving) }}</span>
-        </p>
-        <p v-else-if="product.original_price && product.original_price > product.price" class="mt-1 text-right">
-          <span class="nums hint line-through">{{ money(product.original_price) }}</span>
-        </p>
 
         <div class="my-5 divider" />
 

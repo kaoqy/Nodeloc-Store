@@ -16,7 +16,6 @@ import { errorMessage, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 import SettingsSection from '../components/SettingsSection.vue'
 import AIConfigPanel from './settings/AIConfigPanel.vue'
-import AIToolPanel from './settings/AIToolPanel.vue'
 import KnowledgePanel from './settings/KnowledgePanel.vue'
 import AgentPanel from './settings/AgentPanel.vue'
 
@@ -28,7 +27,7 @@ const router = useRouter()
 const auth = useAuthStore()
 
 type TabKey =
-  | 'ai' | 'tools' | 'knowledge' | 'service'
+  | 'ai' | 'knowledge' | 'service'
   | 'ticket' | 'notify' | 'risk'
   | 'order' | 'product' | 'activity' | 'site'
   | 'retention' | 'upload'
@@ -42,7 +41,6 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { key: 'ai', label: 'AI 基础与工作流', hint: '模型、提示词、转人工策略', resources: ['ai'] },
-  { key: 'tools', label: 'AI 工具与权限', hint: '受控工具与角色授权', resources: ['ai_tools'] },
   { key: 'knowledge', label: '知识库', hint: 'AI 参考的回答依据', resources: ['knowledge'] },
   { key: 'service', label: '客服与快捷回复', hint: '坐席、分配与回复模板', resources: ['agents'] },
   { key: 'ticket', label: '工单配置', hint: '编号、超时与关闭策略', resources: ['config_center'] },
@@ -250,7 +248,6 @@ onMounted(() => {
         </div>
 
         <AIConfigPanel v-else-if="tab === 'ai'" />
-        <AIToolPanel v-else-if="tab === 'tools'" />
         <KnowledgePanel v-else-if="tab === 'knowledge'" />
         <AgentPanel v-else-if="tab === 'service'" />
 
