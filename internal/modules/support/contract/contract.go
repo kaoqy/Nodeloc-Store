@@ -187,6 +187,18 @@ type ActivityReader interface {
 	ActiveActivities(ctx context.Context, limit int) ([]ActivityFact, error)
 }
 
+// Refunder 是支付模块暴露给 AI 的退款能力。
+//
+// 只有「已支付且属于当前用户」的订单会被接受：实现方自己校验归属与状态，
+// 并把退款走 NodeLoc 原路退回。AI 不接触金额，只传订单号。
+type Refunder interface {
+	// RefundOrderForUser 退款一张属于该用户的订单。订单不属于他时返回错误，
+	// 越权退款因此不可能发生。
+	RefundOrderForUser(ctx context.Context, userID uint, orderNo string) (amount int, status string, err error)
+	// RefundableOrders 列出该用户当前可退款的订单，供 AI 先核对再操作。
+	RefundableOrders(ctx context.Context, userID uint, limit int) ([]OrderContext, error)
+}
+
 // Notifier 是通知模块暴露给 AI 的发送能力。AI 只能发送站内通知，
 // 且必须落在当前用户或工单关联人身上。
 type Notifier interface {

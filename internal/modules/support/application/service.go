@@ -33,6 +33,7 @@ type Service struct {
 	activities contract.ActivityReader
 	notifier   contract.Notifier
 	mailer     contract.MailSender
+	refunder   contract.Refunder
 	model      contract.ModelClient
 	now        func() time.Time
 	encKey     []byte
@@ -48,6 +49,7 @@ type Deps struct {
 	Activities contract.ActivityReader
 	Notifier   contract.Notifier
 	Mailer     contract.MailSender
+	Refunder   contract.Refunder
 	Model      contract.ModelClient
 	// SecretKey 用来加密 AI API Key；为空时用进程内随机密钥，
 	// 重启后需要重新保存一次密钥，这是可接受的安全默认。
@@ -67,6 +69,7 @@ func NewService(deps Deps) (*Service, error) {
 		activities: deps.Activities,
 		notifier:   deps.Notifier,
 		mailer:     deps.Mailer,
+		refunder:   deps.Refunder,
 		model:      deps.Model,
 		now:        time.Now,
 	}
@@ -197,6 +200,8 @@ func DefaultAIWorkflow() domain.AIWorkflowConfig {
 		CanQueryShipping:       true,
 		CanRecommendActivity:   true,
 		CanGrantCoupon:         false,
+		CanRefund:              true,
+		RequireHumanRefund:     false,
 		TransferNotice:         "已转入人工队列，客服会按顺序跟进。",
 		WorkingHours:           "每天 09:00 - 21:00",
 		EstimateReplyMinutes:   30,

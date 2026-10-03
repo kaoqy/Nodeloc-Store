@@ -170,14 +170,32 @@ onMounted(load)
         </p>
 
         <div v-if="canManage" class="flex flex-wrap gap-1.5">
-          <button class="btn btn-secondary btn-sm" :disabled="busy" @click="changeStatus('human_handling')">接管处理</button>
-          <button class="btn btn-secondary btn-sm" :disabled="busy" @click="changeStatus('resolved')">标记已解决</button>
-          <button class="btn btn-secondary btn-sm" :disabled="busy" @click="changeStatus('closed')">关闭</button>
-          <button class="btn btn-quiet btn-sm" :disabled="busy" @click="changeStatus('ai_processing')">交给 AI</button>
-          <button v-if="ticket.handler === 'ai'" class="btn btn-quiet btn-sm" :disabled="busy" @click="toHuman">转人工</button>
+          <!-- 按一天的处理顺序排：先接单，再流转，最后结单。
+               主操作（接管）在前，转交类在中间，结单类靠右。 -->
+          <button
+            v-if="ticket.handler === 'ai'"
+            class="btn btn-primary btn-sm"
+            :disabled="busy"
+            @click="toHuman"
+          >
+            转人工
+          </button>
+          <button
+            v-if="ticket.status !== 'human_handling'"
+            class="btn btn-secondary btn-sm"
+            :disabled="busy"
+            @click="changeStatus('human_handling')"
+          >
+            我来处理
+          </button>
           <button v-if="canAssign" class="btn btn-quiet btn-sm" :disabled="busy" @click="showAssign = true">转交客服</button>
           <button v-if="canAssign" class="btn btn-quiet btn-sm" :disabled="busy" @click="autoAssign">自动分配</button>
           <button class="btn btn-quiet btn-sm" @click="openSummary">问题摘要</button>
+          <button class="btn btn-secondary btn-sm" :disabled="busy" @click="changeStatus('resolved')">标记已解决</button>
+          <button v-if="ticket.handler === 'human'" class="btn btn-quiet btn-sm" :disabled="busy" @click="changeStatus('ai_processing')">
+            交回 AI
+          </button>
+          <button class="btn btn-quiet btn-sm" :disabled="busy" @click="changeStatus('closed')">关闭</button>
         </div>
       </div>
 

@@ -1454,6 +1454,54 @@ func (s *Service) AdminDeliverOrder(ctx context.Context, orderNo string, content
 // AdminRefundOrder moves the points back through NodeLoc before the shop calls
 // the order refunded. Marking it locally only would tell the buyer their money
 // is on the way while NodeLoc still shows it as spent.
+// RefundOrderForUser 是给 AI 客服用的用户维度退款：只有这张订单属于该用户、
+// 且处于已支付状态时才受理。金额不由调用方提供，退款走 NodeLoc 原路退回。
+func (s *Service) RefundOrderForUser(ctx context.Context, userID uint, orderNo string) (int, string, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	if userID == 0 || orderNo == "" {
+		return 0, "", ErrInvalidInput
+	}
+	order, err := s.orders.GetOrderByNo(ctx, orderNo)
+	if err != nil {
+		return 0, "", err
+	}
+	if order.UserID != userID {
+		// 越权退款连「这单存在」都不该透露，统一按找不到处理。
+		return 0, "", ErrForbidden
+	}
+	switch order.Status {
+	case "paid", "completed":
+	default:
+		return 0, order.Status, fmt.Errorf("%w: 这一单当前状态是 %s，不能退款", ErrInvalidInput, order.Status)
+	}
+	refunded, err := s.AdminRefundOrder(ctx, orderNo)
+	if err != nil {
+		return 0, "", err
+	}
+	return refunded.TotalAmount, refunded.Status, nil
+}
+
+// RefundableOrders 列出该用户已支付、尚未退款的订单，供 AI 先核对再退款。
+func (s *Service) RefundableOrders(ctx context.Context, userID uint, limit int) ([]models.Order, error) {
+	if userID == 0 {
+		return nil, ErrForbidden
+	}
+	if limit <= 0 || limit > 20 {
+		limit = 10
+	}
+	list, err := s.ListOrders(ctx, userID, limit, 0, "", "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.Order, 0, len(list.Orders))
+	for _, order := range list.Orders {
+		if order.Status == "paid" || order.Status == "completed" {
+			out = append(out, order)
+		}
+	}
+	return out, nil
+}
+
 func (s *Service) AdminRefundOrder(ctx context.Context, orderNo string) (*models.Order, error) {
 	orderNo = strings.TrimSpace(orderNo)
 	order, err := s.orders.GetOrderByNo(ctx, orderNo)

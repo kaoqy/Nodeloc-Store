@@ -77,10 +77,11 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: '客服与 AI',
+    label: '工单与知识库',
     items: [
       {
-        path: '/service', label: '客服中心', hint: '工单队列与 AI 接待', icon: 'support',
+        // 工单是唯一的接待入口：用户发起工单后由 AI 先处理，需要时再转人工。
+        path: '/service', label: '工单中心', hint: 'AI 先接待，可转人工', icon: 'support',
         permission: 'tickets:view', altPermission: 'ai:view',
         keywords: ['ticket', '工单', '客服', 'ai'],
       },

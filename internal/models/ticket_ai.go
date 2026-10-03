@@ -365,13 +365,17 @@ type AIWorkflowConfig struct {
 	TransferPaymentIssue   bool `gorm:"default:true;not null" json:"transfer_payment_issue"`
 	TransferAbuse          bool `gorm:"default:true;not null" json:"transfer_abuse"`
 
-	CanCreateTicket      bool   `gorm:"default:true;not null" json:"can_create_ticket"`
-	CanUpdateTicket      bool   `gorm:"default:false;not null" json:"can_update_ticket"`
-	CanNotify            bool   `gorm:"default:false;not null" json:"can_notify"`
-	CanQueryOrder        bool   `gorm:"default:true;not null" json:"can_query_order"`
-	CanQueryShipping     bool   `gorm:"default:true;not null" json:"can_query_shipping"`
-	CanRecommendActivity bool   `gorm:"default:true;not null" json:"can_recommend_activity"`
-	CanGrantCoupon       bool   `gorm:"default:false;not null" json:"can_grant_coupon"`
+	CanCreateTicket      bool `gorm:"default:true;not null" json:"can_create_ticket"`
+	CanUpdateTicket      bool `gorm:"default:false;not null" json:"can_update_ticket"`
+	CanNotify            bool `gorm:"default:false;not null" json:"can_notify"`
+	CanQueryOrder        bool `gorm:"default:true;not null" json:"can_query_order"`
+	CanQueryShipping     bool `gorm:"default:true;not null" json:"can_query_shipping"`
+	CanRecommendActivity bool `gorm:"default:true;not null" json:"can_recommend_activity"`
+	CanGrantCoupon       bool `gorm:"default:false;not null" json:"can_grant_coupon"`
+	// CanRefund 允许 AI 直接对当前用户自己的已支付订单发起退款。
+	CanRefund bool `gorm:"default:true;not null" json:"can_refund"`
+	// RequireHumanRefund 为 true 时，提到退款就转人工；默认 false，由 AI 直接处理。
+	RequireHumanRefund   bool   `gorm:"default:false;not null" json:"require_human_refund"`
 	TransferNotice       string `gorm:"type:text" json:"transfer_notice,omitempty"`
 	WorkingHours         string `gorm:"size:120" json:"working_hours,omitempty"`
 	EstimateReplyMinutes int    `gorm:"default:30;not null" json:"estimate_reply_minutes"`

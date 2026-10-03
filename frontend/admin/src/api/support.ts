@@ -264,6 +264,8 @@ export interface AIWorkflow {
   can_query_shipping: boolean
   can_recommend_activity: boolean
   can_grant_coupon: boolean
+  can_refund: boolean
+  require_human_refund: boolean
   transfer_notice: string
   working_hours: string
   estimate_reply_minutes: number

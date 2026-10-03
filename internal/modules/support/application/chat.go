@@ -234,7 +234,9 @@ func (s *Service) sensitive(content string, workflow *domain.AIWorkflowConfig) b
 		return false
 	}
 	lower := strings.ToLower(content)
-	if workflow.TransferRefund && containsAny(lower, []string{"退款", "退钱", "refund", "退单", "打回"}) {
+	// 退款默认由 AI 处理：它可以用 refund.list 核对可退订单、用 refund.order 原路退回。
+	// 只有店家在配置里显式要求「退款一律转人工」时才升级。
+	if workflow.RequireHumanRefund && containsAny(lower, []string{"退款", "退钱", "refund", "退单", "打回"}) {
 		return true
 	}
 	if workflow.TransferCardDispute && containsAny(lower, []string{"卡密无效", "卡密用不了", "卡被用过", "密码错误", "重复卡"}) {

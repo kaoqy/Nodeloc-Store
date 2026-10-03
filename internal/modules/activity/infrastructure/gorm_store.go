@@ -153,9 +153,15 @@ func (s *GormStore) ListRules(ctx context.Context, activityID uint) ([]domain.Ac
 }
 
 // ReplaceRules 先删后建，保证规则行的唯一约束（活动+规则类型）不会被旧行占住。
+//
+// 关键点：这里的删除必须是**物理删除**。activity_rules 上有
+// (activity_id, rule_type) 唯一索引，而 GORM 的软删除只是把 deleted_at 填上，
+// 行还在表里；随后重新插入同一规则类型就会撞唯一约束——编辑活动因此永远保存不了。
+// 规则是一次性配置、没有审计需求（活动本身的变更记在 activity_logs），
+// 所以用 Unscoped 真删。
 func (s *GormStore) ReplaceRules(ctx context.Context, activityID uint, rules []domain.ActivityRule) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("activity_id = ?", activityID).Delete(&models.ActivityRule{}).Error; err != nil {
+		if err := tx.Unscoped().Where("activity_id = ?", activityID).Delete(&models.ActivityRule{}).Error; err != nil {
 			return err
 		}
 		for i := range rules {

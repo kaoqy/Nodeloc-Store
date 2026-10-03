@@ -339,7 +339,10 @@ onMounted(load)
         <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.transfer_on_explicit" type="checkbox" :disabled="!canManage" />用户要求人工时立即转</label>
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.transfer_high_amount" type="checkbox" :disabled="!canManage" />高金额订单直接转</label>
-          <label class="flex items-center gap-2 text-sm"><input v-model="workflow.transfer_refund" type="checkbox" :disabled="!canManage" />退款问题直接转</label>
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="workflow.require_human_refund" type="checkbox" :disabled="!canManage" />
+            退款问题直接转人工（关闭时由 AI 直接处理退款）
+          </label>
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.transfer_card_dispute" type="checkbox" :disabled="!canManage" />卡密争议直接转</label>
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.transfer_payment_issue" type="checkbox" :disabled="!canManage" />支付异常直接转</label>
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.transfer_abuse" type="checkbox" :disabled="!canManage" />账号封禁类问题转</label>
@@ -356,6 +359,7 @@ onMounted(load)
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.can_query_shipping" type="checkbox" :disabled="!canManage" />可以查询发货状态</label>
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.can_recommend_activity" type="checkbox" :disabled="!canManage" />可以推荐活动</label>
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.can_grant_coupon" type="checkbox" :disabled="!canManage" />可以发放优惠券（高风险）</label>
+          <label class="flex items-center gap-2 text-sm"><input v-model="workflow.can_refund" type="checkbox" :disabled="!canManage" />可以直接退款（原路退回 NodeLoc）</label>
         </div>
       </div>
     </div>

@@ -24,11 +24,17 @@ const groups = ref<{ resource: string; label: string; actions: string[] }[]>([])
 const roles = ref<{ role: string; label: string; permissions: string[]; headcount: number; editable: boolean }[]>([])
 const active = ref('')
 
+// 只有两个角色。历史角色如果还留在数据里，统一显示为「管理员（旧角色）」，
+// 让店主知道可以把它改成 admin。
 const ROLE_LABELS: Record<string, string> = {
-  super_admin: '超级管理员', admin: '管理员', operator: '运营', support: '客服',
-  ops_manager: '运营管理员', product_manager: '商品管理员', order_manager: '订单管理员',
-  finance: '财务', support_lead: '客服主管', support_agent: '普通客服',
-  ai_admin: 'AI 管理员', data_viewer: '数据查看员',
+  super_admin: '超级管理员',
+  admin: '管理员',
+}
+const LEGACY_LABELS: Record<string, string> = {
+  operator: '运营（旧）', support: '客服（旧）', ops_manager: '运营管理员（旧）',
+  product_manager: '商品管理员（旧）', order_manager: '订单管理员（旧）',
+  finance: '财务（旧）', support_lead: '客服主管（旧）', support_agent: '普通客服（旧）',
+  ai_admin: 'AI 管理员（旧）', data_viewer: '数据查看员（旧）',
 }
 
 const draft = ref<Record<string, Set<string>>>({})
@@ -98,7 +104,7 @@ async function load() {
     groups.value = groupList
     roles.value = roleList.map((r) => ({
       role: r.role,
-      label: ROLE_LABELS[r.role] ?? r.role,
+      label: ROLE_LABELS[r.role] ?? LEGACY_LABELS[r.role] ?? r.role,
       permissions: r.permissions ?? [],
       headcount: r.user_count ?? 0,
       editable: r.editable !== false,

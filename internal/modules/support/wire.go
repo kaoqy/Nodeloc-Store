@@ -37,6 +37,8 @@ type Dependencies struct {
 	Activities contract.ActivityReader
 	Notifier   contract.Notifier
 	Mailer     contract.MailSender
+	// Refunder 让 AI 能对当前用户自己的已支付订单发起退款。
+	Refunder contract.Refunder
 }
 
 // Wire 构造模块。SecretKey 用于加密 AI API Key。
@@ -50,6 +52,7 @@ func Wire(db *gorm.DB, cfg *config.Config, deps Dependencies) *Module {
 		Activities: deps.Activities,
 		Notifier:   deps.Notifier,
 		Mailer:     deps.Mailer,
+		Refunder:   deps.Refunder,
 		SecretKey:  cfg.JWT.Secret,
 	})
 	if err != nil {

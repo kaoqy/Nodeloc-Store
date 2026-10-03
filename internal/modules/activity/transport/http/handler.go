@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -78,6 +79,45 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	overview.GET("", guard("activities", "view"), h.overview)
 }
 
+// activityWire 是 saveRequest 的解码中转：时间字段用 FlexibleTime，
+// 其余字段直接落到 Activity。这样前端 datetime-local 的分钟精度也能存下来。
+type activityWire struct {
+	domain.Activity
+	StartAt FlexibleTime `json:"start_at"`
+	EndAt   FlexibleTime `json:"end_at"`
+}
+
+func (w *activityWire) apply() domain.Activity {
+	out := w.Activity
+	out.StartAt = w.StartAt.Ptr()
+	out.EndAt = w.EndAt.Ptr()
+	return out
+}
+
+// flexibleSaveRequest 与 saveRequest 同构，但 Activity 走上面的中转。
+type flexibleSaveRequest struct {
+	Activity json.RawMessage       `json:"activity"`
+	Rules    []domain.ActivityRule `json:"rules"`
+}
+
+// bindSaveRequest 解析保存活动的请求体，容忍 datetime-local 与 RFC3339 两种时间写法。
+func bindSaveRequest(c *gin.Context) (saveRequest, error) {
+	var raw flexibleSaveRequest
+	if err := c.ShouldBindJSON(&raw); err != nil {
+		return saveRequest{}, err
+	}
+	var out saveRequest
+	if len(raw.Activity) > 0 {
+		var wire activityWire
+		if err := json.Unmarshal(raw.Activity, &wire); err != nil {
+			return saveRequest{}, err
+		}
+		out.Activity = wire.apply()
+	}
+	out.Rules = raw.Rules
+	return out, nil
+}
+
 type saveRequest struct {
 	Activity domain.Activity       `json:"activity"`
 	Rules    []domain.ActivityRule `json:"rules"`
@@ -115,8 +155,8 @@ func (h *Handler) get(c *gin.Context) {
 }
 
 func (h *Handler) create(c *gin.Context) {
-	var request saveRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
+	request, err := bindSaveRequest(c)
+	if err != nil {
 		respondError(c, requestError(err))
 		return
 	}
@@ -148,8 +188,8 @@ func (h *Handler) update(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var request saveRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
+	request, err := bindSaveRequest(c)
+	if err != nil {
 		respondError(c, requestError(err))
 		return
 	}

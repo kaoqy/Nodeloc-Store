@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  createTicket,
   getQuickQuestions,
   getSupportConfig,
   sendChat,
@@ -27,6 +28,8 @@ const questions = ref<QuickQuestion[]>([])
 const conversationId = ref(0)
 const draft = ref('')
 const transferNotice = ref('')
+const submitting = ref(false)
+const createdTicketNo = ref('')
 const needConfirm = ref<{ ticketId: number; reason: string } | null>(null)
 const stream = ref<{ role: 'user' | 'assistant' | 'system'; content: string; id: number; rating?: number }[]>([])
 const messageList = ref<HTMLElement | null>(null)
@@ -97,6 +100,46 @@ async function rate(messageId: number, rating: number) {
   } catch {
     // 评价失败不影响对话继续。
   }
+}
+
+// 这个窗口不再是一个独立的 AI 助手：它的作用是「发起工单」。
+// 工单创建后默认由 AI 接待；用户想找人时点下方的「转人工」按钮。
+async function createTicketFromChat() {
+  if (!auth.isAuthenticated) {
+    void router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+  const text = draft.value.trim() || lastUserMessage()
+  if (!text) {
+    error.value = '先说一句你的问题，再提交工单。'
+    return
+  }
+  submitting.value = true
+  error.value = ''
+  try {
+    const ticket = await createTicket({
+      type: 'other',
+      subject: text.slice(0, 40),
+      content: text,
+    })
+    stream.value.push({
+      role: 'system',
+      content: '工单 ' + ticket.ticket_no + ' 已创建，AI 客服正在处理。你可以继续在「我的工单」里追问。',
+      id: 0,
+    })
+    createdTicketNo.value = ticket.ticket_no
+  } catch (err) {
+    error.value = errorMessage(err, '创建工单失败，请稍后重试。')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function lastUserMessage(): string {
+  for (let i = stream.value.length - 1; i >= 0; i--) {
+    if (stream.value[i].role === 'user') return stream.value[i].content
+  }
+  return ''
 }
 
 async function transferToHuman() {
@@ -229,9 +272,13 @@ onMounted(load)
           />
           <button class="btn btn-primary btn-sm" :disabled="sending || !draft.trim()" @click="send()">发送</button>
         </div>
-        <div class="mt-2 flex items-center gap-2 text-xs">
-          <button class="hint" @click="transferToHuman">转人工客服</button>
-          <button class="hint" @click="reset">清空对话</button>
+        <!-- 主操作是「提交工单」：AI 在工单里接待。想直接找人时用旁边的转人工按钮。 -->
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <button class="btn btn-primary btn-sm" :disabled="submitting" @click="createTicketFromChat">
+            {{ submitting ? '提交中…' : '提交工单' }}
+          </button>
+          <button class="btn btn-quiet btn-sm" @click="transferToHuman">转人工</button>
+          <button class="hint" @click="reset">清空</button>
           <RouterLink v-if="auth.isAuthenticated" to="/tickets" class="hint ml-auto">我的工单</RouterLink>
         </div>
       </div>

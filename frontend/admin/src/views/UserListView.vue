@@ -52,25 +52,28 @@ const transferNote = ref('')
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 const filtered = computed(() => Boolean(search.value.trim() || role.value !== 'all'))
 
+// 角色只有两个：超级管理员负责配置与人员，管理员负责日常经营与客服。
+// 历史角色名仍然会被渲染成对应标签，已有账号不会显示成空白。
 const ROLES = [
   { value: 'all', label: '全部角色' },
   { value: 'user', label: '普通用户' },
-  { value: 'support', label: '客服' },
-  { value: 'support_agent', label: '普通客服' },
-  { value: 'support_lead', label: '客服主管' },
-  { value: 'operator', label: '运营' },
-  { value: 'ops_manager', label: '运营管理员' },
-  { value: 'product_manager', label: '商品管理员' },
-  { value: 'order_manager', label: '订单管理员' },
-  { value: 'finance', label: '财务' },
-  { value: 'ai_admin', label: 'AI 管理员' },
-  { value: 'data_viewer', label: '数据查看员' },
   { value: 'admin', label: '管理员' },
   { value: 'super_admin', label: '超级管理员' },
 ]
 
+const LEGACY_ROLE_LABELS: Record<string, string> = {
+  operator: '管理员', support: '管理员', ops_manager: '管理员', product_manager: '管理员',
+  order_manager: '管理员', finance: '管理员', support_lead: '管理员',
+  support_agent: '管理员', ai_admin: '管理员', data_viewer: '管理员',
+}
+
 function roleLabel(value: string): string {
-  return ROLES.find((r) => r.value === value)?.label ?? roleMeta(value)?.label ?? value
+  return (
+    ROLES.find((r) => r.value === value)?.label ??
+    LEGACY_ROLE_LABELS[value] ??
+    roleMeta(value)?.label ??
+    value
+  )
 }
 
 async function load() {

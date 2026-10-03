@@ -77,75 +77,30 @@ func SeedDefaults() error {
 	}
 
 	seed := map[string][][2]string{
+		// 管理员：覆盖日常经营与客服。工单必须能看能回，这是店主每天都要做的事。
 		"admin": {
-			{"stats", "view"}, {"products", "view"}, {"products", "manage"},
-			{"cards", "view"}, {"cards", "manage"}, {"orders", "view"}, {"orders", "manage"},
-			{"users", "view"}, {"users", "manage"}, {"categories", "view"}, {"categories", "manage"},
-			{"coupons", "view"}, {"coupons", "manage"}, {"settings", "view"}, {"settings", "manage"},
-			{"notifications", "view"}, {"notifications", "manage"}, {"roles", "view"}, {"logs", "view"},
-			{"plugins", "view"}, {"plugins", "manage"},
-		},
-		"operator": {
-			{"stats", "view"}, {"products", "view"}, {"products", "manage"},
-			{"cards", "view"}, {"cards", "manage"}, {"orders", "view"}, {"orders", "manage"},
-			{"categories", "view"}, {"coupons", "view"}, {"coupons", "manage"},
-			{"notifications", "view"}, {"plugins", "view"}, {"plugins", "manage"},
-		},
-		"support": {
-			{"stats", "view"}, {"orders", "view"}, {"orders", "manage"},
-			{"users", "view"}, {"notifications", "view"},
-		},
-		"ops_manager": {
-			{"stats", "view"}, {"stats", "export"}, {"finance", "view"},
-			{"products", "view"}, {"products", "manage"}, {"cards", "view"}, {"cards", "manage"},
-			{"orders", "view"}, {"orders", "manage"}, {"categories", "view"}, {"categories", "manage"},
-			{"coupons", "view"}, {"coupons", "manage"}, {"activities", "view"}, {"activities", "manage"},
+			{"stats", "view"}, {"stats", "export"},
+			{"products", "view"}, {"products", "manage"},
+			{"cards", "view"}, {"cards", "manage"},
+			{"orders", "view"}, {"orders", "manage"},
+			{"categories", "view"}, {"categories", "manage"},
+			{"coupons", "view"}, {"coupons", "manage"},
+			{"activities", "view"}, {"activities", "manage"},
 			{"tickets", "view"}, {"tickets", "manage"}, {"tickets", "assign"},
-			{"users", "view"}, {"users", "manage"}, {"notifications", "view"}, {"notifications", "manage"},
-			{"plugins", "view"}, {"plugins", "manage"},
-		},
-		"product_manager": {
-			{"products", "view"}, {"products", "manage"}, {"cards", "view"}, {"cards", "manage"},
-			{"categories", "view"}, {"categories", "manage"}, {"activities", "view"}, {"activities", "manage"},
-			{"coupons", "view"}, {"coupons", "manage"}, {"stats", "view"}, {"notifications", "view"},
-		},
-		"order_manager": {
-			{"orders", "view"}, {"orders", "manage"}, {"products", "view"}, {"cards", "view"},
-			{"users", "view"}, {"stats", "view"}, {"notifications", "view"}, {"notifications", "manage"},
-			{"finance", "view"}, {"activities", "view"},
-		},
-		"finance": {
-			{"stats", "view"}, {"stats", "export"}, {"finance", "view"}, {"finance", "export"},
-			{"orders", "view"}, {"orders", "manage"}, {"users", "view"}, {"activities", "view"},
-			{"operation_logs", "view"}, {"operation_logs", "export"},
-		},
-		"support_lead": {
-			{"stats", "view"}, {"orders", "view"}, {"users", "view"}, {"users", "manage"},
-			{"notifications", "view"}, {"notifications", "manage"},
-			{"tickets", "view"}, {"tickets", "manage"}, {"tickets", "assign"},
-			{"ticket_config", "view"}, {"ticket_config", "manage"},
-			{"agents", "view"}, {"agents", "manage"}, {"quick_replies", "view"}, {"quick_replies", "manage"},
-			{"knowledge", "view"}, {"knowledge", "manage"}, {"ai", "view"},
-			{"notification_templates", "view"}, {"notification_templates", "manage"},
-		},
-		"support_agent": {
-			{"orders", "view"}, {"users", "view"}, {"notifications", "view"},
-			{"tickets", "view"}, {"tickets", "manage"},
-			{"quick_replies", "view"}, {"knowledge", "view"}, {"ai", "view"},
-		},
-		"ai_admin": {
-			{"stats", "view"}, {"tickets", "view"}, {"tickets", "manage"},
-			{"ai", "view"}, {"ai", "manage"}, {"ai_tools", "view"}, {"ai_tools", "manage"},
+			{"ai", "view"}, {"ai", "manage"},
+			{"ai_tools", "view"}, {"ai_tools", "manage"},
 			{"knowledge", "view"}, {"knowledge", "manage"},
+			{"agents", "view"}, {"agents", "manage"},
 			{"quick_replies", "view"}, {"quick_replies", "manage"},
-			{"ticket_config", "view"}, {"ticket_config", "manage"},
 			{"notification_templates", "view"}, {"notification_templates", "manage"},
 			{"config_center", "view"}, {"config_center", "manage"},
-		},
-		"data_viewer": {
-			{"stats", "view"}, {"stats", "export"}, {"finance", "view"},
-			{"products", "view"}, {"orders", "view"}, {"cards", "view"}, {"users", "view"},
-			{"activities", "view"}, {"tickets", "view"}, {"operation_logs", "view"}, {"operation_logs", "export"},
+			{"ticket_config", "view"}, {"ticket_config", "manage"},
+			{"users", "view"}, {"users", "manage"},
+			{"notifications", "view"}, {"notifications", "manage"},
+			{"plugins", "view"}, {"plugins", "manage"},
+			{"settings", "view"}, {"settings", "manage"},
+			{"roles", "view"}, {"logs", "view"}, {"operation_logs", "view"},
+			{"finance", "view"},
 		},
 	}
 
@@ -196,47 +151,22 @@ func SeedDefaults() error {
 			changed = true
 		}
 	}
-	if stored < 5 {
-		// 活动、工单、AI 客服与配置中心是这一版新增的后台能力。已有的
-		// 管理员/运营要拿到新菜单的查看权限，新角色要按内置权限集补齐。
-		for _, role := range []string{"admin", "operator", "ops_manager"} {
-			for _, permission := range [][2]string{
-				{"activities", "view"}, {"activities", "manage"},
-				{"tickets", "view"}, {"tickets", "manage"}, {"tickets", "assign"},
-				{"ai", "view"}, {"ai", "manage"},
-				{"knowledge", "view"}, {"knowledge", "manage"},
-				{"config_center", "view"}, {"config_center", "manage"},
-			} {
+	if stored < 7 {
+		// 角色收敛到 super_admin / admin 之后，补齐管理员日常所需的全部权限。
+		// 历史角色（operator / support 等）如果已经有了策略，也一并补齐，
+		// 因为它们在权限判定里等同 admin，账号不会因为升级而失去入口。
+		targets := []string{"admin"}
+		for _, legacy := range LegacyRoles {
+			if hasPolicies(legacy) {
+				targets = append(targets, legacy)
+			}
+		}
+		for _, role := range targets {
+			for _, permission := range seed["admin"] {
 				if addMissing(role, permission[0], permission[1]) {
 					changed = true
 				}
 			}
-		}
-	}
-	if stored < 6 {
-		if addMissing("admin", "finance", "view") {
-			changed = true
-		}
-		if addMissing("admin", "ai_tools", "view") {
-			changed = true
-		}
-		if addMissing("admin", "ai_tools", "manage") {
-			changed = true
-		}
-		if addMissing("admin", "agents", "view") {
-			changed = true
-		}
-		if addMissing("admin", "quick_replies", "view") {
-			changed = true
-		}
-		if addMissing("admin", "notification_templates", "view") {
-			changed = true
-		}
-		if addMissing("admin", "operation_logs", "view") {
-			changed = true
-		}
-		if addMissing("admin", "ticket_config", "view") {
-			changed = true
 		}
 	}
 	if !changed {
@@ -331,7 +261,7 @@ const legacyStatsResource = "dashboard"
 
 const (
 	// seedVersion is the shape of the seeded policy set this build expects.
-	seedVersion        = 6
+	seedVersion        = 7
 	seedVersionKey     = "authz_seed_version"
 	settingsValueTable = "app_settings"
 )
@@ -420,12 +350,34 @@ func hasPolicies(role string) bool {
 // Roles are the back-office roles the application understands. They are a
 // fixed set because the storefront's navigation and the seeded policy lists
 // both assume exactly these names.
-var Roles = []string{
-	"super_admin", "admin", "operator", "support",
-	// 需求新增的角色：运营管理员、商品管理员、订单管理员、财务人员、
-	// 客服主管、普通客服、AI 管理员、数据查看员。
+// Roles 是后台提供的角色。只保留两个：
+//
+//	super_admin —— 拥有全部权限，负责配置与人员；
+//	admin       —— 日常经营与客服，能回复工单、处理订单与商品。
+//
+// LegacyRoles 是历史版本用过的名字。它们不再作为可选项出现，但仍然被识别，
+// 并在权限判定时按 admin 处理：已经有这些角色的账号不会因为升级而失去访问权。
+var Roles = []string{"super_admin", "admin"}
+
+var LegacyRoles = []string{
+	"operator", "support",
 	"ops_manager", "product_manager", "order_manager", "finance",
 	"support_lead", "support_agent", "ai_admin", "data_viewer",
+}
+
+// EffectiveRole 把历史角色名归一化成当前的两个角色之一。
+// 权限判定与界面展示都走这里，升级后旧账号仍然是原样可用。
+func EffectiveRole(role string) string {
+	role = strings.TrimSpace(role)
+	if role == "super_admin" {
+		return "super_admin"
+	}
+	for _, legacy := range LegacyRoles {
+		if role == legacy {
+			return "admin"
+		}
+	}
+	return role
 }
 
 // Can reports whether a role may perform act on obj. Policies are keyed by
@@ -435,6 +387,7 @@ func Can(role, obj, act string) bool {
 	if Enforcer == nil || role == "" {
 		return false
 	}
+	role = EffectiveRole(role)
 	if role == "super_admin" {
 		return true
 	}

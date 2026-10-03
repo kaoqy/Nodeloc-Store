@@ -8,6 +8,9 @@ import (
 
 	"gorm.io/gorm"
 
+	paymentapplication "github.com/kaoqy/Nodeloc-Store/internal/modules/payment/application"
+	supportcontract "github.com/kaoqy/Nodeloc-Store/internal/modules/support/contract"
+
 	"github.com/kaoqy/Nodeloc-Store/internal/app/stockwatch"
 	"github.com/kaoqy/Nodeloc-Store/internal/authz"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
@@ -155,6 +158,7 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		Notifier: support.NotifierAdapter{Send: func(ctx context.Context, notification *models.Notification) error {
 			return notificationMod.Service.Send(ctx, notification)
 		}},
+		Refunder: refundBridge{payments: paymentMod.Service},
 	})
 	auditMod := audit.Wire(db)
 	pluginMod := plugin.Wire(db)
@@ -241,6 +245,35 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		Support:      supportMod,
 		Stock:        stockWatch,
 	}, nil
+}
+
+// refundBridge 把支付模块的退款能力接到 AI 客服上。
+// 它做两件事：把订单类型收敛成 support 契约里的形状，并保证只处理当前用户自己的单。
+type refundBridge struct {
+	payments *paymentapplication.Service
+}
+
+func (r refundBridge) RefundOrderForUser(ctx context.Context, userID uint, orderNo string) (int, string, error) {
+	amount, status, err := r.payments.RefundOrderForUser(ctx, userID, orderNo)
+	return amount, status, err
+}
+
+func (r refundBridge) RefundableOrders(ctx context.Context, userID uint, limit int) ([]supportcontract.OrderContext, error) {
+	orders, err := r.payments.RefundableOrders(ctx, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]supportcontract.OrderContext, 0, len(orders))
+	for _, order := range orders {
+		item := supportcontract.OrderContext{
+			OrderNo: order.OrderNo, Quantity: order.Quantity,
+			TotalAmount: order.TotalAmount, Status: order.Status,
+			FulfillmentStatus: order.FulfillmentStatus,
+			PaidAt:            order.PaidAt, DeliveredAt: order.DeliveredAt,
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 // activityDefaults adapts the configuration centre to the activity handler's

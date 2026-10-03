@@ -212,6 +212,20 @@ func (s *Service) registerBuiltins() {
 		Handler:    s.toolNotify,
 	})
 	register(&ToolSpec{
+		Key: "refund.list", Name: "查询可退款订单", Category: "refund", RiskLevel: domain.RiskLow,
+		Description:  "列出当前用户自己已支付且尚未退款的订单，用于核对是否可以退。",
+		RequireLogin: true, OwnDataOnly: true, AllowAuto: true, RateLimit: 20,
+		Handler: s.toolRefundableOrders,
+	})
+	register(&ToolSpec{
+		Key: "refund.order", Name: "发起订单退款", Category: "refund", RiskLevel: domain.RiskHigh,
+		Description:  "对当前用户自己的一张已支付订单发起退款，原路退回其 NodeLoc 账户。高风险写操作，需要用户确认。",
+		RequireLogin: true, OwnDataOnly: true, RequireConfirm: true, AllowAuto: true, RateLimit: 5,
+		AllowedParams: []string{"order_no", "reason"}, RequiredParams: []string{"order_no"},
+		ParamTypes: map[string]string{"order_no": "string", "reason": "string"},
+		Handler:    s.toolRefundOrder,
+	})
+	register(&ToolSpec{
 		Key: "coupon.grant", Name: "发放优惠券", Category: "coupon", RiskLevel: domain.RiskCritical,
 		Description:  "向当前用户发放一张优惠券。高风险，默认关闭，需要二次确认与管理员审批。",
 		RequireLogin: true, OwnDataOnly: true, RequireConfirm: true, AllowAuto: false, RateLimit: 5,
@@ -497,6 +511,52 @@ func (s *Service) toolGrantCoupon(ctx context.Context, access contract.Access, p
 		return nil, fmt.Errorf("%w: 配置里没有允许 AI 发放优惠券。", domain.ErrToolForbidden)
 	}
 	return nil, fmt.Errorf("%w: 优惠券发放需要人工在后台确认。", domain.ErrToolForbidden)
+}
+
+// toolRefundableOrders 列出该用户可退款的订单。只读，风险低。
+func (s *Service) toolRefundableOrders(ctx context.Context, access contract.Access, _ map[string]any) (any, error) {
+	if s.refunder == nil || access.UserID == 0 {
+		return nil, domain.ErrForbidden
+	}
+	orders, err := s.refunder.RefundableOrders(ctx, access.UserID, 10)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]map[string]any, 0, len(orders))
+	for _, order := range orders {
+		rows = append(rows, map[string]any{
+			"order_no": order.OrderNo, "product_name": order.ProductName,
+			"total_amount": order.TotalAmount, "status": order.Status, "paid_at": order.PaidAt,
+		})
+	}
+	return map[string]any{"orders": rows}, nil
+}
+
+// toolRefundOrder 发起退款。归属校验在 Refunder 内完成；这里只负责参数与结果形状。
+// 退款成功后给买家发一条站内通知，让「钱去哪了」有据可查。
+func (s *Service) toolRefundOrder(ctx context.Context, access contract.Access, params map[string]any) (any, error) {
+	workflow, _ := s.Workflow(ctx)
+	if workflow != nil && !workflow.CanRefund {
+		return nil, fmt.Errorf("%w: 当前配置不允许 AI 直接退款，请转人工处理。", domain.ErrToolForbidden)
+	}
+	if s.refunder == nil || access.UserID == 0 {
+		return nil, domain.ErrForbidden
+	}
+	orderNo := stringParam(params, "order_no")
+	if orderNo == "" {
+		return nil, fmt.Errorf("%w: 请提供要退款的订单号。", domain.ErrInvalidInput)
+	}
+	amount, status, err := s.refunder.RefundOrderForUser(ctx, access.UserID, orderNo)
+	if err != nil {
+		return nil, err
+	}
+	if s.notifier != nil {
+		_ = s.notifier.NotifyUser(ctx, access.UserID, "order_refund",
+			"订单 "+orderNo+" 已退款",
+			fmt.Sprintf("退款 %d 已原路退回你的 NodeLoc 账户。", amount),
+			"/orders/"+orderNo)
+	}
+	return map[string]any{"order_no": orderNo, "amount": amount, "status": status}, nil
 }
 
 // ── 参数校验 ─────────────────────────────────────────────────────────
