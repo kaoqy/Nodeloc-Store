@@ -135,13 +135,13 @@ async function toggleConfirm(row: AIToolRow) {
 
 async function permission(row: AIToolRow, role: string) {
   if (!canManage) return
-  const current = row.permissions.find((item) => item.role === role)
+  const current = (row.permissions ?? []).find((item) => item.role === role)
   const allowed = current ? !current.allowed : false
   busy.value = true
   try {
     await setAIToolPermission(row.tool.id, role, allowed)
     if (current) current.allowed = allowed
-    else row.permissions.push({ tool_id: row.tool.id, role, allowed })
+    else (row.permissions ??= []).push({ tool_id: row.tool.id, role, allowed })
     notice.value = '已更新 ' + (roleLabel[role] || role) + ' 的工具权限。'
   } catch (err) {
     error.value = errorMessage(err, '更新权限失败')
@@ -151,7 +151,8 @@ async function permission(row: AIToolRow, role: string) {
 }
 
 function permissionState(row: AIToolRow, role: string) {
-  const found = row.permissions.find((item) => item.role === role)
+  // 后端老版本可能返回 null；这里兜底，避免整页白屏。
+  const found = (row.permissions ?? []).find((item) => item.role === role)
   if (found) return found.allowed
   return false
 }

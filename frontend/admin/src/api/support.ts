@@ -109,7 +109,10 @@ export interface TicketDetail {
 
 export interface TicketStats {
   total: number
+  /** AI 仍在处理或等用户回复的工单数 */
   ai_processing: number
+  /** AI 已经给出结论、等用户确认的工单数 */
+  ai_solved: number
   pending_human: number
   human_handling: number
   resolved: number
@@ -429,6 +432,40 @@ export const listAIToolCatalogue = (role = 'user') =>
   client
     .get<{ role: string; data: AIToolSummary[] }>('/admin/ai-tool-index/catalogue', { params: { role } })
     .then((r) => r.data.data ?? [])
+
+export interface AIConversationRow {
+  id: number
+  user_id?: number
+  ticket_id?: number
+  channel: string
+  status: string
+  agent_name?: string
+  page_context?: string
+  message_count: number
+  handed_to_human: boolean
+  last_message_at?: string
+  created_at?: string
+}
+
+export interface AIFeedbackRow {
+  id: number
+  conversation_id: number
+  message_id?: number
+  ticket_id?: number
+  user_id?: number
+  rating: number
+  reason?: string
+  comment?: string
+  created_at?: string
+}
+
+export const listAIConversations = (params: { user_id?: number; limit?: number; offset?: number } = {}) =>
+  client
+    .get<{ data: AIConversationRow[]; total: number }>('/admin/ai/conversations', { params })
+    .then((r) => ({ data: r.data.data ?? [], total: r.data.total ?? 0 }))
+
+export const listAIFeedback = (limit = 50) =>
+  client.get<{ data: AIFeedbackRow[] }>('/admin/ai/feedback', { params: { limit } }).then((r) => r.data.data ?? [])
 
 export const listAIRoles = () =>
   client.get<{ data: string[] }>('/admin/ai-tool-index/roles').then((r) => r.data.data ?? [])

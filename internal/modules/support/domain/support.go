@@ -114,8 +114,11 @@ type TicketDetail struct {
 
 // TicketStats 是工单中心顶部的统计卡。
 type TicketStats struct {
-	Total            int64   `json:"total"`
+	Total int64 `json:"total"`
+	// AIProcessing 是仍在 AI 手里的工单：处理中或等用户回复。
+	// 「AI 已解决」不算在内，否则卡片数字会和「AI 处理中」列表对不上。
 	AIProcessing     int64   `json:"ai_processing"`
+	AISolved         int64   `json:"ai_solved"`
 	PendingHuman     int64   `json:"pending_human"`
 	HumanHandling    int64   `json:"human_handling"`
 	Resolved         int64   `json:"resolved"`
@@ -153,9 +156,11 @@ type ToolCallInput struct {
 
 // ToolCallResult 是工具调用结果与审计摘要。
 type ToolCallResult struct {
-	ToolKey        string `json:"tool_key"`
-	ToolName       string `json:"tool_name"`
-	Status         string `json:"status"`
+	ToolKey  string `json:"tool_key"`
+	ToolName string `json:"tool_name"`
+	Status   string `json:"status"`
+	// Params 只在需要二次确认时返回，让前端能把这次待执行的调用原样交回后端确认。
+	Params         any    `json:"params,omitempty"`
 	Data           any    `json:"data,omitempty"`
 	Summary        string `json:"summary,omitempty"`
 	Error          string `json:"error,omitempty"`
@@ -185,22 +190,33 @@ type ChatInput struct {
 	TicketID    uint
 	IP          string
 	UserAgent   string
-	Confirmed   bool
+	// ConversationID 是当前会话编号，用于把确认执行的结果写回同一场对话。
+	ConversationID uint
+	// Confirmed 表示用户已经看过高风险操作的说明并点了确认。
+	Confirmed bool
+	// PendingToolKey / PendingParams 是用户确认执行的那一次工具调用。
+	// 只有 Confirmed 为真时才会被采用，且仍要走 CallTool 的完整校验。
+	PendingToolKey string
+	PendingParams  map[string]any
 }
 
 // ChatReply 是一次 AI 对话的回答。
 type ChatReply struct {
-	ConversationID  uint             `json:"conversation_id"`
-	MessageID       uint             `json:"message_id"`
-	Content         string           `json:"content"`
+	ConversationID uint   `json:"conversation_id"`
+	MessageID      uint   `json:"message_id"`
+	Content        string `json:"content"`
+	// ToolCalls 是这一轮 AI 真正调用过的工具与结果，前端用来显示「我查了哪些数据」。
 	ToolCalls       []ToolCallResult `json:"tool_calls,omitempty"`
 	SuggestTransfer bool             `json:"suggest_transfer"`
 	SuggestTicket   bool             `json:"suggest_ticket"`
 	NeedConfirm     *ToolCallResult  `json:"need_confirm,omitempty"`
 	TicketID        uint             `json:"ticket_id,omitempty"`
 	TicketNo        string           `json:"ticket_no,omitempty"`
-	KnowledgeHits   []KnowledgeHit   `json:"knowledge_hits,omitempty"`
-	Fallback        bool             `json:"fallback"`
+	// KnowledgeHits 是这次回答引用的知识库文章，前端显示成「依据」。
+	KnowledgeHits []KnowledgeHit `json:"knowledge_hits,omitempty"`
+	// SuggestedReplies 是建议的追问，前端渲染成快捷按钮。
+	SuggestedReplies []string `json:"suggested_replies,omitempty"`
+	Fallback         bool     `json:"fallback"`
 }
 
 // TransferInput 是转人工的请求。

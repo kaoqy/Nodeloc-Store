@@ -45,6 +45,12 @@ func (s *GormStore) ListTickets(ctx context.Context, filter domain.TicketFilter)
 		query = query.Where("ticket_no LIKE ? OR subject LIKE ? OR order_no LIKE ? OR product_name LIKE ?", like, like, like, like)
 	}
 	switch filter.Attention {
+	case "ai":
+		// 与统计卡「AI 处理中」同一组状态，点进去条数必须一致。
+		query = query.Where("status IN ?", []string{models.TicketStatusAIProcessing, models.TicketStatusWaitingUser})
+	case "pending_human":
+		// 与统计卡「待人工处理」同一组状态：用户已申请 + 排队中。
+		query = query.Where("status IN ?", []string{models.TicketStatusUserRequested, models.TicketStatusPendingHuman})
 	case "overdue":
 		query = query.Where("due_at IS NOT NULL AND due_at < ? AND status NOT IN ?", time.Now().UTC(), []string{models.TicketStatusResolved, models.TicketStatusClosed})
 	case "unread":
@@ -316,7 +322,10 @@ func (s *GormStore) TicketStats(ctx context.Context, agentID uint) (*domain.Tick
 	} else if err := s.db.WithContext(ctx).Model(&models.Ticket{}).Count(&stats.Total).Error; err != nil {
 		return nil, err
 	}
-	if stats.AIProcessing, err = countBy(models.TicketStatusAIProcessing, models.TicketStatusAISolved, models.TicketStatusWaitingUser); err != nil {
+	if stats.AIProcessing, err = countBy(models.TicketStatusAIProcessing, models.TicketStatusWaitingUser); err != nil {
+		return nil, err
+	}
+	if stats.AISolved, err = countBy(models.TicketStatusAISolved); err != nil {
 		return nil, err
 	}
 	if stats.PendingHuman, err = countBy(models.TicketStatusUserRequested, models.TicketStatusPendingHuman); err != nil {
@@ -512,6 +521,9 @@ func (s *GormStore) ListToolCalls(ctx context.Context, filter contract.ToolCallF
 	}
 	if filter.UserID > 0 {
 		query = query.Where("user_id = ?", filter.UserID)
+	}
+	if filter.TicketID > 0 {
+		query = query.Where("ticket_id = ?", filter.TicketID)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {

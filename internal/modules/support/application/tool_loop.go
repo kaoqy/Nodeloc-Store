@@ -12,12 +12,13 @@ import (
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/support/domain"
 )
 
-// ToolSummary 是一条工具说明，用于写进系统提示词。
+// ToolSummary 是一条工具说明，用于写进系统提示词，也是后台
+// 「AI 可调用的工具」卡片的展示数据，所以字段要有 JSON 名。
 type ToolSummary struct {
-	Key         string
-	Name        string
-	Description string
-	Params      []string
+	Key         string   `json:"key"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Params      []string `json:"params"`
 }
 
 // enabledToolCatalogue 返回「当前启用、且这个角色可以用」的工具清单。
@@ -100,10 +101,25 @@ func (s *Service) runToolLoop(
 	input domain.ChatInput,
 	conversationID uint,
 ) (string, []domain.ToolCallResult, error) {
+	return s.runToolLoopWith(ctx, config, systemPrompt, messages, input, conversationID, true)
+}
+
+// runToolLoopWith 是工具循环的实现。allowConfirm 决定「需要用户二次确认」的工具
+// 是返回确认卡片（网页客服），还是直接跳过（工单内的自动应答没有确认入口）。
+func (s *Service) runToolLoopWith(
+	ctx context.Context,
+	config *domain.AIConfig,
+	systemPrompt string,
+	messages []contract.ModelMessage,
+	input domain.ChatInput,
+	conversationID uint,
+	allowConfirm bool,
+) (string, []domain.ToolCallResult, error) {
 	const MaxToolRounds = 3
 
 	current := append([]contract.ModelMessage{}, messages...)
 	var calls []domain.ToolCallResult
+	lastAnswer := ""
 
 	for round := 0; round < MaxToolRounds; round++ {
 		reply, err := s.model.Complete(ctx, config, contract.ModelRequest{
@@ -119,7 +135,28 @@ func (s *Service) runToolLoop(
 		}
 		parsed := parseToolCall(reply.Content)
 		if parsed == nil {
-			return strings.TrimSpace(reply.Content), calls, nil
+			answer := strings.TrimSpace(reply.Content)
+			if answer != "" {
+				lastAnswer = answer
+			}
+			return answer, calls, nil
+		}
+		// 保留这一轮的文字：模型可能先解释再调用工具，轮次用尽时用它兜底。
+		if text := stripToolCall(reply.Content); text != "" {
+			lastAnswer = text
+		}
+		// 工单里没有确认按钮，所以默认只能自动执行低风险工具。
+		// 少数「动的是用户自己的东西」的工具（例如原路退款给本人）
+		// 由具体请求本身构成同意，允许在工单场景直接执行。
+		if !allowConfirm {
+			spec, ok := s.tools.Lookup(parsed.ToolKey)
+			if ok && spec.RequireConfirm && !ticketAutoAllowed[parsed.ToolKey] {
+				current = append(current,
+					contract.ModelMessage{Role: "assistant", Content: reply.Content},
+					contract.ModelMessage{Role: "system", Content: "工具 " + parsed.ToolKey + " 需要用户本人确认，当前场景无法确认，请直接用已有信息回答，必要时建议转人工。"},
+				)
+				continue
+			}
 		}
 		result, err := s.CallTool(ctx, domain.ToolCallInput{
 			ToolKey:        parsed.ToolKey,
@@ -146,8 +183,8 @@ func (s *Service) runToolLoop(
 			contract.ModelMessage{Role: "system", Content: "工具 " + parsed.ToolKey + " 返回：" + jsonString(result.Data, 2000)},
 		)
 	}
-	// 轮次用尽：用最后一轮的文字兜底，避免什么都不回。
-	return "", calls, nil
+	// 轮次用尽：用模型最后一段文字兜底，避免什么都不回。
+	return lastAnswer, calls, nil
 }
 
 // toolFailureText 把工具错误翻成模型能理解的句子。
@@ -197,3 +234,13 @@ func (s *Service) toolsForAdmin(ctx context.Context) ([]ToolSummary, error) {
 
 // ensure fmt stays used even if this file is trimmed later.
 var _ = fmt.Sprintf
+
+// ticketAutoAllowed 是工单场景里可以不打断用户直接执行的确认类工具。
+// 它们共同的特征是只影响调用者本人，且用户这次提问本身就是请求。
+var ticketAutoAllowed = map[string]bool{
+	"refund.order":         true,
+	"ticket.add_message":   true,
+	"notification.send":    false,
+	"ticket.update_status": false,
+	"coupon.grant":         false,
+}

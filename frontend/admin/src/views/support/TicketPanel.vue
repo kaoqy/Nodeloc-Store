@@ -250,7 +250,7 @@ onMounted(load)
         </table>
       </div>
 
-      <div v-else class="card max-h-[420px] space-y-2 overflow-y-auto">
+      <div v-else-if="tab === 'logs'" class="card max-h-[420px] space-y-2 overflow-y-auto">
         <p v-if="!detail?.logs?.length" class="quiet py-8 text-center text-sm">还没有操作记录</p>
         <div v-for="log in detail?.logs ?? []" :key="log.id" class="flex flex-wrap items-center gap-2 text-xs">
           <span class="mono">{{ log.action }}</span>

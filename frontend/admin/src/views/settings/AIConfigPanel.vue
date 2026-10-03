@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   getAIConfig,
   saveAIConfig,
@@ -7,11 +7,15 @@ import {
   listQuickQuestions,
   saveQuickQuestion,
   deleteQuickQuestion,
+  listAIConversations,
+  listAIFeedback,
   type AIConfig,
   type AIWorkflow,
   type AIQuickQuestion,
+  type AIConversationRow,
+  type AIFeedbackRow,
 } from '../../api/support'
-import { errorMessage } from '../../utils/format'
+import { errorMessage, when } from '../../utils/format'
 import SaveBar from '../../components/SaveBar.vue'
 import { useAuthStore } from '../../stores/auth'
 
@@ -22,7 +26,7 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const notice = ref('')
-const tab = ref<'basic' | 'prompt' | 'workflow' | 'quick'>('basic')
+const tab = ref<'basic' | 'prompt' | 'workflow' | 'quick' | 'ops'>('basic')
 const hasKey = ref(false)
 const apiKey = ref('')
 // 未保存状态：加载时记下服务端返回的配置，任何字段改动都会让 dirty 变真，
@@ -40,6 +44,45 @@ function takeSnapshot() {
 const config = ref<Partial<AIConfig>>({})
 const workflow = ref<Partial<AIWorkflow>>({})
 const questions = ref<AIQuickQuestion[]>([])
+// AI 运营数据：会话量、转人工率与买家评价。过去这些数据只写进数据库，
+// 后台没有任何地方能看到，等于白记。
+const conversations = ref<AIConversationRow[]>([])
+const feedback = ref<AIFeedbackRow[]>([])
+const conversationTotal = ref(0)
+const opsLoading = ref(false)
+const opsError = ref('')
+
+const channelLabels: Record<string, string> = { widget: '网页客服', ticket: '工单', admin: '后台' }
+const conversationStatusLabels: Record<string, string> = { active: '进行中', closed: '已关闭', archived: '已归档' }
+
+const handoffCount = computed(() => conversations.value.filter((item) => item.handed_to_human).length)
+const handoffRate = computed(() =>
+  conversations.value.length ? Math.round((handoffCount.value / conversations.value.length) * 100) : 0,
+)
+const ratingAverage = computed(() => {
+  if (!feedback.value.length) return 0
+  return feedback.value.reduce((sum, item) => sum + item.rating, 0) / feedback.value.length
+})
+const upCount = computed(() => feedback.value.filter((item) => item.rating > 0).length)
+const downCount = computed(() => feedback.value.filter((item) => item.rating < 0).length)
+
+async function loadOps() {
+  opsLoading.value = true
+  opsError.value = ''
+  try {
+    const [page, rows] = await Promise.all([
+      listAIConversations({ limit: 50 }),
+      listAIFeedback(100).catch(() => []),
+    ])
+    conversations.value = page.data
+    conversationTotal.value = page.total
+    feedback.value = rows
+  } catch (err) {
+    opsError.value = errorMessage(err, '加载 AI 运营数据失败')
+  } finally {
+    opsLoading.value = false
+  }
+}
 const questionDraft = ref<Partial<AIQuickQuestion>>({
   title: '',
   content: '',
@@ -142,6 +185,10 @@ async function removeQuestion(item: AIQuickQuestion) {
   }
 }
 
+watch(tab, (value) => {
+  if (value === 'ops') void loadOps()
+})
+
 onMounted(load)
 </script>
 
@@ -152,6 +199,7 @@ onMounted(load)
     <p v-if="!canManage" class="alert" role="status">当前角色只能查看 AI 配置，修改需要「AI 客服」管理权限。</p>
 
     <SaveBar
+      v-if="tab !== 'ops'"
       resource="ai"
       :saving="saving"
       :dirty="dirty"
@@ -164,6 +212,7 @@ onMounted(load)
       <button class="chip" :class="tab === 'prompt' ? 'chip-active' : ''" @click="tab = 'prompt'">提示词与文案</button>
       <button class="chip" :class="tab === 'workflow' ? 'chip-active' : ''" @click="tab = 'workflow'">工作流与转人工</button>
       <button class="chip" :class="tab === 'quick' ? 'chip-active' : ''" @click="tab = 'quick'">快捷问题</button>
+      <button class="chip" :class="tab === 'ops' ? 'chip-active' : ''" @click="tab = 'ops'">运营数据</button>
     </div>
 
     <div v-if="loading" class="card space-y-3">
@@ -360,6 +409,88 @@ onMounted(load)
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.can_recommend_activity" type="checkbox" :disabled="!canManage" />可以推荐活动</label>
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.can_grant_coupon" type="checkbox" :disabled="!canManage" />可以发放优惠券（高风险）</label>
           <label class="flex items-center gap-2 text-sm"><input v-model="workflow.can_refund" type="checkbox" :disabled="!canManage" />可以直接退款（原路退回 NodeLoc）</label>
+        </div>
+      </div>
+    </div>
+
+    <div v-else-if="tab === 'ops'" class="space-y-4">
+      <div class="flex flex-wrap items-center gap-2">
+        <button class="btn btn-secondary btn-sm" :disabled="opsLoading" @click="loadOps">
+          {{ opsLoading ? '加载中…' : '刷新数据' }}
+        </button>
+        <span class="quiet text-xs">最近 50 场会话与 100 条评价</span>
+      </div>
+      <p v-if="opsError" class="alert alert-danger" role="alert">{{ opsError }}</p>
+
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="card-quiet">
+          <p class="quiet text-xs">会话总数</p>
+          <p class="nums mt-1 text-xl font-bold">{{ conversationTotal }}</p>
+        </div>
+        <div class="card-quiet">
+          <p class="quiet text-xs">转人工率</p>
+          <p class="nums mt-1 text-xl font-bold">{{ handoffRate }}%</p>
+          <p class="hint mt-0.5">{{ handoffCount }} / {{ conversations.length }} 场</p>
+        </div>
+        <div class="card-quiet">
+          <p class="quiet text-xs">平均评价</p>
+          <p class="nums mt-1 text-xl font-bold">{{ ratingAverage ? ratingAverage.toFixed(1) : '—' }}</p>
+          <p class="hint mt-0.5">有用 {{ upCount }} · 没用 {{ downCount }}</p>
+        </div>
+        <div class="card-quiet">
+          <p class="quiet text-xs">反馈条数</p>
+          <p class="nums mt-1 text-xl font-bold">{{ feedback.length }}</p>
+        </div>
+      </div>
+
+      <div v-if="opsLoading" class="card space-y-2">
+        <div v-for="i in 4" :key="i" class="skeleton h-9 w-full" />
+      </div>
+
+      <div v-else class="card space-y-3">
+        <p class="eyebrow">最近会话</p>
+        <div v-if="!conversations.length" class="quiet py-10 text-center text-sm">还没有 AI 会话记录</div>
+        <div v-else class="table-container">
+          <table class="table">
+            <thead>
+              <tr><th>会话</th><th>用户</th><th>渠道</th><th>消息</th><th>是否转人工</th><th>最后活跃</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in conversations" :key="item.id">
+                <td class="mono text-xs">#{{ item.id }}</td>
+                <td class="text-xs">{{ item.user_id ? '#' + item.user_id : '游客' }}</td>
+                <td class="text-xs">{{ channelLabels[item.channel] || item.channel }}</td>
+                <td class="nums text-xs">{{ item.message_count }}</td>
+                <td>
+                  <span :class="item.handed_to_human ? 'badge-warning' : 'badge-success'">
+                    {{ item.handed_to_human ? '已转人工' : 'AI 处理' }}
+                  </span>
+                </td>
+                <td class="quiet text-xs">{{ when(item.last_message_at || item.created_at) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card space-y-3">
+        <p class="eyebrow">买家评价</p>
+        <div v-if="!feedback.length" class="quiet py-8 text-center text-sm">还没有买家评价</div>
+        <div v-else class="table-container">
+          <table class="table">
+            <thead>
+              <tr><th>评价</th><th>会话</th><th>工单</th><th>说明</th><th>时间</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in feedback" :key="item.id">
+                <td><span :class="item.rating > 0 ? 'badge-success' : 'badge-danger'">{{ item.rating > 0 ? '有用' : '没用' }}</span></td>
+                <td class="mono text-xs">#{{ item.conversation_id }}</td>
+                <td class="mono text-xs">{{ item.ticket_id ? '#' + item.ticket_id : '—' }}</td>
+                <td class="quiet max-w-[320px] truncate text-xs">{{ item.comment || item.reason || '—' }}</td>
+                <td class="quiet text-xs">{{ when(item.created_at) }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

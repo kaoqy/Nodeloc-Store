@@ -51,6 +51,8 @@ const canView = computed(() => auth.allows('tickets', 'view'))
 
 const QUICK = [
   { key: '', label: '全部' },
+  { key: 'ai', label: 'AI 处理中', countKey: 'ai_processing' as const },
+  { key: 'pending_human', label: '待人工处理', countKey: 'pending_human' as const },
   { key: 'unread', label: '未读', countKey: 'unread' as const },
   { key: 'overdue', label: '即将超时', countKey: 'overdue' as const },
   { key: 'urgent', label: '紧急', countKey: 'urgent' as const },
@@ -204,14 +206,14 @@ onMounted(() => {
     <template v-else>
       <!-- 统计卡：数字与该筛选下的列表条数一致 -->
       <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <RouterLink to="/service" class="todo-card">
+        <RouterLink to="/service?attention=ai" class="todo-card">
           <span class="min-w-0 flex-1">
             <span class="quiet block text-xs">AI 处理中</span>
             <span class="nums mt-1 block text-xl font-bold">{{ stats?.ai_processing ?? 0 }}</span>
           </span>
           <AdminIcon name="chevronRight" :size="15" class="text-[var(--text-quiet)]" />
         </RouterLink>
-        <RouterLink to="/service?status=pending_human" class="todo-card">
+        <RouterLink to="/service?attention=pending_human" class="todo-card">
           <span class="min-w-0 flex-1">
             <span class="quiet block text-xs">待人工处理</span>
             <span class="nums accent-text mt-1 block text-xl font-bold">{{ stats?.pending_human ?? 0 }}</span>

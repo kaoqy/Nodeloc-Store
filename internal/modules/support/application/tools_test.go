@@ -19,6 +19,9 @@ type stubRepo struct {
 	perm     []domain.AIToolPermission
 	calls    int
 	feedback []domain.AIFeedback
+	// aiConfig / workflow 让测试能打开 AI 开关，默认空配置表示未启用。
+	aiConfig *domain.AIConfig
+	workflow *domain.AIWorkflowConfig
 }
 
 func (s *stubRepo) GetTool(_ context.Context, key string) (*domain.AIToolDefinition, error) {
@@ -52,10 +55,16 @@ func (s *stubRepo) ListFeedback(context.Context, int) ([]domain.AIFeedback, erro
 func (s *stubRepo) CreateFeedback(context.Context, *domain.AIFeedback) error           { return nil }
 func (s *stubRepo) FeedbackCount(context.Context, uint, int, time.Time) (int64, error) { return 0, nil }
 func (s *stubRepo) GetAIConfig(context.Context) (*domain.AIConfig, error) {
+	if s.aiConfig != nil {
+		return s.aiConfig, nil
+	}
 	return &domain.AIConfig{}, nil
 }
 func (s *stubRepo) SaveAIConfig(context.Context, *domain.AIConfig) error { return nil }
 func (s *stubRepo) GetAIWorkflow(context.Context) (*domain.AIWorkflowConfig, error) {
+	if s.workflow != nil {
+		return s.workflow, nil
+	}
 	return &domain.AIWorkflowConfig{}, nil
 }
 func (s *stubRepo) SaveAIWorkflow(context.Context, *domain.AIWorkflowConfig) error { return nil }

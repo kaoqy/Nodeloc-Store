@@ -25,6 +25,8 @@ export interface ToolCallResult {
   tool_key: string
   tool_name?: string
   status: string
+  /** 需要二次确认时，后端回传的待执行参数，前端原样交回即可。 */
+  params?: Record<string, unknown>
   data?: unknown
   summary?: string
   error?: string
@@ -44,6 +46,7 @@ export interface ChatReply {
   ticket_id?: number
   ticket_no?: string
   knowledge_hits?: { id: number; title: string; summary?: string; content: string }[]
+  suggested_replies?: string[]
   fallback: boolean
 }
 
@@ -60,6 +63,10 @@ export const sendChat = (payload: {
   conversation_id?: number
   ticket_id?: number
   page_context?: string
+  /** 用户确认执行高风险工具时，把工具标识与参数原样交回。 */
+  confirmed?: boolean
+  pending_tool?: string
+  pending_params?: Record<string, unknown>
 }) => client.post<ChatReply>('/support/chat', payload).then((r) => r.data)
 
 export const sendFeedback = (payload: {

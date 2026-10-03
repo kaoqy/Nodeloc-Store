@@ -109,8 +109,11 @@ type ToolCallFilter struct {
 	ToolKey string
 	Status  string
 	UserID  uint
-	Limit   int
-	Offset  int
+	// TicketID 把日志限定在一张工单内。工单详情必须用它过滤，
+	// 否则会把别的工单、别的用户的调用记录一起显示出来。
+	TicketID uint
+	Limit    int
+	Offset   int
 }
 
 // OrderContext 是 AI 查询订单时需要的订单信息。数据由支付模块提供，

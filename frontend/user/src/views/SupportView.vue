@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   createTicket,
+  getSupportConfig,
   getTicket,
   listMyTickets,
   rateTicket,
@@ -50,6 +51,32 @@ const helpSections = [
 
 const openHelp = ref('buy')
 
+// AI 这一单查过什么，用中文说给买家听，工具标识太技术化。
+const TOOL_LABELS: Record<string, string> = {
+  'order.list': '订单列表',
+  'order.detail': '订单详情',
+  'order.payment_status': '支付状态',
+  'order.delivery_status': '发货状态',
+  'product.detail': '商品信息',
+  'product.list': '在售商品',
+  'activity.list': '活动规则',
+  'knowledge.search': '帮助文档',
+  'ticket.list': '我的工单',
+  'refund.list': '可退款订单',
+  'refund.order': '退款处理',
+  'user.profile': '账号资料',
+}
+
+const toolSummary = computed(() => {
+  const seen = new Map<string, { key: string; label: string }>()
+  for (const call of detail.value?.tool_calls ?? []) {
+    if (seen.has(call.tool_key)) continue
+    seen.set(call.tool_key, { key: call.tool_key, label: TOOL_LABELS[call.tool_key] ?? call.tool_name ?? call.tool_key })
+  }
+  return [...seen.values()]
+})
+
+const queueHint = ref('30 分钟')
 const filteredTickets = computed(() =>
   statusFilter.value === 'all' ? tickets.value : tickets.value.filter((item) => item.status === statusFilter.value),
 )
@@ -177,6 +204,11 @@ function openWidget() {
 onMounted(() => {
   if (route.query.tab === 'tickets') tab.value = 'tickets'
   void loadTickets()
+  void getSupportConfig()
+    .then((config) => {
+      if (config.estimate_minutes > 0) queueHint.value = config.estimate_minutes + ' 分钟'
+    })
+    .catch(() => undefined)
   const order = typeof route.query.order === 'string' ? route.query.order : ''
   if (order) {
     showCreate.value = true
@@ -307,8 +339,23 @@ onMounted(() => {
                 <span v-if="detail.ticket.order_no"> · 订单 {{ detail.ticket.order_no }}</span>
               </p>
               <p v-if="detail.ticket.summary" class="quiet text-xs">{{ detail.ticket.summary }}</p>
+              <div v-if="detail.tool_calls?.length" class="flex flex-wrap items-center gap-1.5 text-xs">
+                <span class="quiet">AI 已查询</span>
+                <span v-for="call in toolSummary" :key="call.key" class="badge-info">{{ call.label }}</span>
+              </div>
+              <p v-if="detail.ticket.handler === 'ai'" class="quiet text-xs">
+                现在由智能客服接待，随时可以转人工；人工队列约 {{ queueHint }} 内响应。
+              </p>
               <div class="flex flex-wrap gap-2">
-                <button class="btn btn-secondary btn-sm" @click="askHuman">转人工客服</button>
+                <button
+                  v-if="detail.ticket.handler === 'ai'"
+                  class="btn btn-secondary btn-sm"
+                  :disabled="!detail.ticket.ai_enabled"
+                  @click="askHuman"
+                >
+                  转人工客服
+                </button>
+                <span v-else class="badge-success self-center">已转人工，客服会跟进</span>
                 <button v-if="['resolved','closed'].includes(detail.ticket.status)" class="btn btn-secondary btn-sm" @click="reopen">
                   重新打开
                 </button>

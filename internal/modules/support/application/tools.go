@@ -28,6 +28,8 @@ type ToolSpec struct {
 	OwnDataOnly    bool
 	RequireConfirm bool
 	AllowAuto      bool
+	// DefaultEnabled 表示出厂即启用（默认高风险工具是关闭的）。
+	DefaultEnabled bool
 	RateLimit      int
 	TimeoutMS      int
 	AllowedParams  []string
@@ -214,13 +216,15 @@ func (s *Service) registerBuiltins() {
 	register(&ToolSpec{
 		Key: "refund.list", Name: "查询可退款订单", Category: "refund", RiskLevel: domain.RiskLow,
 		Description:  "列出当前用户自己已支付且尚未退款的订单，用于核对是否可以退。",
-		RequireLogin: true, OwnDataOnly: true, AllowAuto: true, RateLimit: 20,
+		RequireLogin: true, OwnDataOnly: true, AllowAuto: true,
+		DefaultEnabled: true, RateLimit: 20,
 		Handler: s.toolRefundableOrders,
 	})
 	register(&ToolSpec{
 		Key: "refund.order", Name: "发起订单退款", Category: "refund", RiskLevel: domain.RiskHigh,
 		Description:  "对当前用户自己的一张已支付订单发起退款，原路退回其 NodeLoc 账户。高风险写操作，需要用户确认。",
-		RequireLogin: true, OwnDataOnly: true, RequireConfirm: true, AllowAuto: true, RateLimit: 5,
+		RequireLogin: true, OwnDataOnly: true, RequireConfirm: true, AllowAuto: true,
+		DefaultEnabled: true, RateLimit: 5,
 		AllowedParams: []string{"order_no", "reason"}, RequiredParams: []string{"order_no"},
 		ParamTypes: map[string]string{"order_no": "string", "reason": "string"},
 		Handler:    s.toolRefundOrder,
@@ -477,7 +481,8 @@ func (s *Service) toolTicketUpdateStatus(ctx context.Context, access contract.Ac
 	if err != nil {
 		return nil, err
 	}
-	if ticket.UserID != access.UserID && !access.IsStaff {
+	// 只有客服侧能借这个工具改状态：买家自己不能跳过的流转由服务端控制。
+	if !access.IsStaff {
 		return nil, domain.ErrForbidden
 	}
 	if _, err := s.SetTicketStatus(ctx, ticketID, status, access.UserID, "ai", "AI 更新状态"); err != nil {
@@ -768,20 +773,6 @@ func (s *Service) CallTool(ctx context.Context, input domain.ToolCallInput) (*do
 		record(domain.ErrForbidden)
 		return result, domain.ErrForbidden
 	}
-	if !spec.AllowAuto {
-		// 管理员可以在工具页显式放开自动调用；否则必须二次确认。
-		if !stored.AllowAuto {
-			if !input.Confirmed {
-				result.RequireConfirm = true
-				record(domain.ErrToolConfirm)
-				return result, domain.ErrToolConfirm
-			}
-		}
-	} else if stored.RequireConfirm && !input.Confirmed {
-		result.RequireConfirm = true
-		record(domain.ErrToolConfirm)
-		return result, domain.ErrToolConfirm
-	}
 	if ok, err := s.toolAllowedForRole(ctx, stored, input.UserRole); err != nil {
 		record(err)
 		return result, err
@@ -789,6 +780,25 @@ func (s *Service) CallTool(ctx context.Context, input domain.ToolCallInput) (*do
 		record(domain.ErrToolForbidden)
 		return result, domain.ErrToolForbidden
 	}
+
+	// 先把参数校验干净，再谈确认：否则会把一次拼错的调用包装成
+	// 「确认卡片」推到用户面前，用户确认了一个本来就非法的请求。
+	params, err := ValidateParams(spec, input.Params)
+	if err != nil {
+		record(err)
+		return result, err
+	}
+
+	// 两种来源需要二次确认：管理员在工具页勾了「需要确认」，
+	// 或者代码本身不允许自动调用、而管理员也没有显式放开。
+	// 确认后会跳过这一段，并重新走一遍完整校验。
+	if !input.Confirmed && (stored.RequireConfirm || (!spec.AllowAuto && !stored.AllowAuto)) {
+		result.RequireConfirm = true
+		result.Params = input.Params
+		record(domain.ErrToolConfirm)
+		return result, domain.ErrToolConfirm
+	}
+
 	if spec.RateLimit > 0 {
 		since := time.Now().Add(-time.Minute)
 		count, err := s.repo.CountToolCalls(ctx, spec.Key, input.UserID, since)
@@ -800,12 +810,6 @@ func (s *Service) CallTool(ctx context.Context, input domain.ToolCallInput) (*do
 			record(domain.ErrToolRateLimited)
 			return result, domain.ErrToolRateLimited
 		}
-	}
-
-	params, err := ValidateParams(spec, input.Params)
-	if err != nil {
-		record(err)
-		return result, err
 	}
 
 	// 每个工具都有自己的超时，避免一次慢查询拖住整段对话。
@@ -863,11 +867,23 @@ func (s *Service) toolAllowedForRole(ctx context.Context, tool *domain.AIToolDef
 			return permission.Allowed, nil
 		}
 	}
-	// 高风险工具在没有显式授权时默认拒绝。
+	// 自助类工具默认对本人生效：只读写自己的数据，写操作还要前端二次确认。
+	// 管理员若在工具页显式把某个角色关掉，上面的显式记录优先，不会被这里覆盖。
+	if selfServiceTools[tool.Key] && (role == "user" || role == "admin" || role == "super_admin") {
+		return true, nil
+	}
+	// 其余高风险工具在没有显式授权时默认拒绝。
 	if tool.RiskLevel == domain.RiskHigh || tool.RiskLevel == domain.RiskCritical {
 		return false, nil
 	}
 	return true, nil
+}
+
+// selfServiceTools 是默认对买家自己开放的工具集合。
+// 它们共同的特征是「只影响调用者本人」，且写操作需要用户在前端点确认。
+var selfServiceTools = map[string]bool{
+	"refund.list":  true,
+	"refund.order": true,
 }
 
 func isStaffRole(role string) bool {
@@ -897,10 +913,11 @@ var ticketStatusLabels = map[string]string{
 // toContract 把 HTTP 层筛选参数转成仓储层结构。
 func (f ToolCallFilterInput) toContract() contract.ToolCallFilter {
 	return contract.ToolCallFilter{
-		ToolKey: strings.TrimSpace(f.ToolKey),
-		Status:  strings.TrimSpace(f.Status),
-		UserID:  f.UserID,
-		Limit:   f.Limit,
-		Offset:  f.Offset,
+		ToolKey:  strings.TrimSpace(f.ToolKey),
+		Status:   strings.TrimSpace(f.Status),
+		UserID:   f.UserID,
+		TicketID: f.TicketID,
+		Limit:    f.Limit,
+		Offset:   f.Offset,
 	}
 }

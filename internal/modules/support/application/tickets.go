@@ -256,8 +256,10 @@ func (s *Service) CreateTicket(ctx context.Context, input CreateTicketInput) (*d
 		logf("ticket %s: initial log failed: %v", ticket.TicketNo, err)
 	}
 	// AI 默认接待：这里先让 AI 回一次，用户打开工单就能看到处理结果。
+	// AnswerTicket 会读取工单消息并走受控工具循环，能查订单、退款状态等真实数据。
 	if s.aiReady(ctx) {
-		if reply, err := s.AnswerTicket(ctx, ticket, session); err != nil {
+		reply, toolCalls, err := s.AnswerTicket(ctx, ticket, session)
+		if err != nil {
 			logf("ticket %s: ai first answer failed: %v", ticket.TicketNo, err)
 		} else if reply != "" {
 			_ = s.repo.CreateMessage(ctx, &domain.TicketMessage{
@@ -269,6 +271,11 @@ func (s *Service) CreateTicket(ctx context.Context, input CreateTicketInput) (*d
 			if err := s.repo.UpdateTicket(ctx, ticket); err != nil {
 				logf("ticket %s: update status failed: %v", ticket.TicketNo, err)
 			}
+			_ = s.repo.AppendTicketLog(ctx, &domain.TicketLog{
+				TicketID: ticket.ID, ActorType: "ai", Action: "ticket.ai_reply",
+				Detail: truncate(reply, 200), Result: "ok",
+				After: jsonString(map[string]any{"tools": toolCallKeys(toolCalls)}, 2000),
+			})
 		}
 	}
 	s.notify(ctx, "ticket.created", map[string]string{
@@ -318,8 +325,8 @@ func (s *Service) TicketDetail(ctx context.Context, id uint, includeInternal boo
 	if logs, _, err := s.repo.ListTicketLogs(ctx, id, 200, 0); err == nil {
 		detail.Logs = logs
 	}
-	if calls, _, err := s.repo.ListToolCalls(ctx, contract.ToolCallFilter{Limit: 100}); err == nil {
-		// 只保留这张工单的调用记录。
+	// 只取这张工单的调用记录：不带 ticket_id 会把别人的调用一并读出来。
+	if calls, _, err := s.repo.ListToolCalls(ctx, contract.ToolCallFilter{TicketID: id, Limit: 200}); err == nil {
 		detail.ToolCalls = calls
 	}
 	if assignments, err := s.repo.ListAssignments(ctx, id); err == nil {
@@ -684,4 +691,13 @@ func (s *Service) MarkUserRead(ctx context.Context, ticketID uint) error {
 	}
 	ticket.UnreadForUser = false
 	return s.repo.UpdateTicket(ctx, ticket)
+}
+
+// toolCallKeys 只取工具标识，写进工单日志时不必记录完整结果。
+func toolCallKeys(calls []domain.ToolCallResult) []string {
+	keys := make([]string, 0, len(calls))
+	for _, call := range calls {
+		keys = append(keys, call.ToolKey)
+	}
+	return keys
 }

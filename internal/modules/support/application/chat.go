@@ -92,7 +92,34 @@ func (s *Service) Chat(ctx context.Context, input domain.ChatInput) (*domain.Cha
 		return reply, nil
 	}
 
-	// 3) 组装上下文与系统提示。
+	// 3) 用户点了确认卡片：直接执行那次高风险工具，不再让模型重放一遍。
+	if input.Confirmed && strings.TrimSpace(input.PendingToolKey) != "" {
+		result, execErr := s.ExecuteConfirmedTool(ctx, domain.ChatInput{
+			UserID: input.UserID, UserRole: input.UserRole, IP: input.IP,
+			ConversationID: conversation.ID, PendingToolKey: input.PendingToolKey, PendingParams: input.PendingParams,
+		})
+		text := confirmedToolReply(result, execErr)
+		assistant := &domain.AIMessage{ConversationID: conversation.ID, Role: "assistant", Content: text, Status: "ok", Model: "tool"}
+		if err := s.repo.CreateAIMessage(ctx, assistant); err != nil {
+			return nil, err
+		}
+		reply.Content = text
+		reply.MessageID = assistant.ID
+		if result != nil {
+			reply.ToolCalls = []domain.ToolCallResult{*result}
+		}
+		if execErr != nil {
+			reply.Fallback = true
+			reply.SuggestTransfer = true
+		}
+		reply.SuggestedReplies = suggestReplies(content, reply, hits)
+		now := s.now().UTC()
+		conversation.LastMessageAt = &now
+		_ = s.repo.UpdateConversation(ctx, conversation)
+		return reply, nil
+	}
+
+	// 4) 组装上下文与系统提示。
 	history, err := s.repo.ListMessagesByConversation(ctx, conversation.ID, maxInt(config.MaxContext, 12)*2)
 	if err != nil {
 		return nil, err
@@ -127,6 +154,18 @@ func (s *Service) Chat(ctx context.Context, input domain.ChatInput) (*domain.Cha
 		answer = config.FallbackReply
 		reply.Fallback = true
 	}
+	// AI 在这次回答里如果建了工单，把工单号带回给前端，
+	// 买家才能看到「工单已创建」并直接点进去跟进。
+	if call, ok := findToolCall(toolCalls, "ticket.create"); ok {
+		if data, ok := call.Data.(map[string]any); ok {
+			if id, ok := toUint(data["ticket_id"]); ok {
+				reply.TicketID = id
+			}
+			if no, ok := data["ticket_no"].(string); ok {
+				reply.TicketNo = no
+			}
+		}
+	}
 	if config.MaxReplyLen > 0 && len([]rune(answer)) > config.MaxReplyLen {
 		answer = string([]rune(answer)[:config.MaxReplyLen])
 	}
@@ -147,6 +186,9 @@ func (s *Service) Chat(ctx context.Context, input domain.ChatInput) (*domain.Cha
 		})
 	}
 
+	// 工具与知识来源是对买家的透明度：告诉他「我查了这些」，答案才可信。
+	reply.SuggestedReplies = suggestReplies(input.Content, reply, hits)
+
 	// 4) 失败次数累计到阈值就建议转人工。
 	if reply.Fallback {
 		conversation.MessageCount++
@@ -161,6 +203,49 @@ func (s *Service) Chat(ctx context.Context, input domain.ChatInput) (*domain.Cha
 	conversation.LastMessageAt = &now
 	_ = s.repo.UpdateConversation(ctx, conversation)
 	return reply, nil
+}
+
+// suggestReplies 生成几条贴合当前问题的追问，前端渲染成快捷按钮。
+//
+// 它的作用是降低买家的输入成本：常见问题的下一步几乎总是固定的几种，
+// 与其让人重新组织语言，不如直接给按钮。
+func suggestReplies(question string, reply *domain.ChatReply, hits []domain.KnowledgeHit) []string {
+	lower := strings.ToLower(question)
+	out := make([]string, 0, 4)
+
+	switch {
+	case reply != nil && reply.Fallback:
+		out = append(out, "转人工客服")
+	case containsAny(lower, []string{"订单", "发货", "卡密", "order"}):
+		out = append(out, "我的订单现在是什么状态", "卡密在哪里查看")
+	case containsAny(lower, []string{"退款", "退钱", "refund"}):
+		out = append(out, "哪些订单可以退款", "退款多久到账")
+	case containsAny(lower, []string{"支付", "付款", "扣款", "pay"}):
+		out = append(out, "我付了款但订单还是待支付", "付款支持哪些方式")
+	case containsAny(lower, []string{"活动", "优惠", "折扣", "activity"}):
+		out = append(out, "现在有什么活动", "优惠码怎么使用")
+	}
+
+	if len(hits) > 0 {
+		out = append(out, "还有别的说明吗")
+	}
+	if reply != nil && reply.SuggestTransfer {
+		out = append(out, "转人工客服")
+	}
+	// 去重并限制数量，太长的按钮列表反而没人点。
+	seen := map[string]bool{}
+	unique := out[:0]
+	for _, item := range out {
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		unique = append(unique, item)
+		if len(unique) >= 3 {
+			break
+		}
+	}
+	return unique
 }
 
 // ensureConversation 复用进行中的会话，没有就新建一场。
@@ -428,58 +513,113 @@ func (s *Service) History(ctx context.Context, conversationID, userID uint) ([]d
 	return s.repo.ListMessagesByConversation(ctx, conversationID, 100)
 }
 
-// AnswerTicket 是工单内 AI 的自动应答：读工单消息与知识库，给出一条回复。
-func (s *Service) AnswerTicket(ctx context.Context, ticket *domain.Ticket, session *domain.TicketAISession) (string, error) {
+// AnswerTicket 是工单内 AI 的自动应答。返回字符串与工具调用明细，
+// 调用方可以据此把「这轮查了什么/做了什么」写进工单消息流。
+func (s *Service) AnswerTicket(ctx context.Context, ticket *domain.Ticket, session *domain.TicketAISession) (string, []domain.ToolCallResult, error) {
 	config, err := s.Config(ctx)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	if !config.IsEnabled {
-		return "", nil
+	// AI 关闭或未配置时不产出回复，工单留在原状态等人工。
+	if !config.IsEnabled || s.model == nil {
+		return "", nil, nil
 	}
-	messages, _, err := s.repo.ListMessages(ctx, ticket.ID, false, 20, 0)
+	messages, _, err := s.repo.ListMessages(ctx, ticket.ID, false, 60, 0)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	question := ticket.Subject
+
+	// 把工单消息流翻译成模型对话。用户与 AI 发言都保留；
+	// 人工客服的回复不进模型上下文，避免 AI 把自己的规则建立在同事的话上。
 	transcript := make([]contract.ModelMessage, 0, len(messages))
+	question := strings.TrimSpace(ticket.Subject)
 	for _, message := range messages {
+		content := strings.TrimSpace(message.Content)
+		if content == "" {
+			continue
+		}
 		switch message.SenderType {
 		case domain.SenderUser:
-			transcript = append(transcript, contract.ModelMessage{Role: "user", Content: truncate(message.Content, 800)})
-			question = message.Content
-		case domain.SenderAI, domain.SenderAgent:
-			transcript = append(transcript, contract.ModelMessage{Role: "assistant", Content: truncate(message.Content, 800)})
+			transcript = append(transcript, contract.ModelMessage{Role: "user", Content: truncate(content, 1500)})
+			question = content
+		case domain.SenderAI:
+			transcript = append(transcript, contract.ModelMessage{Role: "assistant", Content: truncate(content, 1500)})
 		}
 	}
+	// 只有一条 AI 招呼语时，问题仍应是用户的原始描述。
 	if question == "" {
 		question = ticket.Subject
 	}
+
 	hits, _ := s.repo.SearchKnowledge(ctx, question, 4)
 	systemPrompt := s.buildSystemPrompt(ctx, config, hits, domain.ChatInput{
-		UserID: ticket.UserID, Channel: domain.ChannelTicket, TicketID: ticket.ID,
+		UserID: ticket.UserID, UserRole: "user", Channel: domain.ChannelTicket, TicketID: ticket.ID,
 	})
+	systemPrompt += "\n【当前场景】这是买家提交的工单，你正在工单里接待。需要核对订单时调用 order.detail 等工具；" +
+		"符合退款规则时按配置处理。涉及争议或没有把握时，在回复里提示买家可以点「转人工客服」。\n"
 	if ticket.OrderNo != "" {
-		systemPrompt += fmt.Sprintf("\n这笔工单关联订单 %s，用户已确认订单号。\n", ticket.OrderNo)
+		systemPrompt += "这笔工单关联订单 " + ticket.OrderNo + "，买家已确认订单号，可以直接用它查询。\n"
 	}
-	reply, err := s.model.Complete(ctx, config, contract.ModelRequest{
-		SystemPrompt: systemPrompt, Messages: transcript,
-		MaxTokens:   maxInt(config.MaxReplyLen, 2000) / 2,
-		Temperature: config.Temperature, TopP: config.TopP, TimeoutMS: config.TimeoutMS,
-	})
+
+	// 工单内没有确认按钮，需要二次确认的工具按「不可自动执行」处理，
+	// 由 AI 如实说明并引导买家在网页客服窗口完成确认。
+	answer, toolCalls, err := s.runToolLoopWith(
+		ctx, config, systemPrompt, transcript,
+		domain.ChatInput{UserID: ticket.UserID, UserRole: "user", Channel: domain.ChannelTicket, TicketID: ticket.ID},
+		0, false,
+	)
 	if err != nil {
-		return fallbackFromKnowledge(config, hits), nil
+		return fallbackFromKnowledge(config, hits), toolCalls, nil
 	}
-	answer := strings.TrimSpace(reply.Content)
+	answer = strings.TrimSpace(answer)
 	if answer == "" {
 		answer = fallbackFromKnowledge(config, hits)
+	}
+	if config.MaxReplyLen > 0 && len([]rune(answer)) > config.MaxReplyLen {
+		answer = string([]rune(answer)[:config.MaxReplyLen])
 	}
 	if session != nil {
 		session.TurnCount++
 		now := s.now().UTC()
 		session.LastActiveAt = &now
 	}
-	return answer, nil
+	return answer, toolCalls, nil
+}
+
+// ExecuteConfirmedTool 执行用户在前端确认过的高风险工具。
+//
+// 模型自己不能单方面触发这类操作：它只能产生「需要确认」的卡片，
+// 用户点了确认后前端把工具标识与参数原样交回来，这里再走一次完整的权限校验。
+func (s *Service) ExecuteConfirmedTool(ctx context.Context, input domain.ChatInput) (*domain.ToolCallResult, error) {
+	key := strings.TrimSpace(input.PendingToolKey)
+	if key == "" {
+		return nil, fmt.Errorf("%w: 缺少要确认的工具。", domain.ErrInvalidInput)
+	}
+	spec, ok := s.tools.Lookup(key)
+	if !ok {
+		return nil, domain.ErrToolNotFound
+	}
+	result, err := s.CallTool(ctx, domain.ToolCallInput{
+		ToolKey: key, UserID: input.UserID, UserRole: input.UserRole,
+		Params: input.PendingParams, Confirmed: true, IP: input.IP,
+	})
+	if err != nil {
+		return result, err
+	}
+	// 说明这次是用户本人确认执行的，写一条消息留痕。
+	// 会话必须属于调用者，否则不写：不能借确认接口往别人的会话里塞消息。
+	if input.ConversationID > 0 {
+		if conversation, err := s.repo.GetConversation(ctx, input.ConversationID); err == nil && conversation != nil {
+			if conversation.UserID == nil || *conversation.UserID != input.UserID {
+				return result, domain.ErrForbidden
+			}
+			_ = s.repo.CreateAIMessage(ctx, &domain.AIMessage{
+				ConversationID: input.ConversationID, Role: "system",
+				Content: "用户已确认执行工具 " + spec.Name + "。", Status: "ok",
+			})
+		}
+	}
+	return result, nil
 }
 
 func maxInt(value, fallback int) int {
@@ -527,7 +667,7 @@ func (s *Service) HandleTicketMessage(ctx context.Context, ticketID, userID uint
 	if !s.aiReady(ctx) {
 		return message, false, nil
 	}
-	reply, err := s.AnswerTicket(ctx, ticket, nil)
+	reply, toolCalls, err := s.AnswerTicket(ctx, ticket, nil)
 	if err != nil {
 		logf("ticket %s: ai answer failed: %v", ticket.TicketNo, err)
 		return message, false, nil
@@ -540,6 +680,11 @@ func (s *Service) HandleTicketMessage(ctx context.Context, ticketID, userID uint
 	}
 	ticket.Status = models.TicketStatusWaitingUser
 	_ = s.repo.UpdateTicket(ctx, ticket)
+	_ = s.repo.AppendTicketLog(ctx, &domain.TicketLog{
+		TicketID: ticketID, ActorType: "ai", Action: "ticket.ai_reply",
+		Detail: truncate(reply, 200), Result: "ok",
+		After: jsonString(map[string]any{"tools": toolCallKeys(toolCalls)}, 2000),
+	})
 	return message, false, nil
 }
 
@@ -555,3 +700,56 @@ func (s *Service) SummaryForTicket(ctx context.Context, ticketID uint) (string, 
 
 // Errors 相关辅助，避免调用方直接依赖内部字符串。
 func IsAIDisabled(err error) bool { return errors.Is(err, domain.ErrAIDisabled) }
+
+// confirmedToolReply 把一次用户确认过的工具执行结果翻成给买家看的话。
+func confirmedToolReply(result *domain.ToolCallResult, err error) string {
+	if err != nil {
+		if errors.Is(err, domain.ErrToolForbidden) {
+			return "这次操作当前没有权限，已经记录下来了。需要的话可以点「转人工客服」由同事处理。"
+		}
+		return "操作没有完成：" + toolFailureText(err) + "。你可以点「转人工客服」让同事进一步核实。"
+	}
+	if result == nil {
+		return "操作已提交。"
+	}
+	switch result.ToolKey {
+	case "refund.order":
+		return "退款已提交并按原路退回你的 NodeLoc 账户，到账前订单状态会保持更新，你可以在「我的订单」里查看。"
+	case "ticket.add_message":
+		return "消息已经追加到你的工单里了。"
+	case "notification.send":
+		return "通知已经发送。"
+	}
+	return "「" + nonEmpty(result.ToolName, result.ToolKey) + "」已执行完成。"
+}
+
+// findToolCall 在工具调用结果里找到某个工具的返回。
+func findToolCall(calls []domain.ToolCallResult, key string) (domain.ToolCallResult, bool) {
+	for _, call := range calls {
+		if call.ToolKey == key && call.Status == "ok" {
+			return call, true
+		}
+	}
+	return domain.ToolCallResult{}, false
+}
+
+// toUint 把工具返回里的数字安全地转成编号。
+func toUint(value any) (uint, bool) {
+	switch typed := value.(type) {
+	case uint:
+		return typed, true
+	case int:
+		if typed > 0 {
+			return uint(typed), true
+		}
+	case int64:
+		if typed > 0 {
+			return uint(typed), true
+		}
+	case float64:
+		if typed > 0 {
+			return uint(typed), true
+		}
+	}
+	return 0, false
+}

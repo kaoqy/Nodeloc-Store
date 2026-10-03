@@ -37,15 +37,25 @@ func (s *Service) SyncToolDefinitions(ctx context.Context) error {
 				IsEnabled: true, RateLimit: spec.RateLimit,
 				TimeoutMS: timeoutOrDefault(spec.TimeoutMS), FailureMode: "reply",
 				RiskLevel: riskOrDefault(spec.RiskLevel), Builtin: true, SortOrder: i,
+				EnabledByDefault: spec.DefaultEnabled,
 			}
-			// 高风险工具默认关闭，必须管理员显式放开。
-			if record.RiskLevel == domain.RiskHigh || record.RiskLevel == domain.RiskCritical {
+			// 高风险工具默认关闭，必须管理员显式放开；自助退款是明确的例外。
+			if !spec.DefaultEnabled && (record.RiskLevel == domain.RiskHigh || record.RiskLevel == domain.RiskCritical) {
 				record.IsEnabled = false
 			}
 			if err := s.repo.SaveTool(ctx, &record); err != nil {
 				return err
 			}
 			continue
+		}
+		// 老库升级：之前被默认关掉、现在定义了 DefaultEnabled 的工具自动放开一次，
+		// 之后管理员手动关掉的状态不会被覆盖。
+		if spec.DefaultEnabled && !record.EnabledByDefault {
+			record.EnabledByDefault = true
+			record.IsEnabled = true
+			if err := s.repo.SaveTool(ctx, &record); err != nil {
+				return err
+			}
 		}
 		// 只同步展示字段，不动管理员配置的开关与限频。
 		changed := false
@@ -104,7 +114,12 @@ func (s *Service) ToolList(ctx context.Context) ([]map[string]any, error) {
 	}
 	out := make([]map[string]any, 0, len(tools))
 	for _, tool := range tools {
-		out = append(out, map[string]any{"tool": tool, "permissions": byTool[tool.ID]})
+		// permissions 永远给数组：前端会直接 .find()，返回 null 会让整页崩掉。
+		permissions := byTool[tool.ID]
+		if permissions == nil {
+			permissions = []domain.AIToolPermission{}
+		}
+		out = append(out, map[string]any{"tool": tool, "permissions": permissions})
 	}
 	return out, nil
 }
@@ -179,11 +194,12 @@ func (s *Service) ToolCalls(ctx context.Context, filter ToolCallFilterInput) ([]
 
 // ToolCallFilterInput 是 HTTP 层的筛选参数。
 type ToolCallFilterInput struct {
-	ToolKey string
-	Status  string
-	UserID  uint
-	Limit   int
-	Offset  int
+	ToolKey  string
+	Status   string
+	UserID   uint
+	TicketID uint
+	Limit    int
+	Offset   int
 }
 
 // ── 知识库 ───────────────────────────────────────────────────────────

@@ -190,6 +190,10 @@ type chatRequest struct {
 	ConversationID uint   `json:"conversation_id"`
 	TicketID       uint   `json:"ticket_id"`
 	PageContext    string `json:"page_context"`
+	// 用户点了确认卡片后，把待执行的工具与参数原样交回来。
+	Confirmed     bool           `json:"confirmed"`
+	PendingTool   string         `json:"pending_tool"`
+	PendingParams map[string]any `json:"pending_params"`
 }
 
 func (h *Handler) chat(c *gin.Context) {
@@ -207,6 +211,7 @@ func (h *Handler) chat(c *gin.Context) {
 		UserID: userID, UserRole: contextRole(c), Channel: domain.ChannelWidget,
 		PageContext: request.PageContext, Content: request.Content,
 		TicketID: request.TicketID, IP: c.ClientIP(), UserAgent: c.Request.UserAgent(),
+		Confirmed: request.Confirmed, PendingToolKey: request.PendingTool, PendingParams: request.PendingParams,
 	})
 	if err != nil {
 		respondError(c, err)

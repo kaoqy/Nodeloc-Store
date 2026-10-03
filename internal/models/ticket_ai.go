@@ -224,6 +224,9 @@ type AIToolDefinition struct {
 	AllowAuto       bool `gorm:"default:true;not null" json:"allow_auto"`
 	RequireConfirm  bool `gorm:"default:false;not null" json:"require_confirm"`
 	IsEnabled       bool `gorm:"default:true;not null;index" json:"is_enabled"`
+	// EnabledByDefault 记录「这个工具出厂就该启用」。升级时用它做一次性放开，
+	// 之后管理员手动关掉的开关不会被再次打开。
+	EnabledByDefault bool `gorm:"default:false;not null" json:"enabled_by_default"`
 
 	RateLimit   int    `gorm:"default:30;not null" json:"rate_limit"`
 	TimeoutMS   int    `gorm:"default:8000;not null" json:"timeout_ms"`
