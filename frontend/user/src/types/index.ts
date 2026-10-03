@@ -65,6 +65,12 @@ export interface Product {
   is_featured?: boolean
   auto_deliver: boolean
   is_published: boolean
+  /** 活动后的应付价；没有可用活动时不返回。 */
+  activity_price?: number
+  /** 命中的活动名，用于商品页的活动标签。 */
+  activity_name?: string
+  /** 相对原价省下多少。 */
+  activity_saving?: number
   sort_order?: number
   category_id?: number | null
   category?: Category | null

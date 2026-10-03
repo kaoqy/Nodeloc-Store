@@ -86,6 +86,8 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	toolsIndex.GET("", guard("ai_tools", "view"), h.listTools)
 	toolsIndex.GET("/calls", guard("ai_tools", "view"), h.toolCalls)
 	toolsIndex.GET("/roles", guard("ai_tools", "view"), h.toolRoles)
+	// AI 实际收到的工具清单（按角色可用的那部分），用于后台核对「它能调用什么」。
+	toolsIndex.GET("/catalogue", guard("ai_tools", "view"), h.toolCatalogue)
 
 	// ── 后台：知识库 ──
 	kb := router.Group("/api/v1/admin/knowledge", middleware.JWTMiddleware(jwtConfig))
@@ -719,21 +721,33 @@ func (h *Handler) getConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, payload)
 }
 
+// aiConfigRequest 是 AI 配置的请求体。
+//
+// 这里必须把 API Key 显式列出来：AIConfig.APIKeyEnc 的标签是 json:"-",
+// 目的是不让它出现在任何响应里；但用它直接绑定请求体，前端提交的 api_key
+// 会被静默丢弃，于是密钥永远存不进去、启用时又报「请先配置 API Key」——
+// 这正是「AI 客服无法保存」的原因。
+type aiConfigRequest struct {
+	domain.AIConfig
+	// APIKey 只在写入时使用：留空表示保持原值，__clear__ 表示清除。
+	APIKey string `json:"api_key"`
+}
+
 func (h *Handler) saveConfig(c *gin.Context) {
-	var request domain.AIConfig
+	var request aiConfigRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		respondError(c, fmt.Errorf("%w: 配置内容无法解析。", domain.ErrInvalidInput))
 		return
 	}
-	key := request.APIKeyEnc
-	request.APIKeyEnc = strings.TrimSpace(key)
-	config, err := h.service.SaveConfig(c.Request.Context(), request)
+	config := request.AIConfig
+	config.APIKeyEnc = strings.TrimSpace(request.APIKey)
+	saved, err := h.service.SaveConfig(c.Request.Context(), config)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
 	c.Set(middleware.AuditDetailKey, "更新 AI 客服配置")
-	c.JSON(http.StatusOK, gin.H{"config": config, "has_key": config != nil && config.APIKeyEnc == "__saved__"})
+	c.JSON(http.StatusOK, gin.H{"config": saved, "has_key": saved != nil && saved.APIKeyEnc == "__saved__"})
 }
 
 func (h *Handler) saveWorkflow(c *gin.Context) {
@@ -837,6 +851,19 @@ func (h *Handler) toolCalls(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": calls, "total": total})
+}
+
+func (h *Handler) toolCatalogue(c *gin.Context) {
+	role := strings.TrimSpace(c.Query("role"))
+	if role == "" {
+		role = "user"
+	}
+	items, err := h.service.ToolCatalogue(c.Request.Context(), role)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"role": role, "data": items})
 }
 
 func (h *Handler) toolRoles(c *gin.Context) {

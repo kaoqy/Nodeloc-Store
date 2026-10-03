@@ -46,11 +46,24 @@ const imageFailed = ref(false)
       </p>
 
       <div class="mt-auto flex items-end justify-between gap-3 pt-4">
-        <div class="flex items-baseline gap-2">
-          <span class="nums text-lg font-bold accent-text">{{ money(product.price) }}</span>
-          <span v-if="product.original_price && product.original_price > product.price" class="nums text-xs text-[var(--text-quiet)] line-through">
+        <div class="flex flex-wrap items-baseline gap-2">
+          <!-- 有活动时显示活动价，原价划线；没有活动就显示正常售价。 -->
+          <span class="nums text-lg font-bold accent-text">
+            {{ money(product.activity_price || product.price) }}
+          </span>
+          <span
+            v-if="product.activity_saving && product.activity_saving > 0"
+            class="nums text-xs text-[var(--text-quiet)] line-through"
+          >
+            {{ money(product.price) }}
+          </span>
+          <span
+            v-else-if="product.original_price && product.original_price > product.price"
+            class="nums text-xs text-[var(--text-quiet)] line-through"
+          >
             {{ money(product.original_price) }}
           </span>
+          <span v-if="product.activity_name" class="badge-warning">{{ product.activity_name }}</span>
         </div>
         <span class="badge" :class="product.product_type === 'card' ? 'badge-teal' : 'badge-accent'">
           {{ product.product_type === 'card' ? '自动发货' : '人工交付' }}

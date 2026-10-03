@@ -417,6 +417,19 @@ export const listAIToolCalls = (params: { tool?: string; status?: string; limit?
     .get<{ data: AIToolCall[]; total: number }>('/admin/ai-tool-index/calls', { params })
     .then((r) => ({ data: r.data.data ?? [], total: r.data.total ?? 0 }))
 
+// AI 实际可调用的工具清单（按角色过滤后），用于后台核对权限与提示词。
+export interface AIToolSummary {
+  key: string
+  name: string
+  description: string
+  params?: string[]
+}
+
+export const listAIToolCatalogue = (role = 'user') =>
+  client
+    .get<{ role: string; data: AIToolSummary[] }>('/admin/ai-tool-index/catalogue', { params: { role } })
+    .then((r) => r.data.data ?? [])
+
 export const listAIRoles = () =>
   client.get<{ data: string[] }>('/admin/ai-tool-index/roles').then((r) => r.data.data ?? [])
 

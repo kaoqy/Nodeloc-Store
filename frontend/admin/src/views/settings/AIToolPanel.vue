@@ -4,6 +4,8 @@ import {
   listAITools,
   listAIToolCalls,
   listAIRoles,
+  listAIToolCatalogue,
+  type AIToolSummary,
   saveAITool,
   setAIToolPermission,
   type AIToolCall,
@@ -22,6 +24,9 @@ const notice = ref('')
 const tab = ref<'tools' | 'calls'>('tools')
 const rows = ref<AIToolRow[]>([])
 const roles = ref<string[]>([])
+// AI 真正拿到的工具清单：与写进系统提示词的内容一致，店家在这里核对即可。
+const catalogue = ref<AIToolSummary[]>([])
+const catalogueRole = ref('user')
 const calls = ref<AIToolCall[]>([])
 const callTotal = ref(0)
 const callFilter = ref({ tool: '', status: '' })
@@ -64,12 +69,17 @@ async function load() {
     const [toolList, roleList] = await Promise.all([listAITools(), listAIRoles()])
     rows.value = toolList
     roles.value = roleList
-    await loadCalls()
+    await Promise.all([loadCalls(), loadCatalogue()])
   } catch (err) {
     error.value = errorMessage(err, '加载 AI 工具失败')
   } finally {
     loading.value = false
   }
+}
+
+// loadCatalogue 取「这个角色下 AI 能用哪些工具」，与提示词同源。
+async function loadCatalogue() {
+  catalogue.value = await listAIToolCatalogue(catalogueRole.value).catch(() => [])
 }
 
 async function loadCalls() {
@@ -154,6 +164,33 @@ onMounted(load)
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
     <p v-if="!canManage" class="alert" role="status">当前角色只能查看工具配置，修改需要「AI 工具」管理权限。</p>
+
+    <div class="card space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p class="eyebrow">AI 可调用的工具</p>
+          <p class="quiet mt-1 text-xs">
+            这里列出的工具会被写进 AI 的系统提示词。AI 只能调用这份清单，执行时还会再校验一次权限。
+          </p>
+        </div>
+        <select v-model="catalogueRole" class="input !w-auto" aria-label="按角色查看" @change="loadCatalogue">
+          <option v-for="role in roles" :key="role" :value="role">{{ roleLabel[role] || role }}</option>
+        </select>
+      </div>
+      <div v-if="!catalogue.length" class="card-quiet py-6 text-center text-sm text-[var(--text-quiet)]">
+        这个角色当前没有可用工具。检查上面的开关与授权。
+      </div>
+      <ul v-else class="grid gap-2 sm:grid-cols-2">
+        <li v-for="tool in catalogue" :key="tool.key" class="card-quiet">
+          <p class="text-[13px] font-semibold">{{ tool.name }}</p>
+          <p class="mono quiet text-[11px]">{{ tool.key }}</p>
+          <p class="quiet mt-1 text-xs">{{ tool.description }}</p>
+          <p v-if="tool.params?.length" class="mono mt-1 text-[11px] text-[var(--text-quiet)]">
+            参数：{{ tool.params.join('、') }}
+          </p>
+        </li>
+      </ul>
+    </div>
 
     <div v-if="loading" class="card space-y-3">
       <div v-for="i in 6" :key="i" class="skeleton h-10 w-full" />

@@ -66,7 +66,11 @@ const buyLabel = computed(() => {
   // 上一单还没付掉时，这颗按钮做的是把那一份重发，不是再开一张新单，标签要说实话。
   return unpaidOrderNo.value ? '继续未支付的这一单' : '立即购买'
 })
-const gross = computed(() => (product.value?.price ?? 0) * quantity.value)
+// 活动价是商品级的基础价：服务端在商品接口里算好活动后的单价，
+// 优惠码再叠加在这之上。没有活动时 activity_price 为空，退回正常售价。
+const unitPrice = computed(() => product.value?.activity_price || product.value?.price || 0)
+const activitySaving = computed(() => Number(product.value?.activity_saving || 0))
+const gross = computed(() => unitPrice.value * quantity.value)
 /** What NodeLoc is asked to collect: the quoted discount is already off it. */
 const payable = computed(() => (quote.value?.accepted ? quote.value.payable : gross.value))
 const discount = computed(() => (quote.value?.accepted ? quote.value.discount : 0))
@@ -418,9 +422,14 @@ watch(
       <aside class="card lg:sticky lg:top-24">
         <div class="flex items-baseline justify-between gap-3">
           <span class="label !mb-0">单价</span>
-          <span class="nums text-2xl font-bold">{{ money(product.price) }}</span>
+          <span class="nums text-2xl font-bold">{{ money(unitPrice) }}</span>
         </div>
-        <p v-if="product.original_price && product.original_price > product.price" class="mt-1 text-right">
+        <p v-if="activitySaving > 0" class="mt-1 flex flex-wrap items-center justify-end gap-2">
+          <span class="nums hint line-through">{{ money(product.price) }}</span>
+          <span class="badge-warning">{{ product.activity_name || '活动价' }}</span>
+          <span class="hint">已省 {{ money(activitySaving) }}</span>
+        </p>
+        <p v-else-if="product.original_price && product.original_price > product.price" class="mt-1 text-right">
           <span class="nums hint line-through">{{ money(product.original_price) }}</span>
         </p>
 

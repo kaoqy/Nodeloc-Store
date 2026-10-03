@@ -17,6 +17,7 @@ import (
 
 	middleware "github.com/kaoqy/Nodeloc-Store/internal/app/httpserver"
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
+	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/application"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/domain"
 )
@@ -29,6 +30,8 @@ type Handler struct {
 	restockWarner restockWarner
 	// storefrontFlags carries 配置中心 的前台展示开关到公开接口。
 	storefrontFlags StorefrontFlags
+	// activityPricer 让商品页显示活动后的价格。
+	activityPricer ActivityPricer
 }
 
 // restockWarner is the shape that sweep needs, declared here rather than
@@ -41,6 +44,19 @@ type restockWarner interface {
 // calls it while wiring, and a catalogue without one answers 503 instead of
 // pretending a warning went out.
 func (h *Handler) SetRestockWarner(warner restockWarner) { h.restockWarner = warner }
+
+// ActivityPricer 给前台商品接口补上「这件商品现在能减多少」。
+//
+// 目录模块不认识活动模块，所以由容器注入这个只读函数；实现方返回 nil 表示
+// 这件商品当前没有可用活动。买家因此能在商品页看到活动价，而不是等到付款页。
+type ActivityPricer interface {
+	// PriceFor 计算一件商品在当前用户视角下的活动价。
+	// unitPrice 必须传：活动规则按「单价 × 数量」计算，缺了它一律算不出折扣。
+	PriceFor(ctx context.Context, userID, productID uint, quantity, unitPrice int) (discount int, activityName string, originalPrice int)
+}
+
+// SetActivityPricer attaches the activity pricing read for storefront display.
+func (h *Handler) SetActivityPricer(pricer ActivityPricer) { h.activityPricer = pricer }
 
 // StorefrontFlags 是配置中心里影响前台展示的几个开关。catalogue 不认识
 // 配置中心，所以由容器注入这个只读函数，nil 时使用保守默认值。
@@ -58,8 +74,9 @@ func NewHandler(service *application.Service) *Handler {
 // work the catalogue without ever reaching 设置 or 角色权限.
 func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
 	store := router.Group("/api/v1/store")
-	store.GET("/products", h.listPublicProducts)
-	store.GET("/products/:slug", h.getPublicProduct)
+	// 可选登录：访客也能看商品，已登录买家则能拿到「按自己账号计算」的活动价。
+	store.GET("/products", middleware.OptionalJWTMiddleware(jwtConfig), h.listPublicProducts)
+	store.GET("/products/:slug", middleware.OptionalJWTMiddleware(jwtConfig), h.getPublicProduct)
 	store.GET("/categories", h.listPublicCategories)
 	store.GET("/stats", h.storeStats)
 	// The promo shelf is public on purpose: a shop that advertises a code wants
@@ -152,11 +169,46 @@ func (h *Handler) listPublicProducts(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	rows := make([]storefrontProduct, 0, len(products))
+	for _, product := range products {
+		rows = append(rows, h.decorateProduct(c.Request.Context(), contextUserID(c), product))
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"data":  products,
+		"data":  rows,
 		"total": total,
-		"limit": len(products),
+		"limit": len(rows),
 	})
+}
+
+// storefrontProduct 是商品本身加上活动价。OriginalPrice 保留原值，
+// ActivityPrice 是活动后的应付价；没有活动时 ActivityPrice 为 0，
+// 前端据此决定是否显示划线价与活动标签。
+type storefrontProduct struct {
+	models.Product
+	ActivityPrice  int    `json:"activity_price,omitempty"`
+	ActivityName   string `json:"activity_name,omitempty"`
+	ActivitySaving int    `json:"activity_saving,omitempty"`
+}
+
+// decorateProduct 给一件商品补上当前用户视角的活动价。
+// userID 为 0 表示访客：只有不需要登录的活动会命中。
+func (h *Handler) decorateProduct(ctx context.Context, userID uint, product models.Product) storefrontProduct {
+	out := storefrontProduct{Product: product}
+	if h.activityPricer == nil || product.Price <= 1 {
+		return out
+	}
+	discount, name, original := h.activityPricer.PriceFor(ctx, userID, product.ID, 1, product.Price)
+	if discount <= 0 || original <= 0 {
+		return out
+	}
+	payable := original - discount
+	if payable < 1 {
+		payable = 1
+	}
+	out.ActivityPrice = payable
+	out.ActivityName = name
+	out.ActivitySaving = discount
+	return out
 }
 
 func (h *Handler) storeStats(c *gin.Context) {
@@ -264,7 +316,7 @@ func (h *Handler) getPublicProduct(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": product})
+	c.JSON(http.StatusOK, gin.H{"data": h.decorateProduct(c.Request.Context(), contextUserID(c), *product)})
 }
 
 func (h *Handler) listPublicCategories(c *gin.Context) {

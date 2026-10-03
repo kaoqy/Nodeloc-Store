@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	activityapplication "github.com/kaoqy/Nodeloc-Store/internal/modules/activity/application"
 	paymentapplication "github.com/kaoqy/Nodeloc-Store/internal/modules/payment/application"
 	supportcontract "github.com/kaoqy/Nodeloc-Store/internal/modules/support/contract"
 
@@ -188,6 +189,9 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 	// The back office can also ask for one pass instead of waiting for the
 	// background sweep, so the catalogue's route needs the same watcher.
 	catalogMod.Handler.SetRestockWarner(stockWatch)
+	// 商品页显示活动价：走活动模块的只读计价，失败时按「无活动」处理，
+	// 商品列表不会因为活动模块的问题而打不开。
+	catalogMod.Handler.SetActivityPricer(activityPricerBridge{activity: activityMod.Service})
 	// 前台展示开关读配置中心：销量是否展示、库存预警阈值都由店家决定。
 	catalogMod.Handler.SetStorefrontFlags(func(ctx context.Context) map[string]bool {
 		return map[string]bool{
@@ -245,6 +249,22 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		Support:      supportMod,
 		Stock:        stockWatch,
 	}, nil
+}
+
+// activityPricerBridge 把活动计价接到商品接口上。只读，失败返回 0（表示无活动）。
+type activityPricerBridge struct {
+	activity *activityapplication.Service
+}
+
+func (b activityPricerBridge) PriceFor(ctx context.Context, userID, productID uint, quantity, unitPrice int) (int, string, int) {
+	priced, err := b.activity.Price(ctx, models.ActivityMatchInput{
+		UserID: userID, ProductID: productID, Quantity: quantity, UnitPrice: unitPrice,
+	})
+	if err != nil || priced == nil {
+		// 没有活动命中是正常情况，不是故障；商品页照常显示原价。
+		return 0, "", 0
+	}
+	return priced.DiscountAmount, priced.ActivityName, priced.Payable + priced.DiscountAmount
 }
 
 // refundBridge 把支付模块的退款能力接到 AI 客服上。
