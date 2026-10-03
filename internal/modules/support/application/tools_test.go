@@ -20,8 +20,9 @@ type stubRepo struct {
 	calls    int
 	feedback []domain.AIFeedback
 	// aiConfig / workflow 让测试能打开 AI 开关，默认空配置表示未启用。
-	aiConfig *domain.AIConfig
-	workflow *domain.AIWorkflowConfig
+	aiConfig  *domain.AIConfig
+	workflow  *domain.AIWorkflowConfig
+	templates []domain.NotificationTemplate
 }
 
 func (s *stubRepo) GetTool(_ context.Context, key string) (*domain.AIToolDefinition, error) {
@@ -171,7 +172,7 @@ func (s *stubRepo) ListNotificationLogs(context.Context, string, int, int) ([]do
 	return nil, 0, nil
 }
 func (s *stubRepo) ListNotificationTemplates(context.Context, string) ([]domain.NotificationTemplate, error) {
-	return nil, nil
+	return s.templates, nil
 }
 func (s *stubRepo) SaveNotificationTemplate(context.Context, *domain.NotificationTemplate) error {
 	return nil

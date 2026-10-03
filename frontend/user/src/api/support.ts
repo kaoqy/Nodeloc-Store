@@ -1,82 +1,9 @@
 import client from './client'
 
-// ── AI 客服 ──────────────────────────────────────────────────────────
+// ── 客服入口 ────────────────────────────────────────────────
 
-export interface SupportConfig {
-  enabled: boolean
-  agent_name: string
-  avatar?: string
-  greeting?: string
-  guest_allowed: boolean
-  rating_enabled: boolean
-  working_hours?: string
-  estimate_minutes: number
-}
-
-export interface QuickQuestion {
-  id: number
-  title: string
-  content?: string
-  position: string
-  require_login: boolean
-}
-
-export interface ToolCallResult {
-  tool_key: string
-  tool_name?: string
-  status: string
-  /** 需要二次确认时，后端回传的待执行参数，前端原样交回即可。 */
-  params?: Record<string, unknown>
-  data?: unknown
-  summary?: string
-  error?: string
-  duration_ms: number
-  require_confirm: boolean
-  risk_level: string
-}
-
-export interface ChatReply {
-  conversation_id: number
-  message_id: number
-  content: string
-  tool_calls?: ToolCallResult[]
-  suggest_transfer: boolean
-  suggest_ticket: boolean
-  need_confirm?: ToolCallResult
-  ticket_id?: number
-  ticket_no?: string
-  knowledge_hits?: { id: number; title: string; summary?: string; content: string }[]
-  suggested_replies?: string[]
-  fallback: boolean
-}
-
-export const getSupportConfig = () =>
-  client.get<SupportConfig>('/support/config').then((r) => r.data)
-
-export const getQuickQuestions = (position = 'widget') =>
-  client
-    .get<{ data: QuickQuestion[] }>('/support/quick-questions', { params: { position } })
-    .then((r) => r.data.data ?? [])
-
-export const sendChat = (payload: {
-  content: string
-  conversation_id?: number
-  ticket_id?: number
-  page_context?: string
-  /** 用户确认执行高风险工具时，把工具标识与参数原样交回。 */
-  confirmed?: boolean
-  pending_tool?: string
-  pending_params?: Record<string, unknown>
-}) => client.post<ChatReply>('/support/chat', payload).then((r) => r.data)
-
-export const sendFeedback = (payload: {
-  conversation_id: number
-  message_id?: number
-  ticket_id?: number
-  rating: number
-  reason?: string
-  comment?: string
-}) => client.post('/support/feedback', payload)
+// 买家侧 AI 对话已下线，入口收敛为人工工单：申请、查看与转人工都在
+// 下面的「我的工单」API 里。保留此段注释说明取消掉的接口。
 
 // ── 我的工单 ─────────────────────────────────────────────────────────
 
@@ -115,29 +42,15 @@ export interface TicketMessage {
   created_at?: string
 }
 
-export interface TicketToolCall {
-  id: number
-  tool_key: string
-  tool_name?: string
-  status: string
-  duration_ms: number
-  created_at?: string
-}
-
 export interface TicketDetail {
   ticket: Ticket
   messages: TicketMessage[]
-  tool_calls: TicketToolCall[]
 }
 
 export const ticketStatusLabels: Record<string, string> = {
-  ai_processing: 'AI 处理中',
-  waiting_user: '等待你回复',
-  ai_solved: 'AI 已解决',
   user_requested_human: '已申请人工',
   pending_human: '等待人工处理',
   human_handling: '人工处理中',
-  waiting_confirm: '等待你确认',
   resolved: '已解决',
   closed: '已关闭',
   rejected: '已拒绝',

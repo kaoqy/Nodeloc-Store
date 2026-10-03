@@ -230,8 +230,19 @@ type Notifier interface {
 }
 
 // MailSender 是站外提醒能力，配置关闭时实现方直接返回 nil。
+//
+// SendToUser 发给通知的关联买家；SendToAddress 发给模板里写死的收件地址，
+// 让「订单异常发到老板邮箱」这类提醒不必再为每个人单独建模板。
 type MailSender interface {
 	SendToUser(ctx context.Context, userID uint, subject, body string) error
+	SendToAddress(ctx context.Context, address, subject, body string) error
+}
+
+// StaffRecipients 解析提醒事件里的 recipients=staff：管理端员工的站内账号
+// 与邮箱。两者分开是因为站内通知按用户 ID 投递，邮件按地址投递。
+type StaffRecipients interface {
+	UserIDs(ctx context.Context) ([]uint, error)
+	Emails(ctx context.Context) ([]string, error)
 }
 
 // KnowledgeProvider 让 AI 服务读取知识库全文。

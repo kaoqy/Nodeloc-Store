@@ -379,7 +379,6 @@ onUnmounted(() => {
         </RouterLink>
         <RouterLink v-if="auth.allows('orders', 'view')" to="/orders" class="btn btn-quiet btn-sm">全部订单</RouterLink>
         <RouterLink v-if="auth.allows('tickets', 'view')" to="/service" class="btn btn-quiet btn-sm">工单中心</RouterLink>
-        <RouterLink v-if="auth.allows('ai', 'view')" to="/config?tab=ai" class="btn btn-quiet btn-sm">AI 客服配置</RouterLink>
         <RouterLink v-if="auth.allows('knowledge', 'view')" to="/config?tab=knowledge" class="btn btn-quiet btn-sm">知识库</RouterLink>
         <RouterLink v-if="auth.allows('settings', 'view')" to="/settings" class="btn btn-quiet btn-sm">系统设置</RouterLink>
       </div>

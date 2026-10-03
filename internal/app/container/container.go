@@ -159,6 +159,13 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		Notifier: support.NotifierAdapter{Send: func(ctx context.Context, notification *models.Notification) error {
 			return notificationMod.Service.Send(ctx, notification)
 		}},
+		// 站外提醒接上店铺 SMTP：提醒事件里勾了「邮件」的模板才会真正发出。
+		Mailer: support.MailAdapter{
+			Config: supportMailConfig{sys: sys, db: db},
+			Lookup: mailAddresses{identity: identityMod.Service},
+		},
+		// recipients=staff 的通知发到能看工单的管理端账号与本机邮箱。
+		Staff:    staffRoster{db: db, identity: identityMod.Service},
 		Refunder: refundBridge{payments: paymentMod.Service},
 		// 卡密读取与补发都走既有模块能力，AI 只是调用方。
 		Cards:       cardBridge{payments: paymentMod.Service},
@@ -336,6 +343,88 @@ func (a mailAddresses) EmailFor(ctx context.Context, userID uint) (string, error
 		return "", nil
 	}
 	return strings.TrimSpace(*user.Email), nil
+}
+
+// supportMailConfig adapts the system module's SMTP settings to the support
+// module's mail adapter. It reads the settings on every send so a change in
+// 设置 applies to the next reminder without a restart.
+type supportMailConfig struct {
+	sys *system.Service
+	db  *gorm.DB
+}
+
+func (m supportMailConfig) SMTPConfig() (support.MailSettings, error) {
+	var config system.SMTPConfig
+	if m.sys != nil {
+		if smtp, err := m.sys.SMTPConfig(); err == nil {
+			config = smtp
+		}
+	} else if m.db != nil {
+		if rt, err := system.LoadRuntime(m.db); err == nil && rt != nil {
+			config = rt.SMTP
+		}
+	}
+	return support.MailSettings{
+		Host:     config.Host,
+		Port:     config.Port,
+		Username: config.Username,
+		Password: config.Password,
+		Secure:   config.Secure,
+		From:     config.From,
+		On:       config.On(),
+	}, nil
+}
+
+// staffRoster answers "who handles tickets": active accounts whose role may
+// open the ticket pages. It reuses the same grant the admin routes check, so a
+// reminder never lands in an inbox that cannot act on it.
+type staffRoster struct {
+	db       *gorm.DB
+	identity *identityapplication.Service
+}
+
+func (r staffRoster) UserIDs(ctx context.Context) ([]uint, error) {
+	if r.db == nil {
+		return nil, nil
+	}
+	var holders []struct {
+		ID   uint
+		Role string
+	}
+	if err := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("is_active = ? AND role <> ? AND role <> ?", true, "", "user").
+		Find(&holders).Error; err != nil {
+		return nil, err
+	}
+	ids := make([]uint, 0, len(holders))
+	for _, holder := range holders {
+		if authz.Can(holder.Role, "tickets", "view") {
+			ids = append(ids, holder.ID)
+		}
+	}
+	return ids, nil
+}
+
+func (r staffRoster) Emails(ctx context.Context) ([]string, error) {
+	if r.identity == nil {
+		return nil, nil
+	}
+	ids, err := r.UserIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	lookup := mailAddresses{identity: r.identity}
+	addresses := make([]string, 0, len(ids))
+	for _, id := range ids {
+		address, err := lookup.EmailFor(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(address) != "" {
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses, nil
 }
 
 // mailSettings adapts the system module's SMTP settings to the notification

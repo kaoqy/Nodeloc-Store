@@ -173,8 +173,8 @@ type CreateTicketInput struct {
 	Contact     string
 }
 
-// CreateTicket 建单后默认交给 AI 接待：写入首条消息、建 AI 会话、把状态
-// 推进到「AI 处理中」，并把处理过程写进消息流。
+// CreateTicket 建单后进入人工待处理队列：写入买家首条消息、留下创建日志，
+// 并给买家发一条「已提交」通知。AI 接待已下线，工单默认由人工跟进。
 func (s *Service) CreateTicket(ctx context.Context, input CreateTicketInput) (*domain.Ticket, error) {
 	subject := strings.TrimSpace(input.Subject)
 	if subject == "" {
@@ -211,10 +211,12 @@ func (s *Service) CreateTicket(ctx context.Context, input CreateTicketInput) (*d
 	} else if workflow != nil && workflow.EstimateReplyMinutes > 0 {
 		due = due.Add(time.Duration(workflow.EstimateReplyMinutes) * time.Minute)
 	}
+	// 人工优先：新单一律进待人工队列，AI 不再自动接待。
+	// AIEnabled 置 false，工单里的自动应答分支因此不会触发。
 	ticket := &domain.Ticket{
 		TicketNo: no, UserID: input.UserID, Type: ticketType, Subject: subject,
-		Content: input.Content, Status: models.TicketStatusAIProcessing, Handler: models.TicketHandlerAI,
-		Priority: priority, AIEnabled: true, Source: input.Source, DueAt: &due,
+		Content: input.Content, Status: models.TicketStatusPendingHuman, Handler: models.TicketHandlerHuman,
+		Priority: priority, AIEnabled: false, Source: input.Source, DueAt: &due,
 		UnreadForStaff: true,
 	}
 	if ticket.Source == "" {
@@ -246,44 +248,14 @@ func (s *Service) CreateTicket(ctx context.Context, input CreateTicketInput) (*d
 	if err := s.repo.CreateMessage(ctx, initial); err != nil {
 		return nil, err
 	}
-	session := &domain.TicketAISession{TicketID: ticket.ID, Status: "active", TurnCount: 1}
-	now := s.now().UTC()
-	session.LastActiveAt = &now
-	if err := s.repo.AppendTicketLog(ctx, &domain.TicketLog{
-		TicketID: ticket.ID, ActorType: "system", Action: "ticket.create",
-		After: jsonString(map[string]any{"status": ticket.Status, "type": ticket.Type}, 2000), Result: "ok",
-	}); err != nil {
-		logf("ticket %s: initial log failed: %v", ticket.TicketNo, err)
-	}
-	// AI 默认接待：这里先让 AI 回一次，用户打开工单就能看到处理结果。
-	// AnswerTicket 会读取工单消息并走受控工具循环，能查订单、退款状态等真实数据。
-	if s.aiReady(ctx) {
-		reply, toolCalls, err := s.AnswerTicket(ctx, ticket, session)
-		if err != nil {
-			logf("ticket %s: ai first answer failed: %v", ticket.TicketNo, err)
-		} else if reply != "" {
-			_ = s.repo.CreateMessage(ctx, &domain.TicketMessage{
-				TicketID: ticket.ID, SenderType: domain.SenderAI, Content: reply, ContentType: "markdown",
-			})
-			ticket.Status = models.TicketStatusWaitingUser
-			ticket.Handler = models.TicketHandlerAI
-			ticket.AIEnabled = true
-			if err := s.repo.UpdateTicket(ctx, ticket); err != nil {
-				logf("ticket %s: update status failed: %v", ticket.TicketNo, err)
-			}
-			_ = s.repo.AppendTicketLog(ctx, &domain.TicketLog{
-				TicketID: ticket.ID, ActorType: "ai", Action: "ticket.ai_reply",
-				Detail: truncate(reply, 200), Result: "ok",
-				After: jsonString(map[string]any{"tools": toolCallKeys(toolCalls)}, 2000),
-			})
-		}
-	}
+	// 不再为新单创建 TicketAISession，也不再调用 AI 首答。
+	// TicketAISession 表保留（工单表有外键关联），只停止读写。
 	s.notify(ctx, "ticket.created", map[string]string{
 		"ticket_no": ticket.TicketNo, "subject": ticket.Subject, "user_name": fmt.Sprintf("用户 #%d", input.UserID),
 	}, Notification{
 		UserID: input.UserID, TicketID: ticket.ID,
 		Title:   "工单 " + ticket.TicketNo + " 已创建",
-		Content: "智能客服已经开始处理你的问题，你也可以随时点「转人工客服」。",
+		Content: "客服会尽快跟进你的问题，你可以在「我的工单」里查看处理进度。",
 	})
 	return s.repo.GetTicket(ctx, ticket.ID)
 }

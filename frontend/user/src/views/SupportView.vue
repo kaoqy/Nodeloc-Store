@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   createTicket,
-  getSupportConfig,
   getTicket,
   listMyTickets,
   rateTicket,
@@ -18,8 +17,8 @@ import {
 import { errorMessage } from '../api/client'
 import { when } from '../utils/format'
 
-// 客服中心：把「AI 客服 / 我的工单 / 帮助文档」收进一个页面，
-// 买家用一个入口就能找到全部售后路径，不再需要在菜单里分辨三处入口。
+// 客服中心：把「帮助文档 / 我的工单」收进一个页面，
+// 买家用一个入口就能找到全部售后路径。
 const route = useRoute()
 
 const tab = ref<'help' | 'tickets'>('help')
@@ -43,38 +42,13 @@ const helpSections = [
   { id: 'buy', title: '如何购买商品', body: '在首页搜索或选择分类，打开商品详情页确认价格、库存和交付方式，填写必要信息后点击立即购买。未登录时会先进入登录流程。' },
   { id: 'payment', title: '支付完成后在哪里查看', body: '支付完成后回到订单详情页。商店以服务端确认结果为准自动核实支付状态；请不要因为页面暂未更新而重复付款。' },
   { id: 'delivery', title: '卡密什么时候发放', body: '自动发货商品在支付确认且有可用库存后交付。若库存暂时不足，订单会显示等待补货；人工交付商品由商家在订单中完成发货。' },
-  { id: 'card-issue', title: '卡密无效或已被使用', body: '带着订单号提交工单，智能客服会先核对交付记录。核实为无效卡后会按售后规则重新发货或退款。' },
+  { id: 'card-issue', title: '卡密无效或已被使用', body: '带着订单号提交工单，客服会先核对交付记录。核实为无效卡后会按售后规则重新发货或退款。' },
   { id: 'refund', title: '退款与售后规则', body: '数字商品具有一次性交付属性，已交付且可正常使用的卡密原则上不支持退款。未交付、卡密无效或重复交付的情况可以申请售后。' },
   { id: 'oauth', title: 'NodeLoc 登录失败', body: '请从登录页重新发起一次授权。若持续失败，请把登录时间与页面提示提供给客服，不要提供 Client Secret、授权码或 Token。' },
-  { id: 'human', title: '需要人工客服', body: '在右下角打开智能客服窗口，或在本页提交工单后点击「转人工客服」。你的完整对话会一起交给人工同事。' },
+  { id: 'human', title: '需要人工客服', body: '在右下角打开客服窗口提交问题，或在本页「我的工单」里直接提交。客服会按顺序跟进。' },
 ]
 
 const openHelp = ref('buy')
-
-// AI 这一单查过什么，用中文说给买家听，工具标识太技术化。
-const TOOL_LABELS: Record<string, string> = {
-  'order.list': '订单列表',
-  'order.detail': '订单详情',
-  'order.payment_status': '支付状态',
-  'order.delivery_status': '发货状态',
-  'product.detail': '商品信息',
-  'product.list': '在售商品',
-  'activity.list': '活动规则',
-  'knowledge.search': '帮助文档',
-  'ticket.list': '我的工单',
-  'refund.list': '可退款订单',
-  'refund.order': '退款处理',
-  'user.profile': '账号资料',
-}
-
-const toolSummary = computed(() => {
-  const seen = new Map<string, { key: string; label: string }>()
-  for (const call of detail.value?.tool_calls ?? []) {
-    if (seen.has(call.tool_key)) continue
-    seen.set(call.tool_key, { key: call.tool_key, label: TOOL_LABELS[call.tool_key] ?? call.tool_name ?? call.tool_key })
-  }
-  return [...seen.values()]
-})
 
 const queueHint = ref('30 分钟')
 const filteredTickets = computed(() =>
@@ -82,13 +56,9 @@ const filteredTickets = computed(() =>
 )
 
 const statusTone: Record<string, string> = {
-  ai_processing: 'badge-info',
-  waiting_user: 'badge',
-  ai_solved: 'badge-success',
   user_requested_human: 'badge-warning',
   pending_human: 'badge-warning',
   human_handling: 'badge-info',
-  waiting_confirm: 'badge',
   resolved: 'badge-success',
   closed: 'badge',
   rejected: 'badge-danger',
@@ -204,11 +174,6 @@ function openWidget() {
 onMounted(() => {
   if (route.query.tab === 'tickets') tab.value = 'tickets'
   void loadTickets()
-  void getSupportConfig()
-    .then((config) => {
-      if (config.estimate_minutes > 0) queueHint.value = config.estimate_minutes + ' 分钟'
-    })
-    .catch(() => undefined)
   const order = typeof route.query.order === 'string' ? route.query.order : ''
   if (order) {
     showCreate.value = true
@@ -225,18 +190,18 @@ onMounted(() => {
         <p class="eyebrow">客服中心</p>
         <h1 class="mt-2 text-2xl font-bold sm:text-3xl">有问题，从这里开始</h1>
         <p class="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--text-dim)]">
-          智能客服会先接待并查询订单与规则；需要人工时点一下就转接，对话记录会一起带过去。
+          先看下面的常见问题；没解决就提交工单，客服会带着你的描述和订单信息跟进。
         </p>
       </div>
       <button class="btn btn-primary" @click="openWidget">
-        打开智能客服
+        联系客服
       </button>
     </header>
 
     <div class="mt-6 grid gap-3 sm:grid-cols-3">
       <button class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]" @click="openWidget">
-        <p class="font-semibold">智能客服</p>
-        <p class="quiet mt-1 text-xs">先查订单与规则，随时可转人工</p>
+        <p class="font-semibold">联系客服</p>
+        <p class="quiet mt-1 text-xs">描述问题，提交后由客服跟进</p>
       </button>
       <button
         class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]"
@@ -278,8 +243,8 @@ onMounted(() => {
         </p>
       </article>
       <div class="card flex flex-wrap items-center gap-3">
-        <p class="text-sm text-[var(--text-dim)]">没有找到答案？智能客服会读这些文档并帮你查订单。</p>
-        <button class="btn btn-secondary btn-sm ml-auto" @click="openWidget">问智能客服</button>
+        <p class="text-sm text-[var(--text-dim)]">没有找到答案？直接提交工单，客服会帮你查订单。</p>
+        <button class="btn btn-secondary btn-sm ml-auto" @click="openWidget">联系客服</button>
       </div>
     </section>
 
@@ -332,30 +297,18 @@ onMounted(() => {
               <div class="flex flex-wrap items-center gap-2">
                 <h2 class="text-lg font-bold">{{ detail.ticket.subject }}</h2>
                 <span :class="statusTone[detail.ticket.status] || 'badge'">{{ ticketStatusLabels[detail.ticket.status] || detail.ticket.status }}</span>
-                <span class="badge">{{ detail.ticket.handler === 'ai' ? 'AI 处理' : '人工处理' }}</span>
+                <span class="badge">人工处理</span>
               </div>
               <p class="mono quiet text-xs">
                 {{ detail.ticket.ticket_no }}
                 <span v-if="detail.ticket.order_no"> · 订单 {{ detail.ticket.order_no }}</span>
               </p>
               <p v-if="detail.ticket.summary" class="quiet text-xs">{{ detail.ticket.summary }}</p>
-              <div v-if="detail.tool_calls?.length" class="flex flex-wrap items-center gap-1.5 text-xs">
-                <span class="quiet">AI 已查询</span>
-                <span v-for="call in toolSummary" :key="call.key" class="badge-info">{{ call.label }}</span>
-              </div>
-              <p v-if="detail.ticket.handler === 'ai'" class="quiet text-xs">
-                现在由智能客服接待，随时可以转人工；人工队列约 {{ queueHint }} 内响应。
+              <p class="quiet text-xs">
+                客服会按队列顺序跟进，一般 {{ queueHint }} 内回复。
               </p>
               <div class="flex flex-wrap gap-2">
-                <button
-                  v-if="detail.ticket.handler === 'ai'"
-                  class="btn btn-secondary btn-sm"
-                  :disabled="!detail.ticket.ai_enabled"
-                  @click="askHuman"
-                >
-                  转人工客服
-                </button>
-                <span v-else class="badge-success self-center">已转人工，客服会跟进</span>
+                <span class="badge-success self-center">人工客服跟进中</span>
                 <button v-if="['resolved','closed'].includes(detail.ticket.status)" class="btn btn-secondary btn-sm" @click="reopen">
                   重新打开
                 </button>
@@ -366,14 +319,14 @@ onMounted(() => {
               <article v-for="message in detail.messages" :key="message.id" class="card-quiet">
                 <div class="flex items-center gap-2 text-xs">
                   <span :class="message.sender_type === 'user' ? 'badge-warning' : message.sender_type === 'ai' ? 'badge-info' : 'badge-success'">
-                    {{ message.sender_type === 'user' ? '我' : message.sender_type === 'ai' ? 'AI 客服' : message.sender_type === 'agent' ? '人工客服' : '系统' }}
+                    {{ message.sender_type === 'user' ? '我' : message.sender_type === 'ai' ? '历史记录' : message.sender_type === 'agent' ? '人工客服' : '系统' }}
                   </span>
                   <span class="quiet ml-auto">{{ when(message.created_at) }}</span>
                 </div>
                 <p class="mt-2 whitespace-pre-line text-sm">{{ message.content }}</p>
               </article>
               <div class="flex items-end gap-2">
-                <textarea v-model="reply" class="input min-h-[70px]" placeholder="继续追问，AI 会先接待；需要人工时点上方按钮" />
+                <textarea v-model="reply" class="input min-h-[70px]" placeholder="继续补充信息，客服会看到" />
                 <button class="btn btn-primary btn-sm" :disabled="sendingReply || !reply.trim()" @click="sendReply">发送</button>
               </div>
             </div>
@@ -408,7 +361,7 @@ onMounted(() => {
         <input v-model="form.order_no" class="input" placeholder="关联订单号（可选）" />
         <input v-model="form.subject" class="input" placeholder="问题标题（必填）" />
         <textarea v-model="form.content" class="input min-h-[120px]" placeholder="详细描述你遇到的问题" />
-        <p class="quiet text-xs">提交后会由 AI 客服先接待，你可以随时转人工。</p>
+        <p class="quiet text-xs">提交后客服会按顺序跟进，你可以在本页查看进度。</p>
         <div class="flex justify-end gap-2">
           <button class="btn btn-secondary btn-sm" @click="showCreate = false">取消</button>
           <button class="btn btn-primary btn-sm" :disabled="creating" @click="submitTicket">{{ creating ? '提交中…' : '提交' }}</button>

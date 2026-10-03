@@ -34,13 +34,8 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 		return middleware.RequirePermission(accounts, resource, action)
 	}
 
-	// ── 买家侧：AI 客服与工单 ──
-	chat := router.Group("/api/v1/support", middleware.OptionalJWTMiddleware(jwtConfig))
-	chat.GET("/config", h.publicConfig)
-	chat.GET("/quick-questions", h.publicQuickQuestions)
-	chat.POST("/chat", h.chat)
-	chat.GET("/conversations/:id", h.conversationHistory)
-	chat.POST("/feedback", h.feedback)
+	// 买家侧 AI 对话入口已下线（2026-10 计划第 1 步）：只停注册，保留 handler 代码。
+	// 工单入口在下方 /api/v1/me/tickets，买家仍然可以提交并跟进人工工单。
 
 	me := router.Group("/api/v1/me/tickets", middleware.JWTMiddleware(jwtConfig))
 	me.GET("", h.myTickets)
@@ -69,48 +64,9 @@ func (h *Handler) RegisterRoutes(router gin.IRouter, jwtConfig *config.JWTConfig
 	adminTicketStats := router.Group("/api/v1/admin/ticket-stats", middleware.JWTMiddleware(jwtConfig))
 	adminTicketStats.GET("", guard("tickets", "view"), h.adminStats)
 
-	// ── 后台：AI 客服配置 ──
-	adminAI := router.Group("/api/v1/admin/ai", middleware.JWTMiddleware(jwtConfig))
-	adminAI.GET("/config", guard("ai", "view"), h.getConfig)
-	adminAI.PUT("/config", guard("ai", "manage"), h.saveConfig)
-	adminAI.PUT("/workflow", guard("ai", "manage"), h.saveWorkflow)
-	adminAI.GET("/conversations", guard("ai", "view"), h.adminConversations)
-	adminAI.GET("/feedback", guard("ai", "view"), h.adminFeedback)
-
-	// ── 后台：AI 工具 ──
-	tools := router.Group("/api/v1/admin/ai-tools", middleware.JWTMiddleware(jwtConfig))
-	tools.PUT("/:id", guard("ai_tools", "manage"), h.saveTool)
-	tools.POST("/:id/permissions", guard("ai_tools", "manage"), h.setToolPermission)
-	// 工具清单与调用日志放在独立前缀，避免与 :id 通配冲突。
-	toolsIndex := router.Group("/api/v1/admin/ai-tool-index", middleware.JWTMiddleware(jwtConfig))
-	toolsIndex.GET("", guard("ai_tools", "view"), h.listTools)
-	toolsIndex.GET("/calls", guard("ai_tools", "view"), h.toolCalls)
-	toolsIndex.GET("/roles", guard("ai_tools", "view"), h.toolRoles)
-	// AI 实际收到的工具清单（按角色可用的那部分），用于后台核对「它能调用什么」。
-	toolsIndex.GET("/catalogue", guard("ai_tools", "view"), h.toolCatalogue)
-
-	// ── 后台：知识库 ──
-	kb := router.Group("/api/v1/admin/knowledge", middleware.JWTMiddleware(jwtConfig))
-	kb.GET("/:id", guard("knowledge", "view"), h.getKnowledge)
-	kb.PUT("/:id", guard("knowledge", "manage"), h.updateKnowledge)
-	kb.DELETE("/:id", guard("knowledge", "manage"), h.deleteKnowledge)
-	kb.POST("/:id/test", guard("knowledge", "view"), h.testKnowledge)
-	// 分类、导入导出走独立前缀，路径不再与 :id 竞争。
-	kbIndex := router.Group("/api/v1/admin/knowledge-index", middleware.JWTMiddleware(jwtConfig))
-	kbIndex.GET("", guard("knowledge", "view"), h.listKnowledge)
-	kbIndex.POST("", guard("knowledge", "manage"), h.saveKnowledge)
-	kbIndex.GET("/categories", guard("knowledge", "view"), h.listKnowledgeCategories)
-	kbIndex.POST("/categories", guard("knowledge", "manage"), h.saveKnowledgeCategory)
-	kbIndex.DELETE("/categories/:id", guard("knowledge", "manage"), h.deleteKnowledgeCategory)
-	kbIndex.POST("/import", guard("knowledge", "manage"), h.importKnowledge)
-	kbIndex.GET("/export", guard("knowledge", "manage"), h.exportKnowledge)
-
-	// ── 后台：快捷问题 ──
-	quick := router.Group("/api/v1/admin/ai/quick-questions", middleware.JWTMiddleware(jwtConfig))
-	quick.GET("", guard("ai", "view"), h.listQuickQuestions)
-	quick.POST("", guard("ai", "manage"), h.saveQuickQuestion)
-	quick.PUT("/:id", guard("ai", "manage"), h.updateQuickQuestion)
-	quick.DELETE("/:id", guard("ai", "manage"), h.deleteQuickQuestion)
+	// 后台 AI 配置、AI 工具、知识库与 AI 快捷问题入口已下线（2026-10 计划第 1 步）。
+	// 按迁移方案只停注册、保留 handler 与仓储方法，观察一个版本后确认无调用再删除。
+	// 表结构不动：AutoMigrate 不会删列，ai_conversations / ai_messages 先原样保留。
 
 	// ── 后台：客服人员 ──
 	agents := router.Group("/api/v1/admin/agents", middleware.JWTMiddleware(jwtConfig))

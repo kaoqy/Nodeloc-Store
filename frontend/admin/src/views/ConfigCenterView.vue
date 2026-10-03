@@ -64,7 +64,7 @@ const configs = ref<SystemConfig[]>([])
 
 const templateDraft = ref<Partial<NotificationTemplate>>({
   key: '', name: '', event: '', category: 'ticket', is_enabled: true, in_app: true,
-  mail: false, title_template: '', content_template: '', retry_limit: 3, sort_order: 0,
+  mail: false, recipients: 'staff', title_template: '', content_template: '', retry_limit: 3, sort_order: 0,
 })
 
 const groupLabels: Record<string, string> = {
@@ -218,7 +218,7 @@ async function saveTemplateDraft() {
     notice.value = '提醒事件已保存。'
     templateDraft.value = {
       key: '', name: '', event: '', category: 'ticket', is_enabled: true, in_app: true,
-      mail: false, title_template: '', content_template: '', retry_limit: 3, sort_order: 0,
+      mail: false, recipients: 'staff', title_template: '', content_template: '', retry_limit: 3, sort_order: 0,
     }
     await load()
   } catch (err) {
@@ -226,6 +226,15 @@ async function saveTemplateDraft() {
   } finally {
     busy.value = false
   }
+}
+
+function recipientsLabel(value?: string): string {
+  const raw = (value || '').trim()
+  if (!raw) return '默认（买家）'
+  if (raw === 'staff') return '客服团队'
+  if (raw === 'user') return '站内用户'
+  if (raw === 'custom') return '自定义邮箱'
+  return raw
 }
 
 function editTemplate(template: NotificationTemplate) {
@@ -380,6 +389,7 @@ onMounted(() => {
                       {{ item.title_template || item.content_template || '未设置文案' }}
                     </p>
                     <p v-if="item.variables" class="mono quiet mt-0.5 text-[11px]">变量：{{ item.variables }}</p>
+                    <p class="quiet mt-0.5 text-[11px]">提醒收件人：{{ recipientsLabel(item.recipients) }}</p>
                   </div>
                   <div class="config-row-control">
                     <label class="config-switch">
@@ -414,6 +424,7 @@ onMounted(() => {
                   <option value="system">系统</option>
                 </select>
                 <input v-model="templateDraft.variables" class="input mono text-xs" placeholder="可用变量，逗号分隔" />
+                <input v-model="templateDraft.recipients" class="input mono text-xs" placeholder="收件人：staff 或邮箱，逗号分隔" />
                 <input v-model.number="templateDraft.sort_order" class="input nums" type="number" placeholder="排序" />
               </div>
               <input v-model="templateDraft.title_template" class="input" placeholder="标题模板" />

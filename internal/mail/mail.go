@@ -31,7 +31,27 @@ func ConfigFromEnv() Config {
 	return Config{Host: strings.TrimSpace(os.Getenv("SMTP_HOST")), Port: port, User: os.Getenv("SMTP_USER"), Pass: os.Getenv("SMTP_PASS"), Secure: strings.ToLower(strings.TrimSpace(os.Getenv("SMTP_SECURE"))), From: strings.TrimSpace(os.Getenv("MAIL_FROM"))}
 }
 
-func (c Config) Validate() error {
+// Normalize 补齐默认值并把可选值统一成小写，方便比较。
+// 它是值接收者，调用方拿到的仍是自己的副本，所以 Send 与 deliver 都必须
+// 先用指针校验收到的返回值，否则默认 SECURE 只改了局部变量、连接仍然裸奔。
+func (c *Config) Normalize() {
+	c.Host = strings.TrimSpace(c.Host)
+	c.User = strings.TrimSpace(c.User)
+	c.Secure = strings.ToLower(strings.TrimSpace(c.Secure))
+	c.From = strings.TrimSpace(c.From)
+	// 发件人不填时用 SMTP 用户名兜底：绝大多数邮箱服务商的账号名本身就是
+	// 合法发件地址，要求店家把同一个字符串写两遍只会多出一种配置错误。
+	if c.From == "" {
+		c.From = c.User
+	}
+	if c.Secure == "" {
+		c.Secure = "starttls"
+	}
+}
+
+// Validate 校验配置，并就地补齐默认值与发件人回退。
+func (c *Config) Validate() error {
+	c.Normalize()
 	if c.Host == "" {
 		return errors.New("SMTP_HOST is required")
 	}
@@ -39,13 +59,10 @@ func (c Config) Validate() error {
 		return fmt.Errorf("SMTP_PORT must be a real port, got %d", c.Port)
 	}
 	if c.From == "" {
-		return errors.New("MAIL_FROM is required")
+		return errors.New("MAIL_FROM is required (or set SMTP_USER as the sender)")
 	}
 	if _, err := mail.ParseAddress(c.From); err != nil {
 		return fmt.Errorf("MAIL_FROM is invalid: %w", err)
-	}
-	if c.Secure == "" {
-		c.Secure = "starttls"
 	}
 	if c.Secure != "ssl" && c.Secure != "starttls" && c.Secure != "plain" {
 		return fmt.Errorf("SMTP_SECURE must be ssl, starttls or plain, got %q", c.Secure)
@@ -64,6 +81,8 @@ type Message struct {
 // path every outbound mail takes — the settings-page test and the notification
 // fan-out both end up here, so an SMTP problem looks the same everywhere.
 func (c Config) Send(message Message) error {
+	// Validate 需要指针接收者才能把 SECURE / From 的默认值写回本次发送，
+	// 否则调用方传入的空 SECURE 会在校验后又被丢掉，deliver 会当成 plain。
 	if err := c.Validate(); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}

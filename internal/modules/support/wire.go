@@ -37,6 +37,8 @@ type Dependencies struct {
 	Activities contract.ActivityReader
 	Notifier   contract.Notifier
 	Mailer     contract.MailSender
+	// Staff 用于把提醒事件投递给管理端员工（站内 + 邮箱）。
+	Staff contract.StaffRecipients
 	// Refunder 让 AI 能对当前用户自己的已支付订单发起退款。
 	Refunder contract.Refunder
 	// Cards / Fulfillment / Pricing 是新增工具用到的只读与补发能力，
@@ -57,6 +59,7 @@ func Wire(db *gorm.DB, cfg *config.Config, deps Dependencies) *Module {
 		Activities:  deps.Activities,
 		Notifier:    deps.Notifier,
 		Mailer:      deps.Mailer,
+		Staff:       deps.Staff,
 		Refunder:    deps.Refunder,
 		Cards:       deps.Cards,
 		Fulfillment: deps.Fulfillment,
@@ -343,23 +346,48 @@ type MailAddressReader interface {
 	EmailFor(ctx context.Context, userID uint) (string, error)
 }
 
-func (a MailAdapter) SendToUser(ctx context.Context, userID uint, subject, body string) error {
-	if a.Config == nil || a.Lookup == nil {
-		return nil
+// settings 读一次 SMTP 配置；未开启或未配置时返回 false。
+func (a MailAdapter) settings() (mail.Config, bool, error) {
+	if a.Config == nil {
+		return mail.Config{}, false, nil
 	}
 	settings, err := a.Config.SMTPConfig()
-	if err != nil || !settings.On {
+	if err != nil {
+		return mail.Config{}, false, err
+	}
+	if !settings.On {
+		return mail.Config{}, false, nil
+	}
+	return mail.Config{
+		Host: settings.Host, Port: settings.Port, User: settings.Username,
+		Pass: settings.Password, Secure: settings.Secure, From: settings.From,
+	}, true, nil
+}
+
+func (a MailAdapter) SendToUser(ctx context.Context, userID uint, subject, body string) error {
+	if a.Lookup == nil {
+		return nil
+	}
+	settings, on, err := a.settings()
+	if err != nil || !on {
 		return err
 	}
 	address, err := a.Lookup.EmailFor(ctx, userID)
 	if err != nil || strings.TrimSpace(address) == "" {
 		return err
 	}
-	config := mail.Config{
-		Host: settings.Host, Port: settings.Port, User: settings.Username,
-		Pass: settings.Password, Secure: settings.Secure, From: settings.From,
+	return settings.Send(mail.Message{To: address, Subject: subject, Body: body})
+}
+
+func (a MailAdapter) SendToAddress(ctx context.Context, address, subject, body string) error {
+	if strings.TrimSpace(address) == "" {
+		return nil
 	}
-	return config.Send(mail.Message{To: address, Subject: subject, Body: body})
+	settings, on, err := a.settings()
+	if err != nil || !on {
+		return err
+	}
+	return settings.Send(mail.Message{To: strings.TrimSpace(address), Subject: subject, Body: body})
 }
 
 // supportlog 与 application 层保持同样的日志前缀。

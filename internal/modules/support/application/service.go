@@ -33,6 +33,7 @@ type Service struct {
 	activities  contract.ActivityReader
 	notifier    contract.Notifier
 	mailer      contract.MailSender
+	staff       contract.StaffRecipients
 	refunder    contract.Refunder
 	cards       contract.CardReader
 	fulfillment contract.FulfillmentRetrier
@@ -52,6 +53,7 @@ type Deps struct {
 	Activities  contract.ActivityReader
 	Notifier    contract.Notifier
 	Mailer      contract.MailSender
+	Staff       contract.StaffRecipients
 	Refunder    contract.Refunder
 	Cards       contract.CardReader
 	Fulfillment contract.FulfillmentRetrier
@@ -75,6 +77,7 @@ func NewService(deps Deps) (*Service, error) {
 		activities:  deps.Activities,
 		notifier:    deps.Notifier,
 		mailer:      deps.Mailer,
+		staff:       deps.Staff,
 		refunder:    deps.Refunder,
 		cards:       deps.Cards,
 		fulfillment: deps.Fulfillment,
