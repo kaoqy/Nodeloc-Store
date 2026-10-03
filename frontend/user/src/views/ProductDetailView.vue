@@ -544,16 +544,22 @@ watch(
 
           <div class="divider" />
 
+          <!-- 折扣明细：活动、优惠码逐项列出，最后一项才是真正要付的钱。
+               买家在点下支付之前就应该能自己算出这个数。 -->
           <div class="space-y-1.5 text-sm">
             <div class="flex items-baseline justify-between text-[var(--text-dim)]">
-              <span>小计</span>
-              <span class="nums">{{ money(gross) }}</span>
+              <span>商品原价 <span class="quiet">× {{ quantity }}</span></span>
+              <span class="nums">{{ money(wasPrice > 0 ? wasPrice * quantity : gross) }}</span>
+            </div>
+            <div v-if="activitySaving > 0" class="flex items-baseline justify-between text-[var(--success)]">
+              <span>活动折扣<span v-if="product.activity_name" class="quiet"> · {{ product.activity_name }}</span></span>
+              <span class="nums">-{{ money(activitySaving * quantity) }}</span>
             </div>
             <div v-if="discount" class="flex items-baseline justify-between text-[var(--success)]">
               <span>优惠码减免</span>
               <span class="nums">-{{ money(discount) }}</span>
             </div>
-            <div class="flex items-baseline justify-between">
+            <div class="flex items-baseline justify-between border-t border-[var(--stroke-quiet)] pt-2">
               <span class="text-[var(--text-dim)]">应付合计</span>
               <span class="nums accent-text text-2xl font-bold">{{ money(payable) }}</span>
             </div>

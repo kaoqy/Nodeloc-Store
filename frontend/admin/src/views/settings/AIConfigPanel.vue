@@ -10,12 +10,15 @@ import {
   listAIConversations,
   listAIFeedback,
   listAIToolCalls,
+  listAITools,
+  saveAITool,
   type AIConfig,
   type AIWorkflow,
   type AIQuickQuestion,
   type AIConversationRow,
   type AIFeedbackRow,
   type AIToolCall,
+  type AIToolRow,
 } from '../../api/support'
 import { errorMessage, when } from '../../utils/format'
 import SaveBar from '../../components/SaveBar.vue'
@@ -60,6 +63,10 @@ const questionDraft = ref<Partial<AIQuickQuestion>>({
 const conversations = ref<AIConversationRow[]>([])
 const feedback = ref<AIFeedbackRow[]>([])
 const toolCalls = ref<AIToolCall[]>([])
+// 工具开关：AI 能调用哪些系统 API。工具本身由代码内置并逐次校验，
+// 店家在这里决定「这次要不要让它用」。
+const tools = ref<AIToolRow[]>([])
+const toolsSaving = ref('')
 const conversationTotal = ref(0)
 const opsLoading = ref(false)
 const opsError = ref('')
@@ -94,6 +101,7 @@ async function load() {
     workflow.value = { ...payload.workflow }
     hasKey.value = payload.has_key
     questions.value = await listQuickQuestions().catch(() => [])
+    tools.value = await listAITools().catch(() => [])
     takeSnapshot()
   } catch (err) {
     error.value = errorMessage(err, '加载 AI 配置失败')
@@ -144,6 +152,22 @@ async function clearKey() {
     error.value = errorMessage(err, '清除密钥失败')
   } finally {
     saving.value = false
+  }
+}
+
+// toggleTool 立即保存一个工具的开关；工具配置不走整页保存，
+// 因为它和「模型配置」是两件事，改一个不该牵动另一个。
+async function toggleTool(row: AIToolRow) {
+  if (!canManage.value) return
+  toolsSaving.value = row.tool.key
+  error.value = ''
+  try {
+    row.tool = await saveAITool(row.tool.id, { ...row.tool, is_enabled: !row.tool.is_enabled })
+    notice.value = '工具「' + row.tool.name + '」已' + (row.tool.is_enabled ? '启用' : '停用') + '。'
+  } catch (err) {
+    error.value = errorMessage(err, '更新工具失败')
+  } finally {
+    toolsSaving.value = ''
   }
 }
 
@@ -228,6 +252,8 @@ async function loadOps() {
 }
 
 const channelLabels: Record<string, string> = { widget: '网页客服', ticket: '工单', admin: '后台' }
+const riskTone: Record<string, string> = { low: 'badge-success', medium: 'badge-info', high: 'badge-warning', critical: 'badge-danger' }
+const riskLabel: Record<string, string> = { low: '低', medium: '中', high: '高', critical: '极高' }
 
 watch(tab, (value) => {
   if (value === 'ops') void loadOps()
@@ -507,6 +533,32 @@ onMounted(load)
             AI 只能调用系统内置并逐次校验的工具；任何写操作都绑定当前用户本人，不会碰到别人的数据。
           </p>
         </div>
+
+        <div class="card space-y-3">
+          <div>
+            <p class="eyebrow">工具开关</p>
+            <p class="quiet mt-1 text-xs">
+              AI 处理业务时会调用下列系统接口。停用某一项后，AI 既看不到它，也无法调用。
+              涉及资金的操作永远走后台确认，不会因为开了开关就直接打款。
+            </p>
+          </div>
+          <div v-if="!tools.length" class="quiet py-6 text-center text-sm">还没有注册工具</div>
+          <div v-else class="tool-grid">
+            <label v-for="row in tools" :key="row.tool.key" class="tool-item">
+              <input
+                type="checkbox"
+                :checked="row.tool.is_enabled"
+                :disabled="!canManage || toolsSaving === row.tool.key"
+                @change="toggleTool(row)"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-[12.5px] font-semibold">{{ row.tool.name }}</span>
+                <span class="mono quiet block truncate text-[11px]">{{ row.tool.key }}</span>
+              </span>
+              <span :class="riskTone[row.tool.risk_level] || 'badge'">{{ riskLabel[row.tool.risk_level] || row.tool.risk_level }}</span>
+            </label>
+          </div>
+        </div>
       </div>
 
       <!-- 快捷问题 -->
@@ -676,3 +728,19 @@ onMounted(load)
     </template>
   </div>
 </template>
+
+<style scoped>
+.tool-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.tool-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  padding: 9px 11px;
+  cursor: pointer;
+  transition: border-color var(--fast);
+}
+.tool-item:hover { border-color: var(--stroke); }
+</style>

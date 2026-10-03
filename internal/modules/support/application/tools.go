@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/support/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/support/domain"
 )
@@ -136,6 +137,63 @@ func (s *Service) registerBuiltins() {
 		AllowedParams: []string{"order_no"}, RequiredParams: []string{"order_no"},
 		ParamTypes: map[string]string{"order_no": "string"},
 		Handler:    s.toolDeliveryStatus,
+	})
+	register(&ToolSpec{
+		Key: "order.card", Name: "查询订单卡密", Category: "order", RiskLevel: domain.RiskMedium,
+		Description:  "按订单号查看当前用户自己订单的交付卡密。需要订单归属校验；卡密只回给下单本人。",
+		RequireLogin: true, OwnDataOnly: true, AllowAuto: true, RateLimit: 20,
+		AllowedParams: []string{"order_no"}, RequiredParams: []string{"order_no"},
+		ParamTypes: map[string]string{"order_no": "string"},
+		Handler:    s.toolOrderCard,
+	})
+	register(&ToolSpec{
+		Key: "order.history", Name: "查询用户历史订单", Category: "order", RiskLevel: domain.RiskLow,
+		Description:  "列出当前用户自己的历史订单，可按关键词过滤商品名或订单号。",
+		RequireLogin: true, OwnDataOnly: true, AllowAuto: true, RateLimit: 30,
+		AllowedParams: []string{"limit", "keyword", "status"},
+		ParamTypes:    map[string]string{"limit": "int", "keyword": "string", "status": "string"},
+		Handler:       s.toolOrderHistory,
+	})
+	register(&ToolSpec{
+		Key: "order.resend", Name: "补发卡密", Category: "order", RiskLevel: domain.RiskMedium,
+		Description:  "为当前用户自己一张已支付但未交付的订单重新触发交付。只补发，不改金额、不退款。",
+		RequireLogin: true, OwnDataOnly: true, RequireConfirm: true, AllowAuto: false, RateLimit: 5,
+		AllowedParams: []string{"order_no"}, RequiredParams: []string{"order_no"},
+		ParamTypes: map[string]string{"order_no": "string"},
+		Handler:    s.toolOrderResend,
+	})
+	register(&ToolSpec{
+		Key: "product.stock", Name: "查询商品库存", Category: "product", RiskLevel: domain.RiskLow,
+		Description:  "查询在售商品的实时库存与价格，用于回答「还有货吗」「多少钱」。",
+		RequireLogin: false, OwnDataOnly: false, AllowAuto: true, RateLimit: 60,
+		AllowedParams: []string{"product_id"}, RequiredParams: []string{"product_id"},
+		ParamTypes: map[string]string{"product_id": "int"},
+		Handler:    s.toolProductStock,
+	})
+	register(&ToolSpec{
+		Key: "activity.discount", Name: "查询活动折扣", Category: "activity", RiskLevel: domain.RiskLow,
+		Description:  "查询一件商品当前命中的活动与折后价，用于回答「这件打完折多少钱」。",
+		RequireLogin: false, OwnDataOnly: false, AllowAuto: true, RateLimit: 60,
+		AllowedParams: []string{"product_id"}, RequiredParams: []string{"product_id"},
+		ParamTypes: map[string]string{"product_id": "int"},
+		Handler:    s.toolActivityDiscount,
+	})
+	register(&ToolSpec{
+		Key: "ticket.close", Name: "关闭工单", Category: "ticket", RiskLevel: domain.RiskMedium,
+		Description:  "把当前用户自己的工单标记为已解决并关闭。仅在买家确认问题已解决后调用。",
+		RequireLogin: true, OwnDataOnly: true, RequireConfirm: true, AllowAuto: false, RateLimit: 10,
+		AllowedParams:  []string{"ticket_id", "reason"},
+		RequiredParams: []string{"ticket_id"},
+		ParamTypes:     map[string]string{"ticket_id": "int", "reason": "string"},
+		Handler:        s.toolTicketClose,
+	})
+	register(&ToolSpec{
+		Key: "refund.request", Name: "提交退款申请", Category: "refund", RiskLevel: domain.RiskMedium,
+		Description:  "为当前用户自己的订单提交退款申请，进入后台待处理队列。不会直接打款。",
+		RequireLogin: true, OwnDataOnly: true, AllowAuto: true, RateLimit: 5,
+		AllowedParams: []string{"order_no", "reason"}, RequiredParams: []string{"order_no"},
+		ParamTypes: map[string]string{"order_no": "string", "reason": "string"},
+		Handler:    s.toolRefundRequest,
 	})
 	register(&ToolSpec{
 		Key: "product.detail", Name: "查询商品详情", Category: "product", RiskLevel: domain.RiskLow,
@@ -562,6 +620,212 @@ func (s *Service) toolRefundOrder(ctx context.Context, access contract.Access, p
 			"/orders/"+orderNo)
 	}
 	return map[string]any{"order_no": orderNo, "amount": amount, "status": status}, nil
+}
+
+// ── 新增工具实现 ─────────────────────────────────────────────────────
+
+// toolOrderCard 返回订单的交付卡密。
+//
+// 三重边界：订单必须属于调用者本人；必须是已支付的订单；返回值只包含
+// 这一张订单的卡密，且整条调用会写进 ai_tool_calls 审计。
+func (s *Service) toolOrderCard(ctx context.Context, access contract.Access, params map[string]any) (any, error) {
+	order, err := s.orderForUser(ctx, access, params)
+	if err != nil {
+		return nil, err
+	}
+	if order.Status != "paid" && order.Status != "delivered" {
+		return nil, fmt.Errorf("%w: 这笔订单还没有完成支付，暂时没有卡密可查。", domain.ErrInvalidInput)
+	}
+	if s.cards == nil {
+		return nil, domain.ErrNotConfigured
+	}
+	items, err := s.cards.CardsForOrder(ctx, access.UserID, order.OrderNo)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return map[string]any{
+			"order_no": order.OrderNo, "cards": []string{},
+			"note": "这笔订单还没有交付内容，可能仍在补货或需要人工发货。",
+		}, nil
+	}
+	return map[string]any{"order_no": order.OrderNo, "cards": items}, nil
+}
+
+// toolOrderHistory 列出买家的历史订单，支持按关键词与状态过滤。
+func (s *Service) toolOrderHistory(ctx context.Context, access contract.Access, params map[string]any) (any, error) {
+	if s.orders == nil || access.UserID == 0 {
+		return nil, domain.ErrForbidden
+	}
+	limit := intParam(params, "limit", 10, 1, 30)
+	keyword := strings.ToLower(stringParam(params, "keyword"))
+	status := stringParam(params, "status")
+	orders, err := s.orders.OrdersForUser(ctx, access.UserID, 50)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]map[string]any, 0, limit)
+	for _, order := range orders {
+		if status != "" && order.Status != status {
+			continue
+		}
+		if keyword != "" && !strings.Contains(strings.ToLower(order.OrderNo), keyword) &&
+			!strings.Contains(strings.ToLower(order.ProductName), keyword) {
+			continue
+		}
+		rows = append(rows, orderSummary(order))
+		if len(rows) >= limit {
+			break
+		}
+	}
+	return map[string]any{"orders": rows, "count": len(rows)}, nil
+}
+
+// toolOrderResend 触发一次重新交付。只补发欠交付的订单，不动金额。
+func (s *Service) toolOrderResend(ctx context.Context, access contract.Access, params map[string]any) (any, error) {
+	order, err := s.orderForUser(ctx, access, params)
+	if err != nil {
+		return nil, err
+	}
+	if order.FulfillmentStatus == "delivered" {
+		return map[string]any{
+			"order_no": order.OrderNo, "already_delivered": true,
+			"note": "这笔订单已经交付过，请用 order.card 查看卡密，不要重复补发。",
+		}, nil
+	}
+	if order.Status != "paid" {
+		return nil, fmt.Errorf("%w: 只有已支付的订单才能补发。", domain.ErrInvalidInput)
+	}
+	if s.fulfillment == nil {
+		return nil, domain.ErrNotConfigured
+	}
+	if err := s.fulfillment.RetryDelivery(ctx, order.OrderNo); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"order_no": order.OrderNo, "retried": true,
+		"note": "已重新触发交付。如果是库存不足，补货后会自动发货。",
+	}, nil
+}
+
+// toolProductStock 给出商品的实时库存与售价。
+func (s *Service) toolProductStock(ctx context.Context, access contract.Access, params map[string]any) (any, error) {
+	if s.catalog == nil {
+		return nil, domain.ErrNotConfigured
+	}
+	id := uint(intParam(params, "product_id", 0, 0, 1<<30))
+	if id == 0 {
+		return nil, fmt.Errorf("%w: 请提供商品编号。", domain.ErrInvalidInput)
+	}
+	fact, err := s.catalog.ProductFact(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if fact == nil {
+		return nil, fmt.Errorf("%w: 这个商品不存在。", domain.ErrInvalidInput)
+	}
+	return map[string]any{
+		"product_id": fact.ID, "name": fact.Name, "price": fact.Price,
+		"stock": fact.Stock, "in_stock": fact.Stock > 0,
+		"published": fact.Published, "category": fact.Category,
+	}, nil
+}
+
+// toolActivityDiscount 告诉 AI 一件商品当前的活动折后价。
+func (s *Service) toolActivityDiscount(ctx context.Context, access contract.Access, params map[string]any) (any, error) {
+	if s.catalog == nil || s.activities == nil {
+		return nil, domain.ErrNotConfigured
+	}
+	id := uint(intParam(params, "product_id", 0, 0, 1<<30))
+	if id == 0 {
+		return nil, fmt.Errorf("%w: 请提供商品编号。", domain.ErrInvalidInput)
+	}
+	fact, err := s.catalog.ProductFact(ctx, id)
+	if err != nil || fact == nil {
+		return nil, fmt.Errorf("%w: 这个商品不存在。", domain.ErrInvalidInput)
+	}
+	// 复用前台同一套折扣计算，保证 AI 说的价格与结算是同一个数。
+	if s.pricing == nil {
+		return map[string]any{
+			"product_id": fact.ID, "name": fact.Name,
+			"price": fact.Price, "has_discount": false,
+		}, nil
+	}
+	payable, activityName, err := s.pricing.PriceForProduct(ctx, access.UserID, fact.ID, fact.Price)
+	if err != nil || activityName == "" || payable >= fact.Price {
+		return map[string]any{
+			"product_id": fact.ID, "name": fact.Name,
+			"price": fact.Price, "has_discount": false,
+		}, nil
+	}
+	return map[string]any{
+		"product_id": fact.ID, "name": fact.Name,
+		"price": fact.Price, "payable": payable,
+		"activity": activityName, "has_discount": true,
+		"saving": fact.Price - payable,
+	}, nil
+}
+
+// toolTicketClose 由买家确认后把工单标记为已解决。
+func (s *Service) toolTicketClose(ctx context.Context, access contract.Access, params map[string]any) (any, error) {
+	ticketID := uint(intParam(params, "ticket_id", 0, 0, 1<<30))
+	if ticketID == 0 {
+		return nil, fmt.Errorf("%w: 请提供工单编号。", domain.ErrInvalidInput)
+	}
+	ticket, err := s.repo.GetTicket(ctx, ticketID)
+	if err != nil {
+		return nil, err
+	}
+	if ticket.UserID != access.UserID {
+		return nil, domain.ErrForbidden
+	}
+	reason := stringParam(params, "reason")
+	if reason == "" {
+		reason = "买家确认问题已解决"
+	}
+	if _, err := s.SetTicketStatus(ctx, ticketID, models.TicketStatusResolved, access.UserID, "ai", reason); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ticket_no": ticket.TicketNo, "status": "resolved"}, nil
+}
+
+// toolRefundRequest 提交退款申请，进后台队列，不直接打款。
+func (s *Service) toolRefundRequest(ctx context.Context, access contract.Access, params map[string]any) (any, error) {
+	order, err := s.orderForUser(ctx, access, params)
+	if err != nil {
+		return nil, err
+	}
+	if order.Status != "paid" {
+		return nil, fmt.Errorf("%w: 只有已支付且未退款的订单可以申请退款。", domain.ErrInvalidInput)
+	}
+	reason := stringParam(params, "reason")
+	if reason == "" {
+		reason = "买家通过 AI 客服提交退款申请"
+	}
+	// 用一个专用工单承载申请：后台在工单中心审核后再走既有退款流程。
+	prefix := s.SystemConfigValue(ctx, "ticket", "ticket_no_prefix", "TK")
+	no, err := s.repo.NextTicketNo(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	ticket := &domain.Ticket{
+		TicketNo: no, UserID: access.UserID, Type: "refund", Subject: "退款申请 " + order.OrderNo,
+		Content: "订单 " + order.OrderNo + " 退款申请。原因：" + reason,
+		Status:  models.TicketStatusPendingHuman, Handler: models.TicketHandlerHuman,
+		Priority: "high", AIEnabled: true, Source: "ai", OrderNo: order.OrderNo,
+		UnreadForStaff: true,
+	}
+	if err := s.repo.CreateTicket(ctx, ticket); err != nil {
+		return nil, err
+	}
+	_ = s.repo.AppendTicketLog(ctx, &domain.TicketLog{
+		TicketID: ticket.ID, ActorType: "ai", Action: "refund.request",
+		Detail: "AI 为买家提交退款申请：" + reason, Result: "ok",
+	})
+	return map[string]any{
+		"ticket_no": ticket.TicketNo, "order_no": order.OrderNo, "status": "pending_review",
+		"note": "退款申请已提交，后台审核后会原路退回；这不是即时打款。",
+	}, nil
 }
 
 // ── 参数校验 ─────────────────────────────────────────────────────────

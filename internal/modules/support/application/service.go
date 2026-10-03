@@ -25,32 +25,38 @@ import (
 //
 // 所有金额、订单归属、用户身份都由提供方校验，服务层只做编排。
 type Service struct {
-	repo       contract.Repository
-	tools      ToolRegistry
-	orders     contract.OrderReader
-	users      contract.UserReader
-	catalog    contract.CatalogReader
-	activities contract.ActivityReader
-	notifier   contract.Notifier
-	mailer     contract.MailSender
-	refunder   contract.Refunder
-	model      contract.ModelClient
-	now        func() time.Time
-	encKey     []byte
+	repo        contract.Repository
+	tools       ToolRegistry
+	orders      contract.OrderReader
+	users       contract.UserReader
+	catalog     contract.CatalogReader
+	activities  contract.ActivityReader
+	notifier    contract.Notifier
+	mailer      contract.MailSender
+	refunder    contract.Refunder
+	cards       contract.CardReader
+	fulfillment contract.FulfillmentRetrier
+	pricing     contract.ProductPricer
+	model       contract.ModelClient
+	now         func() time.Time
+	encKey      []byte
 }
 
 // Deps 是服务层依赖，未提供的能力会自动降级（例如没有配置 SMTP 时不发邮件）。
 type Deps struct {
-	Repo       contract.Repository
-	Tools      ToolRegistry
-	Orders     contract.OrderReader
-	Users      contract.UserReader
-	Catalog    contract.CatalogReader
-	Activities contract.ActivityReader
-	Notifier   contract.Notifier
-	Mailer     contract.MailSender
-	Refunder   contract.Refunder
-	Model      contract.ModelClient
+	Repo        contract.Repository
+	Tools       ToolRegistry
+	Orders      contract.OrderReader
+	Users       contract.UserReader
+	Catalog     contract.CatalogReader
+	Activities  contract.ActivityReader
+	Notifier    contract.Notifier
+	Mailer      contract.MailSender
+	Refunder    contract.Refunder
+	Cards       contract.CardReader
+	Fulfillment contract.FulfillmentRetrier
+	Pricing     contract.ProductPricer
+	Model       contract.ModelClient
 	// SecretKey 用来加密 AI API Key；为空时用进程内随机密钥，
 	// 重启后需要重新保存一次密钥，这是可接受的安全默认。
 	SecretKey string
@@ -61,17 +67,20 @@ func NewService(deps Deps) (*Service, error) {
 		return nil, errors.New("support service requires a repository")
 	}
 	service := &Service{
-		repo:       deps.Repo,
-		tools:      deps.Tools,
-		orders:     deps.Orders,
-		users:      deps.Users,
-		catalog:    deps.Catalog,
-		activities: deps.Activities,
-		notifier:   deps.Notifier,
-		mailer:     deps.Mailer,
-		refunder:   deps.Refunder,
-		model:      deps.Model,
-		now:        time.Now,
+		repo:        deps.Repo,
+		tools:       deps.Tools,
+		orders:      deps.Orders,
+		users:       deps.Users,
+		catalog:     deps.Catalog,
+		activities:  deps.Activities,
+		notifier:    deps.Notifier,
+		mailer:      deps.Mailer,
+		refunder:    deps.Refunder,
+		cards:       deps.Cards,
+		fulfillment: deps.Fulfillment,
+		pricing:     deps.Pricing,
+		model:       deps.Model,
+		now:         time.Now,
 	}
 	service.encKey = deriveKey(deps.SecretKey)
 	if service.tools == nil {

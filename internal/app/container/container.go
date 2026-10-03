@@ -160,6 +160,10 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 			return notificationMod.Service.Send(ctx, notification)
 		}},
 		Refunder: refundBridge{payments: paymentMod.Service},
+		// 卡密读取与补发都走既有模块能力，AI 只是调用方。
+		Cards:       cardBridge{payments: paymentMod.Service},
+		Fulfillment: fulfillmentBridge{payments: paymentMod.Service},
+		Pricing:     pricingBridge{activity: activityMod.Service},
 	})
 	auditMod := audit.Wire(db)
 	pluginMod := plugin.Wire(db)
@@ -415,4 +419,54 @@ func (mailSender) SendMail(config notificationcontract.MailConfig, to, subject, 
 		Secure: config.Secure,
 		From:   config.From,
 	}).Send(mail.Message{To: to, Subject: subject, Body: body})
+}
+
+// cardBridge 让 AI 在订单归属校验通过后读取该订单的交付卡密。
+// 它复用支付模块已有的 GetOrder（内部校验 userID 与订单归属），
+// 拿到的是这一单已经写好的交付内容，不额外查库、不改任何支付逻辑。
+type cardBridge struct {
+	payments *paymentapplication.Service
+}
+
+func (b cardBridge) CardsForOrder(ctx context.Context, userID uint, orderNo string) ([]string, error) {
+	order, err := b.payments.GetOrder(ctx, userID, orderNo)
+	if err != nil {
+		return nil, err
+	}
+	if order == nil || order.DeliveryContent == nil || strings.TrimSpace(*order.DeliveryContent) == "" {
+		return nil, nil
+	}
+	// 交付内容对多件商品是逐行写入的，按行拆成卡密列表。
+	lines := []string{}
+	for _, line := range strings.Split(*order.DeliveryContent, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	return lines, nil
+}
+
+// fulfillmentBridge 让 AI 对欠交付订单重跑既有交付流程。
+type fulfillmentBridge struct {
+	payments *paymentapplication.Service
+}
+
+func (b fulfillmentBridge) RetryDelivery(ctx context.Context, orderNo string) error {
+	_, err := b.payments.FulfillOrder(ctx, orderNo)
+	return err
+}
+
+// pricingBridge 把活动折扣计算暴露给 AI，保证它报的价与前台、结算同一个数。
+type pricingBridge struct {
+	activity *activityapplication.Service
+}
+
+func (b pricingBridge) PriceForProduct(ctx context.Context, userID, productID uint, unitPrice int) (int, string, error) {
+	priced, err := b.activity.Price(ctx, models.ActivityMatchInput{
+		UserID: userID, ProductID: productID, Quantity: 1, UnitPrice: unitPrice,
+	})
+	if err != nil || priced == nil || priced.DiscountAmount <= 0 {
+		return unitPrice, "", nil
+	}
+	return priced.Payable, priced.ActivityName, nil
 }

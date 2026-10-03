@@ -39,21 +39,29 @@ type Dependencies struct {
 	Mailer     contract.MailSender
 	// Refunder 让 AI 能对当前用户自己的已支付订单发起退款。
 	Refunder contract.Refunder
+	// Cards / Fulfillment / Pricing 是新增工具用到的只读与补发能力，
+	// 都由既有模块提供，AI 只是调用方。
+	Cards       contract.CardReader
+	Fulfillment contract.FulfillmentRetrier
+	Pricing     contract.ProductPricer
 }
 
 // Wire 构造模块。SecretKey 用于加密 AI API Key。
 func Wire(db *gorm.DB, cfg *config.Config, deps Dependencies) *Module {
 	store := infrastructure.NewGormStore(db)
 	service, err := application.NewService(application.Deps{
-		Repo:       store,
-		Orders:     deps.Orders,
-		Users:      deps.Users,
-		Catalog:    deps.Catalog,
-		Activities: deps.Activities,
-		Notifier:   deps.Notifier,
-		Mailer:     deps.Mailer,
-		Refunder:   deps.Refunder,
-		SecretKey:  cfg.JWT.Secret,
+		Repo:        store,
+		Orders:      deps.Orders,
+		Users:       deps.Users,
+		Catalog:     deps.Catalog,
+		Activities:  deps.Activities,
+		Notifier:    deps.Notifier,
+		Mailer:      deps.Mailer,
+		Refunder:    deps.Refunder,
+		Cards:       deps.Cards,
+		Fulfillment: deps.Fulfillment,
+		Pricing:     deps.Pricing,
+		SecretKey:   cfg.JWT.Secret,
 	})
 	if err != nil {
 		panic(err)

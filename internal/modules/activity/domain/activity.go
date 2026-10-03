@@ -34,6 +34,7 @@ var (
 
 // 规则类型常量，与后台规则表单一一对应。
 const (
+	RuleFactorOff    = "factor_off"
 	RulePercentOff   = "percent_off"
 	RuleAmountOff    = "amount_off"
 	RuleFixedPrice   = "fixed_price"
@@ -46,7 +47,7 @@ const (
 
 // RuleCategories 把规则分组，后台按活动类型只展示可用规则。
 var RuleTypes = []string{
-	RulePercentOff, RuleAmountOff, RuleFixedPrice, RuleFullReduce,
+	RuleFactorOff, RulePercentOff, RuleAmountOff, RuleFixedPrice, RuleFullReduce,
 	RuleFullQuantity, RuleBulkPrice, RuleCouponLock, RuleGiftCoupon,
 }
 
@@ -62,7 +63,13 @@ func ValidRuleType(value string) bool {
 // RuleConfig 是规则的结构化参数。字段按规则类型取用，未用到的保持零值。
 // 全部为整数，金额单位与商品定价一致，避免浮点误差。
 type RuleConfig struct {
-	// PercentOff: 折扣百分比，90 表示 9 折。
+	// Factor 是乘区折扣系数，0.8000 表示售价 × 0.8。
+	//
+	// 这是首选的折扣表达方式：它直接乘在售价上，口径与「实际成交价 =
+	// 售价 × 折扣率」完全一致，不会出现「减 X 元」在不同数量下被重复放大
+	// 的问题。按四位小数存储，避免 0.85 这类系数在浮点里失精。
+	Factor float64 `json:"factor,omitempty"`
+	// PercentOff: 折扣百分比，90 表示 9 折。保留用于兼容既有活动。
 	Percent int `json:"percent,omitempty"`
 	// AmountOff / FullReduce: 直接减多少钱。
 	Amount int `json:"amount,omitempty"`

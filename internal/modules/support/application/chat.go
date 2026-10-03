@@ -60,23 +60,9 @@ func (s *Service) Chat(ctx context.Context, input domain.ChatInput) (*domain.Cha
 	hits, _ := s.repo.SearchKnowledge(ctx, content, 5)
 	reply.KnowledgeHits = hits
 
-	// 2) 明确的敏感问题直接建议转人工，不走模型。
-	if s.sensitive(content, workflow) {
-		text := config.SensitiveTip
-		if text == "" {
-			text = config.FallbackReply
-		}
-		if workflow != nil && workflow.TransferOnExplicit {
-			reply.SuggestTransfer = true
-		}
-		assistant := &domain.AIMessage{ConversationID: conversation.ID, Role: "assistant", Content: text, Status: "ok", Model: "policy"}
-		if err := s.repo.CreateAIMessage(ctx, assistant); err != nil {
-			return nil, err
-		}
-		reply.MessageID = assistant.ID
-		reply.Content = text
-		return reply, nil
-	}
+	// 2) 用户主动要求人工：这是唯一会在对话里改变处理方的分支。
+	//    除它之外，AI 一直继续处理——没有「超时」「失败次数」「金额过高」这类
+	//    自动转人工的旁路，因为店主无法预知 AI 会在哪一句上放弃。
 	if workflow != nil && workflow.TransferOnExplicit && explicitHumanRequest(content) {
 		text := config.TransferTip
 		if text == "" {
@@ -109,8 +95,8 @@ func (s *Service) Chat(ctx context.Context, input domain.ChatInput) (*domain.Cha
 			reply.ToolCalls = []domain.ToolCallResult{*result}
 		}
 		if execErr != nil {
+			// 工具失败也不改变处理方：AI 继续接待，把失败原因讲清楚即可。
 			reply.Fallback = true
-			reply.SuggestTransfer = true
 		}
 		reply.SuggestedReplies = suggestReplies(content, reply, hits)
 		now := s.now().UTC()
@@ -146,7 +132,8 @@ func (s *Service) Chat(ctx context.Context, input domain.ChatInput) (*domain.Cha
 		reply.Content = fallback
 		reply.MessageID = assistant.ID
 		reply.Fallback = true
-		reply.SuggestTransfer = true
+		// 模型临时不可用同样不转人工：工单仍留在 AI 手里，
+		// 下一轮买家追问时会重新尝试。
 		return reply, nil
 	}
 	answer = strings.TrimSpace(answer)
@@ -193,12 +180,8 @@ func (s *Service) Chat(ctx context.Context, input domain.ChatInput) (*domain.Cha
 	if reply.Fallback {
 		conversation.MessageCount++
 	}
-	if workflow != nil && conversation.HandedToHuman == false {
-		downvotes, _ := s.repo.FeedbackCount(ctx, conversation.ID, -1, time.Time{})
-		if int(downvotes) >= workflow.TransferAfterDownvotes {
-			reply.SuggestTransfer = true
-		}
-	}
+	// 点踩只用于统计与后台查看，不再自动触发转人工建议：
+	// 「AI 连续被点踩就放弃」同样是一条店主没要求的旁路。
 	now := s.now().UTC()
 	conversation.LastMessageAt = &now
 	_ = s.repo.UpdateConversation(ctx, conversation)
@@ -325,27 +308,15 @@ func (s *Service) buildSystemPrompt(ctx context.Context, config *domain.AIConfig
 	return builder.String()
 }
 
-// sensitive 判断一句话是否应该直接走人工策略。
+// sensitive 曾用于「命中就转人工」，现在不再有这条旁路。
+// 保留这个判断是为了让 AI 在话术上更谨慎：涉及资金的请求仍然只能通过
+// refund.request 走后台确认，而不能由模型自行决定。
 func (s *Service) sensitive(content string, workflow *domain.AIWorkflowConfig) bool {
 	if workflow == nil {
 		return false
 	}
 	lower := strings.ToLower(content)
-	// 退款默认由 AI 处理：它可以用 refund.list 核对可退订单、用 refund.order 原路退回。
-	// 只有店家在配置里显式要求「退款一律转人工」时才升级。
-	if workflow.RequireHumanRefund && containsAny(lower, []string{"退款", "退钱", "refund", "退单", "打回"}) {
-		return true
-	}
-	if workflow.TransferCardDispute && containsAny(lower, []string{"卡密无效", "卡密用不了", "卡被用过", "密码错误", "重复卡"}) {
-		return true
-	}
-	if workflow.TransferPaymentIssue && containsAny(lower, []string{"扣款", "付款失败", "支付失败", "已经付了", "付了钱"}) {
-		return true
-	}
-	if workflow.TransferAbuse && containsAny(lower, []string{"封号", "封禁", "冻结", "投诉", "举报", "骗子"}) {
-		return true
-	}
-	return false
+	return containsAny(lower, []string{"退款", "退钱", "refund", "退单", "卡密无效", "卡被用过", "扣款", "投诉", "举报"})
 }
 
 func explicitHumanRequest(content string) bool {
@@ -445,7 +416,8 @@ func (s *Service) countMessages(ctx context.Context, userID uint, ip string, sin
 	return total, nil
 }
 
-// Feedback 记录一次点赞/点踩，累计点踩到阈值会标记建议转人工。
+// Feedback 记录一次点赞/点踩。评价只用于统计与后台查看，
+// 不会改变处理方：转人工只能由买家主动点击。
 func (s *Service) Feedback(ctx context.Context, input ChatFeedbackInput) error {
 	if input.ConversationID == 0 {
 		return fmt.Errorf("%w: 缺少会话编号。", domain.ErrInvalidInput)
@@ -471,18 +443,6 @@ func (s *Service) Feedback(ctx context.Context, input ChatFeedbackInput) error {
 	}
 	if err := s.repo.CreateFeedback(ctx, feedback); err != nil {
 		return err
-	}
-	if input.Rating == -1 && input.TicketID > 0 {
-		downvotes, err := s.repo.FeedbackCount(ctx, input.ConversationID, -1, time.Time{})
-		if err == nil {
-			workflow, _ := s.Workflow(ctx)
-			if workflow != nil && int(downvotes) >= workflow.TransferAfterDownvotes {
-				_ = s.repo.AppendTicketLog(ctx, &domain.TicketLog{
-					TicketID: input.TicketID, ActorType: "system", Action: "ticket.suggest_transfer",
-					Detail: fmt.Sprintf("用户连续 %d 次点踩，建议转人工", downvotes), Result: "ok",
-				})
-			}
-		}
 	}
 	return nil
 }
@@ -658,10 +618,9 @@ func (s *Service) HandleTicketMessage(ctx context.Context, ticketID, userID uint
 	if ticket.Handler != models.TicketHandlerAI || !ticket.AIEnabled {
 		return message, false, nil
 	}
+	// 只有买家明确说「转人工」才交给人工队列。敏感话题、AI 答不出来、
+	// 买家点踩，都不再自动改变处理方——那些旁路会让 AI 在不该放弃的时候放弃。
 	if workflow != nil && workflow.TransferOnExplicit && explicitHumanRequest(content) {
-		return message, true, nil
-	}
-	if s.sensitive(content, workflow) {
 		return message, true, nil
 	}
 	if !s.aiReady(ctx) {

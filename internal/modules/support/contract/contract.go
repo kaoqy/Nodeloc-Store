@@ -139,6 +139,27 @@ type OrderReader interface {
 	OrderForUser(ctx context.Context, userID uint, orderNo string) (*OrderContext, error)
 }
 
+// CardReader 让 AI 在「订单属于调用者本人」的前提下读交付卡密。
+//
+// 实现方必须自己再校验一次归属：订单号是买家输入的，不能只靠上层判断。
+type CardReader interface {
+	// CardsForOrder 返回这张订单交付的卡密明文；订单不属于该用户时返回错误。
+	CardsForOrder(ctx context.Context, userID uint, orderNo string) ([]string, error)
+}
+
+// FulfillmentRetrier 让 AI 对欠交付的订单重新触发发货。
+type FulfillmentRetrier interface {
+	// RetryDelivery 对一张已支付但未交付的订单重跑交付流程。
+	RetryDelivery(ctx context.Context, orderNo string) error
+}
+
+// ProductPricer 复用活动模块的折扣计算，保证 AI 报的价格与结算一致。
+type ProductPricer interface {
+	// PriceForProduct 返回一件商品在当前用户视角下的应付价与命中活动名。
+	// 没有活动命中时返回原价与空活动名。
+	PriceForProduct(ctx context.Context, userID, productID uint, unitPrice int) (payable int, activityName string, err error)
+}
+
 // UserContext 是 AI 查询用户资料时的安全字段。
 type UserContext struct {
 	ID         uint      `json:"id"`

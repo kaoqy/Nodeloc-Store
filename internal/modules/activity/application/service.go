@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -371,9 +372,15 @@ func (s *Service) priceWithRules(activity *domain.Activity, rules []domain.Activ
 		config := parseRuleConfig(rule.Config)
 		value := 0
 		switch rule.RuleType {
+		case domain.RuleFactorOff:
+			// 乘区：成交价 = 售价 × 系数。折扣额取整到分，
+			// 与下单、支付、后台统计三处用同一个舍入方式。
+			if config.Factor > 0 && config.Factor < 1 {
+				value = discountFromFactor(total, config.Factor)
+			}
 		case domain.RulePercentOff:
 			if config.Percent > 0 && config.Percent < 100 {
-				value = total * (100 - config.Percent) / 100
+				value = discountFromFactor(total, float64(config.Percent)/100)
 			}
 		case domain.RuleAmountOff:
 			value = config.Amount
@@ -735,4 +742,21 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// discountFromFactor 把「售价 × 系数」换算成应减金额。
+//
+// 金额在整条链路上都是整数（支付网关以最小货币单位结算），所以这里只做一次
+// 舍入，并把结果四舍五入到分。前台展示、下单、支付、统计都复用同一个
+// Pricing.DiscountAmount，不再各自算一遍。
+func discountFromFactor(total int, factor float64) int {
+	if total <= 0 || factor <= 0 || factor >= 1 {
+		return 0
+	}
+	payable := float64(total) * factor
+	discount := float64(total) - math.Round(payable)
+	if discount < 0 {
+		return 0
+	}
+	return int(math.Round(discount))
 }
