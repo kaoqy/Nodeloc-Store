@@ -5,6 +5,7 @@ import {
   createTicket,
   getTicket,
   listMyTickets,
+  cancelTicket,
   rateTicket,
   reopenTicket,
   replyTicket,
@@ -33,6 +34,8 @@ const detail = ref<TicketDetail | null>(null)
 const detailLoading = ref(false)
 const reply = ref('')
 const sendingReply = ref(false)
+const closingTicket = ref(false)
+const closingConfirm = ref(false)
 const rating = ref(5)
 const ratingComment = ref('')
 
@@ -166,6 +169,26 @@ async function reopen() {
     ticketError.value = errorMessage(err, '重新打开失败')
   }
 }
+
+async function closeTicket() {
+  if (!detail.value || closingTicket.value) return
+  closingTicket.value = true
+  ticketError.value = ''
+  try {
+    await cancelTicket(detail.value.ticket.id)
+    closingConfirm.value = false
+    await openTicket(detail.value.ticket.id)
+    await loadTickets()
+  } catch (err) {
+    ticketError.value = errorMessage(err, '关闭工单失败')
+  } finally {
+    closingTicket.value = false
+  }
+}
+
+const canClose = computed(() =>
+  Boolean(detail.value && !['closed', 'cancelled', 'rejected'].includes(detail.value.ticket.status)),
+)
 
 // 客服窗口已下线，联系客服统一走工单：切到工单标签并打开提交表单。
 function startTicket() {
@@ -311,11 +334,19 @@ onMounted(() => {
                 客服会按队列顺序跟进，一般 {{ queueHint }} 内回复。
               </p>
               <div class="flex flex-wrap gap-2">
-                <span class="badge-success self-center">人工客服跟进中</span>
+                <span class="badge-success self-center">
+                  {{ ['closed', 'cancelled'].includes(detail.ticket.status) ? '工单已结束' : '人工客服跟进中' }}
+                </span>
                 <button v-if="['resolved','closed'].includes(detail.ticket.status)" class="btn btn-secondary btn-sm" @click="reopen">
                   重新打开
                 </button>
+                <button v-if="canClose" class="btn btn-quiet btn-sm" :disabled="closingTicket" @click="closingConfirm = true">
+                  关闭工单
+                </button>
               </div>
+              <p v-if="detail.ticket.status === 'cancelled'" class="alert alert-info" role="status">
+                这张工单已由你关闭。如仍需处理，可以重新打开并补充说明。
+              </p>
             </div>
 
             <div class="card space-y-3">
@@ -368,6 +399,22 @@ onMounted(() => {
         <div class="flex justify-end gap-2">
           <button class="btn btn-secondary btn-sm" @click="showCreate = false">取消</button>
           <button class="btn btn-primary btn-sm" :disabled="creating" @click="submitTicket">{{ creating ? '提交中…' : '提交' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="closingConfirm" class="scrim fixed inset-0 z-50 grid place-items-center p-4" @click.self="closingConfirm = false">
+      <div class="card w-full max-w-md space-y-3">
+        <h2 class="text-lg font-bold">关闭这张工单？</h2>
+        <p class="text-sm leading-relaxed text-[var(--text-dim)]">
+          关闭后可再次打开。如果问题还需要客服继续处理，建议先补充说明再关闭。
+        </p>
+        <div class="flex justify-end gap-2">
+          <button class="btn btn-secondary btn-sm" :disabled="closingTicket" @click="closingConfirm = false">取消</button>
+          <button class="btn btn-primary btn-sm" :disabled="closingTicket" @click="closeTicket">
+            <span v-if="closingTicket" class="spinner spinner-light" />
+            {{ closingTicket ? '关闭中…' : '确认关闭' }}
+          </button>
         </div>
       </div>
     </div>

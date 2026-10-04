@@ -40,7 +40,8 @@ const routes = [
   { path: '/ai/:rest(.*)', redirect: { path: '/config', query: { tab: 'support' } } },
   { path: '/service/agents', redirect: { path: '/config', query: { tab: 'support' } } },
   { path: '/notifications', redirect: { path: '/config', query: { tab: 'remind' } } },
-  { path: '/plugins', component: () => import('../views/PluginView.vue'), meta: { permission: 'plugins:view', title: '插件管理' } },
+  // 插件管理页面已下线；支付交付所需的插件运行时仍由后端内部保留。
+  { path: '/plugins', redirect: '/' },
   { path: '/logs', component: () => import('../views/LogListView.vue'), meta: { permission: 'logs:view', title: '操作日志' } },
   { path: '/settings', component: () => import('../views/SettingsView.vue'), meta: { permission: 'settings:view', title: '系统设置' } },
   { path: '/roles', component: () => import('../views/RoleListView.vue'), meta: { permission: 'roles:view', title: '角色权限' } },
@@ -92,7 +93,6 @@ function landing(permissions: string[], isSuper: boolean): string {
     ['tickets:view', '/service'],
     ['config_center:view', '/config'],
     ['notifications:view', '/notifications'],
-    ['plugins:view', '/plugins'],
     ['logs:view', '/logs'],
     ['settings:view', '/settings'],
     ['roles:view', '/roles'],

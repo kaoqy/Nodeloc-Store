@@ -36,6 +36,7 @@ const canAssign = computed(() => auth.allows('tickets', 'assign'))
 
 const loading = ref(true)
 const busy = ref(false)
+const action = ref('')
 const error = ref('')
 const notice = ref('')
 const detail = ref<TicketDetail | null>(null)
@@ -69,13 +70,14 @@ async function load() {
   }
 }
 
-async function run(action: () => Promise<unknown>, message: string) {
+async function run(name: string, task: () => Promise<unknown>, message: string) {
   if (busy.value) return
   busy.value = true
+  action.value = name
   error.value = ''
   notice.value = ''
   try {
-    await action()
+    await task()
     notice.value = message
     detail.value = await getTicket(props.ticketId)
     emit('changed')
@@ -83,18 +85,23 @@ async function run(action: () => Promise<unknown>, message: string) {
     error.value = errorMessage(err, '操作失败')
   } finally {
     busy.value = false
+    action.value = ''
   }
 }
 
 function changeStatus(next: string) {
-  void run(() => setTicketStatus(props.ticketId, next, '客服在客服中心更新状态'), '工单状态已更新为「' + (ticketStatusLabels[next] ?? next) + '」')
+  void run(
+    'status',
+    () => setTicketStatus(props.ticketId, next, '客服在客服中心更新状态'),
+    '工单状态已更新为「' + (ticketStatusLabels[next] ?? next) + '」',
+  )
 }
 
 function send() {
   if (!reply.value.trim()) return
   const body = reply.value.trim()
   const isInternal = internal.value
-  void run(async () => {
+  void run(isInternal ? 'note' : 'reply', async () => {
     await replyTicket(props.ticketId, body, isInternal)
     reply.value = ''
     internal.value = false
@@ -122,15 +129,15 @@ async function openSummary() {
 
 function assignTo(agentId: number) {
   showAssign.value = false
-  void run(() => assignTicket(props.ticketId, agentId), '工单已指派')
+  void run('assign', () => assignTicket(props.ticketId, agentId), '工单已指派')
 }
 
 function autoAssign() {
-  void run(() => autoAssignTicket(props.ticketId), '已自动分配给负载最低的在线客服')
+  void run('auto-assign', () => autoAssignTicket(props.ticketId), '已自动分配给负载最低的在线客服')
 }
 
 function claim() {
-  void run(() => claimTicket(props.ticketId), '已接管这张工单')
+  void run('claim', () => claimTicket(props.ticketId), '已接管这张工单')
 }
 
 const senderMeta = (type: string) => {
@@ -155,22 +162,45 @@ onMounted(load)
       <div v-for="i in 5" :key="i" class="skeleton h-10 w-full" />
     </div>
 
+    <div v-else-if="error && !ticket" class="card text-center">
+      <p class="alert alert-danger text-left" role="alert">{{ error }}</p>
+      <button class="btn btn-secondary btn-sm mt-3" :disabled="loading" @click="load">重新加载工单</button>
+    </div>
+
     <template v-else-if="ticket">
       <!-- 工单头部与操作 -->
-      <div class="card space-y-3">
-        <div class="flex flex-wrap items-center gap-2">
-          <h3 class="min-w-0 flex-1 truncate text-[15px] font-bold">{{ ticket.subject }}</h3>
-          <StatusBadge :value="ticket.status" :label="ticketStatusLabels[ticket.status]" />
-          <StatusBadge :value="ticket.priority" :label="ticketPriorityLabels[ticket.priority]" />
-          <span class="badge-neutral">{{ ticket.handler === 'human' ? (ticket.assigned_agent_id ? '已指派客服' : '人工待分派') : '历史工单' }}</span>
+      <div class="card ticket-panel-head space-y-4">
+        <div class="ticket-panel-title">
+          <div class="min-w-0">
+            <p class="eyebrow">工单处理</p>
+            <h3 class="mt-1 min-w-0 truncate text-[17px] font-bold">{{ ticket.subject }}</h3>
+          </div>
+          <div class="flex flex-wrap items-center justify-end gap-1.5">
+            <StatusBadge :value="ticket.status" :label="ticketStatusLabels[ticket.status]" />
+            <StatusBadge :value="ticket.priority" :label="ticketPriorityLabels[ticket.priority]" />
+            <span class="badge-neutral">{{ ticket.handler === 'human' ? (ticket.assigned_agent_id ? '已指派客服' : '人工待分派') : '历史工单' }}</span>
+          </div>
         </div>
-        <p class="mono quiet text-[11.5px]">
-          {{ ticket.ticket_no }}
-          <span v-if="ticket.order_no"> · 订单 {{ ticket.order_no }}</span>
-          <span v-if="detail?.username"> · {{ detail.username }}</span>
-        </p>
+        <dl class="ticket-meta">
+          <div>
+            <dt>工单号</dt>
+            <dd class="mono">{{ ticket.ticket_no }}</dd>
+          </div>
+          <div>
+            <dt>买家</dt>
+            <dd>{{ detail?.username || '#' + ticket.user_id }}</dd>
+          </div>
+          <div v-if="ticket.order_no">
+            <dt>关联订单</dt>
+            <dd class="mono">{{ ticket.order_no }}</dd>
+          </div>
+          <div>
+            <dt>更新时间</dt>
+            <dd>{{ when(ticket.updated_at || ticket.created_at) }}</dd>
+          </div>
+        </dl>
 
-        <div v-if="canManage" class="flex flex-wrap gap-1.5">
+        <div v-if="canManage" class="ticket-actions">
           <!-- 按一天的处理顺序排：先接单，再流转，最后结单。
                主操作（接管）在前，转交类在中间，结单类靠右。 -->
           <button
@@ -179,7 +209,8 @@ onMounted(load)
             :disabled="busy"
             @click="claim"
           >
-            接管处理
+            <span v-if="action === 'claim'" class="spinner spinner-light !size-3.5" />
+            {{ action === 'claim' ? '接管中…' : '接管处理' }}
           </button>
           <button
             v-if="ticket.status !== 'human_handling'"
@@ -187,12 +218,15 @@ onMounted(load)
             :disabled="busy"
             @click="changeStatus('human_handling')"
           >
-            我来处理
+            <span v-if="action === 'status'" class="spinner !size-3.5" />
+            {{ action === 'status' ? '更新中…' : '我来处理' }}
           </button>
           <button v-if="canAssign" class="btn btn-quiet btn-sm" :disabled="busy" @click="showAssign = true">转交客服</button>
-          <button v-if="canAssign" class="btn btn-quiet btn-sm" :disabled="busy" @click="autoAssign">自动分配</button>
+          <button v-if="canAssign" class="btn btn-quiet btn-sm" :disabled="busy" @click="autoAssign">
+            {{ action === 'auto-assign' ? '分配中…' : '自动分配' }}
+          </button>
           <button class="btn btn-quiet btn-sm" @click="openSummary">问题摘要</button>
-          <button class="btn btn-secondary btn-sm" :disabled="busy" @click="changeStatus('resolved')">标记已解决</button>
+          <button class="btn btn-secondary btn-sm ticket-action-end" :disabled="busy" @click="changeStatus('resolved')">标记已解决</button>
           <button class="btn btn-quiet btn-sm" :disabled="busy" @click="changeStatus('closed')">关闭</button>
         </div>
       </div>
@@ -233,6 +267,15 @@ onMounted(load)
 
       <!-- 回复区 -->
       <div v-if="canManage" class="card space-y-3">
+        <div class="card-head !mb-0">
+          <div>
+            <h4 class="text-[13.5px] font-bold">回复买家</h4>
+            <p class="sub">回复会进入买家工单；内部备注只给客服看。</p>
+          </div>
+          <span v-if="busy && (action === 'reply' || action === 'note')" class="badge-info">
+            {{ action === 'note' ? '保存备注中' : '发送中' }}
+          </span>
+        </div>
         <div v-if="quickReplies.length" class="flex flex-wrap gap-1.5">
           <button v-for="item in quickReplies" :key="item.id" class="chip" @click="useQuickReply(item.id ?? 0)">
             {{ item.title }}
@@ -245,8 +288,8 @@ onMounted(load)
             作为内部备注（买家不可见）
           </label>
           <button class="btn btn-primary btn-sm ml-auto" :disabled="busy || !reply.trim()" @click="send">
-            <span v-if="busy" class="spinner !size-3.5" />
-            {{ busy ? '发送中…' : '发送' }}
+            <span v-if="busy && (action === 'reply' || action === 'note')" class="spinner !size-3.5" />
+            {{ action === 'note' ? '保存备注' : '发送回复' }}
           </button>
         </div>
       </div>
@@ -287,3 +330,72 @@ onMounted(load)
     </AppDrawer>
   </div>
 </template>
+
+<style scoped>
+.ticket-panel-head {
+  border-top: 2px solid var(--accent-line);
+}
+
+.ticket-panel-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ticket-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-sm);
+  background: var(--stroke-quiet);
+}
+
+.ticket-meta > div {
+  min-width: 0;
+  background: var(--surface-sunken);
+  padding: 9px 11px;
+}
+
+.ticket-meta dt {
+  font-size: 10.5px;
+  color: var(--text-quiet);
+}
+
+.ticket-meta dd {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ticket-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  border-top: 1px solid var(--stroke-quiet);
+  padding-top: 13px;
+}
+
+.ticket-action-end {
+  margin-left: auto;
+}
+
+@media (min-width: 640px) {
+  .ticket-meta {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
+  .ticket-action-end {
+    margin-left: 0;
+  }
+}
+</style>

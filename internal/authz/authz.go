@@ -326,7 +326,6 @@ func PermissionCatalog() []PermissionGroup {
 		{Resource: "settings", Label: "设置", Actions: []string{"view", "manage"}},
 		{Resource: "roles", Label: "角色权限", Actions: []string{"view", "manage"}},
 		{Resource: "logs", Label: "审计日志", Actions: []string{"view"}},
-		{Resource: "plugins", Label: "插件", Actions: []string{"view", "manage"}},
 	}
 }
 

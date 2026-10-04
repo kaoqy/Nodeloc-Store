@@ -96,7 +96,6 @@ async function logout() {
           <!-- Plain anchor: /admin is a separate SPA, so it needs a full load.
                Narrow phones list this in the ☰ drawer instead, next to 退出登录. -->
           <a v-if="auth.canEnterAdmin" href="/admin/" class="header-action hidden sm:inline-flex">进入后台</a>
-          <button class="header-action hidden sm:inline-flex" @click="logout">退出</button>
         </template>
         <template v-else>
           <RouterLink to="/login" class="btn btn-ghost btn-sm">登录</RouterLink>
@@ -130,7 +129,6 @@ async function logout() {
           个人中心<span v-if="inbox.unread" class="nums ml-2 text-[var(--accent)]">{{ badge }} 未读</span>
         </RouterLink>
         <a v-if="auth.canEnterAdmin" href="/admin/" class="nav-item w-full">进入后台</a>
-        <button class="btn btn-quiet btn-sm mt-1 self-start" @click="logout">退出登录</button>
       </template>
       <template v-else>
         <RouterLink to="/login" class="nav-item w-full">登录</RouterLink>

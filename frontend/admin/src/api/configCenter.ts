@@ -33,10 +33,45 @@ export interface SystemConfig {
   sort_order: number
 }
 
+/** Backend values are strings, but older/imported rows may be null or numeric. */
+function configValue(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Normalize one configuration row before the page sees it. A malformed row
+ * should degrade to safe defaults, not make a whole settings group disappear.
+ */
+function normalizeConfig(raw: unknown): SystemConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const row = raw as Record<string, unknown>
+  const group = String(row.group ?? '').trim()
+  const key = String(row.key ?? '').trim()
+  if (!group || !key) return null
+  return {
+    id: typeof row.id === 'number' ? row.id : undefined,
+    group,
+    key,
+    value: configValue(row.value),
+    value_type: String(row.value_type ?? 'string'),
+    label: row.label === null || row.label === undefined ? undefined : String(row.label),
+    description: row.description === null || row.description === undefined ? undefined : String(row.description),
+    is_secret: row.is_secret === true || row.is_secret === 1 || row.is_secret === '1',
+    sort_order: Number.isFinite(Number(row.sort_order)) ? Number(row.sort_order) : 0,
+  }
+}
+
 export const listTemplates = (category = '') =>
   client
-    .get<{ data: NotificationTemplate[] }>('/admin/config-center/templates', { params: { category: category || undefined } })
-    .then((r) => r.data.data ?? [])
+    .get<{ data?: NotificationTemplate[] }>('/admin/config-center/templates', { params: { category: category || undefined } })
+    .then((r) => (Array.isArray(r.data.data) ? r.data.data : []))
 
 export const saveTemplate = (template: Partial<NotificationTemplate>) =>
   template.id
@@ -67,8 +102,8 @@ export const listNotificationLogs = (params: { status?: string; limit?: number; 
 
 export const listSystemConfigs = (group = '') =>
   client
-    .get<{ data: SystemConfig[] }>('/admin/config-center/system', { params: { group: group || undefined } })
-    .then((r) => r.data.data ?? [])
+    .get<{ data?: unknown[] }>('/admin/config-center/system', { params: { group: group || undefined } })
+    .then((r) => (Array.isArray(r.data.data) ? r.data.data.map(normalizeConfig).filter((item): item is SystemConfig => item !== null) : []))
 
 export const saveSystemConfig = (config: Partial<SystemConfig>) =>
   client.put('/admin/config-center/system', config).then((r) => r.data.data)

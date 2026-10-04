@@ -56,8 +56,6 @@ export const NAV_GROUPS: NavGroup[] = [
         permission: 'coupons:view', keywords: ['coupon', '优惠码'] },
       { path: '/activities', label: '活动管理', hint: '折扣活动与适用范围', icon: 'activities',
         permission: 'activities:view', keywords: ['activity', '活动', '促销'] },
-      { path: '/plugins', label: '插件管理', hint: '交付提供者与映射', icon: 'plugins',
-        permission: 'plugins:view', keywords: ['plugin', '插件'] },
     ],
   },
   {

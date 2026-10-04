@@ -261,9 +261,9 @@ onMounted(() => {
         <button v-if="narrowed" class="btn btn-quiet btn-sm" @click="clearFilters">清除筛选</button>
       </div>
 
-      <div class="grid gap-4 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+      <div class="ticket-workspace grid gap-4 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
         <!-- 队列 -->
-        <div class="space-y-2">
+        <div class="ticket-queue space-y-2">
           <div v-if="loading" class="space-y-2">
             <div v-for="i in 6" :key="i" class="skeleton h-16 w-full" />
           </div>
@@ -272,8 +272,9 @@ onMounted(() => {
             <button class="btn btn-secondary btn-sm mt-3" @click="load">重新加载</button>
           </div>
           <div v-else-if="!rows.length" class="card py-16 text-center">
+            <p class="mb-3 text-[var(--text-quiet)]" aria-hidden="true">◍</p>
             <p class="font-semibold">没有符合条件的工单</p>
-            <p class="quiet mt-1.5 text-sm">换个筛选条件，或等待买家提交新问题。</p>
+            <p class="quiet mt-1.5 text-sm">{{ narrowed ? '换个筛选条件，或清除筛选查看全部。' : '买家提交问题后，工单会出现在这里。' }}</p>
             <button v-if="narrowed" class="btn btn-secondary btn-sm mt-5" @click="clearFilters">清除筛选</button>
           </div>
           <template v-else>
@@ -332,6 +333,15 @@ onMounted(() => {
 .queue-item:hover { border-color: var(--stroke-hi); background: var(--surface-hi); }
 .queue-item-active { border-color: var(--accent-line); background: var(--accent-soft); }
 
+.ticket-workspace {
+  align-items: start;
+}
+
+.ticket-queue {
+  position: sticky;
+  top: 76px;
+}
+
 .todo-card {
   display: flex;
   align-items: center;
@@ -343,4 +353,10 @@ onMounted(() => {
   transition: border-color var(--fast), transform var(--normal) var(--spring);
 }
 .todo-card:hover { border-color: var(--stroke-hi); transform: translateY(-1px); }
+
+@media (max-width: 1279px) {
+  .ticket-queue {
+    position: static;
+  }
+}
 </style>

@@ -81,12 +81,12 @@ func TestEveryRouteRegisters(t *testing.T) {
 		t.Fatalf("public plugin descriptor answered %d, want 200: %s", recorder.Code, recorder.Body.String())
 	}
 
-	// And the back office list must stay gated: a plugin catalog names provider
-	// keys and configuration, which is staff business.
+	// The plugin management screen is gone. Its old list endpoint must not
+	// remain registered behind a hidden menu item.
 	recorder = httptest.NewRecorder()
 	request = httptest.NewRequest(http.MethodGet, "/api/v1/plugins", nil)
 	router.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("plugin catalog answered %d as a guest, want 401", recorder.Code)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("retired plugin catalog answered %d, want 404", recorder.Code)
 	}
 }

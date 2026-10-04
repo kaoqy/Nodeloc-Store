@@ -384,6 +384,9 @@ async function load() {
     ])
     templates.value = templateList
     configs.value = configList
+    if (!templateList.length && !configList.length) {
+      error.value = '配置暂时没有可读取的内容，请检查服务端配置后重试。'
+    }
     if (tab.value === 'remind') {
       const page = await listNotificationLogs({ status: logStatus.value || undefined, limit: 50 })
         .catch(() => ({ data: [], total: 0 }))
@@ -521,22 +524,30 @@ async function removeTemplate(template: NotificationTemplate) {
   }
 }
 
-async function saveConfig(config: SystemConfig) {
+async function saveConfig(config: SystemConfig): Promise<boolean> {
   busy.value = true
   error.value = ''
   try {
-    await saveSystemConfig(config)
+    const saved = await saveSystemConfig(config)
+    if (saved && typeof saved === 'object' && 'value' in saved) {
+      config.value = String((saved as SystemConfig).value ?? '')
+    }
     notice.value = '配置「' + (config.label || config.key) + '」已保存。'
+    return true
   } catch (err) {
-    error.value = errorMessage(err, '保存配置失败')
+    error.value = '配置「' + (config.label || config.key) + '」保存失败：' + errorMessage(err, '请检查填写内容')
+    return false
   } finally {
     busy.value = false
   }
 }
 
 function toggleBool(config: SystemConfig) {
-  config.value = config.value === 'true' || config.value === '1' ? 'false' : 'true'
-  void saveConfig(config)
+  const previous = config.value
+  config.value = previous === 'true' || previous === '1' ? 'false' : 'true'
+  void saveConfig(config).then((saved) => {
+    if (!saved) config.value = previous
+  })
 }
 
 watch(() => route.query.tab, (value) => { tab.value = normaliseTab(value) })
