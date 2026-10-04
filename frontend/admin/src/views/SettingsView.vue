@@ -25,7 +25,7 @@ const SETTINGS_TABS = [
   { key: 'site', label: '站点与品牌', hint: '站名、域名、Logo 与外观' },
   { key: 'oauth', label: 'NodeLoc 登录', hint: 'OAuth 凭据与登录记录' },
   { key: 'payment', label: '支付设置', hint: 'Nodeloc Payments 凭据' },
-  { key: 'content', label: '内容与开关', hint: '公告、页脚与功能开关' },
+  { key: 'content', label: '内容与功能', hint: '公告、页脚与功能开关' },
   { key: 'smtp', label: '邮件通知', hint: 'SMTP 与发信测试' },
 ] as const
 

@@ -187,7 +187,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
+  <div class="mx-auto w-full max-w-6xl px-4 py-9 sm:px-6">
     <header class="flex flex-wrap items-end justify-between gap-4">
       <div>
         <p class="eyebrow">客服中心</p>
@@ -201,20 +201,20 @@ onMounted(() => {
       </button>
     </header>
 
-    <div class="mt-6 grid gap-3 sm:grid-cols-3">
-      <button class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]" @click="startTicket">
+    <div class="support-actions mt-6 grid gap-3 sm:grid-cols-3">
+      <button class="support-action text-left" @click="startTicket">
         <p class="font-semibold">联系客服</p>
         <p class="quiet mt-1 text-xs">描述问题，提交后由客服跟进</p>
       </button>
       <button
-        class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]"
+        class="support-action text-left"
         @click="tab = 'tickets'; showCreate = true"
       >
         <p class="font-semibold">提交工单</p>
         <p class="quiet mt-1 text-xs">复杂问题留档，客服按顺序跟进</p>
       </button>
       <!-- 活动是独立页面：这里只给一个指路卡片，不再把促销内容混进客服页。 -->
-      <RouterLink to="/activities" class="card-quiet text-left transition-colors hover:border-[var(--stroke-hi)]">
+      <RouterLink to="/activities" class="support-action text-left">
         <p class="font-semibold">活动中心</p>
         <p class="quiet mt-1 text-xs">查看正在进行的促销与领券活动</p>
       </RouterLink>
@@ -265,7 +265,7 @@ onMounted(() => {
       <p v-if="ticketError" class="alert alert-danger mt-4" role="alert">{{ ticketError }}</p>
 
       <div class="mt-4 grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <div class="space-y-2">
+        <div class="support-ticket-list space-y-2">
           <div v-if="ticketLoading" class="card space-y-2">
             <div v-for="i in 3" :key="i" class="skeleton h-8 w-full" />
           </div>
@@ -275,8 +275,8 @@ onMounted(() => {
           <button
             v-for="item in filteredTickets"
             :key="item.id"
-            class="card-quiet w-full text-left transition-colors"
-            :class="detail?.ticket.id === item.id ? 'border-[var(--accent-line)]' : ''"
+            class="support-ticket-row w-full text-left"
+            :class="detail?.ticket.id === item.id ? 'support-ticket-row-active' : ''"
             @click="openTicket(item.id)"
           >
             <p class="truncate text-sm font-semibold">{{ item.subject }}</p>
@@ -296,7 +296,7 @@ onMounted(() => {
             选择左侧工单查看对话
           </div>
           <div v-else class="space-y-4">
-            <div class="card space-y-2">
+            <div class="card support-ticket-detail space-y-2">
               <div class="flex flex-wrap items-center gap-2">
                 <h2 class="text-lg font-bold">{{ detail.ticket.subject }}</h2>
                 <span :class="statusTone[detail.ticket.status] || 'badge'">{{ ticketStatusLabels[detail.ticket.status] || detail.ticket.status }}</span>
@@ -373,3 +373,59 @@ onMounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.support-action {
+  min-height: 78px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 14px 15px;
+  transition: border-color var(--fast), background var(--fast), transform 200ms var(--spring);
+}
+
+.support-action:hover {
+  border-color: var(--stroke-hi);
+  background: var(--surface-hi);
+  transform: translateY(-1px);
+}
+
+.support-ticket-list {
+  max-height: 68vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.support-ticket-row {
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 12px 13px;
+  transition: border-color var(--fast), background var(--fast);
+}
+
+.support-ticket-row:hover {
+  border-color: var(--stroke-hi);
+  background: var(--surface-hi);
+}
+
+.support-ticket-row-active {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.support-ticket-detail {
+  position: sticky;
+  top: 82px;
+}
+
+@media (max-width: 1279px) {
+  .support-ticket-list {
+    max-height: none;
+  }
+
+  .support-ticket-detail {
+    position: static;
+  }
+}
+</style>

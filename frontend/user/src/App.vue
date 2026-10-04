@@ -66,7 +66,7 @@ onMounted(async () => {
 
         <p class="text-xs text-[var(--text-quiet)]/80">
           {{ site.footerNote || 'NodeLoc OAuth2 登录 · Nodeloc Payments 支付 · 卡密自动交付' }}
-          <span v-if="site.version" class="nums"> · v{{ site.version }}</span>
+          <span v-if="site.version && site.showVersion" class="nums"> · v{{ site.version }}</span>
         </p>
 
         <p v-if="site.footerLinks.length || site.footerText" class="text-xs text-[var(--text-quiet)]/70">

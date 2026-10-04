@@ -451,7 +451,7 @@ html[data-theme='light'] {
     border: 1px solid var(--stroke);
     border-radius: var(--radius-md);
     background: var(--surface);
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--shadow-xs);
   }
   .table-container table, .table table { width: 100%; border-collapse: separate; border-spacing: 0; }
   /* The header stays put while the rows scroll: a table of orders is read from
@@ -465,24 +465,25 @@ html[data-theme='light'] {
   }
   .table-container thead th, .table thead th {
     text-align: left;
-    padding: 10px 16px;
+    padding: 11px 16px;
     font-size: 10.5px;
     font-weight: 700;
     color: var(--text-quiet);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    background: var(--surface-sunken);
+    background: var(--bg-raise);
     border-bottom: 1px solid var(--stroke);
     white-space: nowrap;
   }
   .table-container td, .table td {
-    padding: 12px 16px;
+    padding: 13px 16px;
     font-size: 13px;
     border-bottom: 1px solid var(--stroke-quiet);
     vertical-align: middle;
     background: var(--surface);
   }
   .table-container tbody tr:last-child td, .table tbody tr:last-child td { border-bottom: 0; }
+  .table-container tbody tr { transition: background var(--fast); }
   .table-container td.num, .table td.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
   /* Opt-in wrapping for a cell that carries a sentence rather than a value. */
   .table-container td.wrap, .table td.wrap { white-space: normal; min-width: 18ch; }
@@ -696,7 +697,22 @@ html[data-theme='light'] {
   align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
-.page-head h2 { font-size: 1.05rem; font-weight: 700; }
+.page-head h2 { font-size: 1.1rem; font-weight: 750; }
+.page-head-description { max-width: 72ch; }
 .page-head .page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.admin-main {
+  width: 100%;
+  max-width: 1600px;
+  margin-inline: auto;
+}
+
+.admin-titleblock {
+  position: relative;
+}
+
+.admin-toolbar {
+  flex-shrink: 0;
+}

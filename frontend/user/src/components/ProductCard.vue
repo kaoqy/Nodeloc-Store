@@ -62,16 +62,32 @@ const soldOut = computed(
     </div>
 
     <div class="product-body">
-      <div class="flex items-start justify-between gap-2.5">
-        <h3 class="product-name">{{ product.name }}</h3>
-        <span v-if="product.category" class="badge badge-neutral shrink-0">{{ product.category.name }}</span>
+      <div class="product-heading">
+        <div class="min-w-0">
+          <p class="product-kicker">{{ product.category?.name || '数字商品' }}</p>
+          <h3 class="product-name">{{ product.name }}</h3>
+        </div>
+        <span v-if="product.is_featured" class="product-bookmark" aria-label="店长推荐">推荐</span>
       </div>
 
       <p class="product-summary">{{ product.summary || product.description || '暂无简介' }}</p>
 
+      <div class="product-facts">
+        <span v-if="site.showSoldCount" class="product-fact">
+          已售 <strong class="nums">{{ product.sold_count ?? 0 }}</strong>
+        </span>
+        <span v-if="product.stock_visible && product.stock_count > 0" class="product-fact">
+          现货 <strong class="nums">{{ product.stock_count }}</strong>
+        </span>
+        <span v-else-if="product.stock_visible && product.product_type === 'card'" class="product-fact product-fact-warn">
+          库存紧张
+        </span>
+        <span v-if="product.activity_name" class="product-fact product-fact-accent">{{ product.activity_name }}</span>
+      </div>
+
       <div class="product-price">
         <div class="min-w-0">
-          <span class="product-price-label">{{ onSale ? '活动价' : '现价' }}</span>
+          <span class="product-price-label">{{ onSale ? '活动价' : '售价' }}</span>
           <span class="product-price-pay">{{ money(pay) }}</span>
         </div>
         <div v-if="was > 0" class="product-price-was">
@@ -80,17 +96,9 @@ const soldOut = computed(
         </div>
       </div>
 
-      <div class="product-meta">
-        <span v-if="product.activity_name" class="badge badge-warning">{{ product.activity_name }}</span>
-        <span v-if="site.showSoldCount" class="quiet">
-          已售 <span class="nums">{{ product.sold_count ?? 0 }}</span>
-        </span>
-        <span v-if="product.stock_visible && product.stock_count > 0" class="quiet">
-          现货 <span class="nums">{{ product.stock_count }}</span>
-        </span>
-        <span v-else-if="product.stock_visible && product.product_type === 'card'" class="text-[var(--warning)]">
-          库存紧张
-        </span>
+      <div class="product-action">
+        <span>{{ soldOut ? '查看补货状态' : '查看商品' }}</span>
+        <span aria-hidden="true">→</span>
       </div>
     </div>
   </RouterLink>

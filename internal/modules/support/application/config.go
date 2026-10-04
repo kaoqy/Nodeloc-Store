@@ -375,15 +375,18 @@ func defaultSystemConfigs() []domain.SystemConfig {
 		{Group: "ticket", Key: "enable_rating", Value: "true", ValueType: "bool",
 			Label: "启用工单评价", Description: "工单结束后邀请买家打分，分数会进满意度统计。", SortOrder: 4},
 
-		// ── 订单规则 ──────────────────────────────────────────────
+		// ── 兼容设置（保留已有数据，不在配置页面展示）────────────
+		// 这些键在过去版本里可能已经被店家修改过，但当前版本没有对应的
+		// 执行路径。保留在 active 清单里可避免 seedSystemConfigs 删除旧值，
+		// 前端则不再渲染这些控件，避免出现「改了但不生效」的假配置。
 		{Group: "order", Key: "unpaid_cancel_hours", Value: "2", ValueType: "int",
-			Label: "待支付订单保留时长（小时）", Description: "超过这个时间仍未支付的订单会自动关闭，库存释放给其他买家。", SortOrder: 0},
+			Label: "待支付订单保留时长（小时）", Description: "历史兼容配置，当前版本未接入自动关单任务。", SortOrder: 0},
 		{Group: "order", Key: "auto_deliver_retry", Value: "true", ValueType: "bool",
-			Label: "交付失败自动重试", Description: "自动发货出错时后台会定期重试，直到成功或需要人工介入。", SortOrder: 1},
+			Label: "交付失败自动重试", Description: "历史兼容配置，当前版本未接入自动重试任务。", SortOrder: 1},
 
 		// ── 商品规则 ──────────────────────────────────────────────
 		{Group: "product", Key: "default_stock_alert", Value: "5", ValueType: "int",
-			Label: "库存预警阈值", Description: "卡密剩余数量低于这个值时，总览页列入库存预警。", SortOrder: 0},
+			Label: "库存预警阈值", Description: "历史兼容配置；当前预警阈值由系统设置中的功能开关读取。", SortOrder: 0},
 		{Group: "product", Key: "show_sold_count", Value: "true", ValueType: "bool",
 			Label: "前台显示销量", Description: "在商品卡片上显示已售数量。", SortOrder: 1},
 
@@ -397,21 +400,16 @@ func defaultSystemConfigs() []domain.SystemConfig {
 		{Group: "site", Key: "footer_show_version", Value: "true", ValueType: "bool",
 			Label: "页脚显示版本号", Description: "在店铺页脚展示当前版本，方便你核对线上是否是最新构建。", SortOrder: 0},
 
-		// ── 风控与限频 ────────────────────────────────────────────
 		{Group: "risk", Key: "coupon_max_attempts", Value: "10", ValueType: "int",
-			Label: "优惠码每分钟尝试上限", Description: "同一个来源每分钟最多尝试几次优惠码，防止被暴力猜码。", SortOrder: 0},
+			Label: "优惠码每分钟尝试上限", Description: "历史兼容配置，当前版本未接入限流计数器。", SortOrder: 0},
 		{Group: "risk", Key: "require_second_confirm", Value: "true", ValueType: "bool",
-			Label: "高风险操作二次确认", Description: "退款、发券这类写操作需要买家本人再确认一次。", SortOrder: 1},
-
-		// ── 数据保留 ──────────────────────────────────────────────
+			Label: "高风险操作二次确认", Description: "历史兼容配置，当前版本未接入统一二次确认中间件。", SortOrder: 1},
 		{Group: "retention", Key: "audit_log_days", Value: "180", ValueType: "int",
-			Label: "操作日志保留天数", Description: "后台操作记录保留多久，超期可由清理任务删除。", SortOrder: 0},
+			Label: "操作日志保留天数", Description: "历史兼容配置，当前版本未接入日志清理任务。", SortOrder: 0},
 		{Group: "retention", Key: "ticket_days", Value: "365", ValueType: "int",
-			Label: "工单保留天数", Description: "已关闭工单保留多久，便于日后复查。", SortOrder: 1},
-
-		// ── 文件上传 ──────────────────────────────────────────────
+			Label: "工单保留天数", Description: "历史兼容配置，当前版本未接入工单清理任务。", SortOrder: 1},
 		{Group: "upload", Key: "max_image_mb", Value: "8", ValueType: "int",
-			Label: "图片上传上限（MB）", Description: "商品封面与客服头像单张图片的体积上限。", SortOrder: 0},
+			Label: "图片上传上限（MB）", Description: "历史兼容配置；当前上传上限固定为 2 MB。", SortOrder: 0},
 	}
 }
 

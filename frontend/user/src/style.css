@@ -259,29 +259,68 @@ html[data-theme='light'] {
     display: flex;
     flex: 1;
     flex-direction: column;
-    padding: 16px 18px 18px;
+    padding: 16px 18px 14px;
+  }
+  .product-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .product-kicker {
+    margin-bottom: 4px;
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    color: var(--text-quiet);
   }
   .product-name {
     min-width: 0;
-    font-size: 15px;
-    font-weight: 650;
-    line-height: 1.45;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  .product-bookmark {
+    flex-shrink: 0;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--accent-line);
+    background: var(--accent-soft);
+    padding: 1px 7px;
+    font-size: 10.5px;
+    font-weight: 650;
+    color: var(--accent);
+  }
   .product-summary {
-    margin-top: 7px;
+    margin-top: 8px;
     min-height: 2.6em;
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: 12.5px;
+    line-height: 1.55;
     color: var(--text-dim);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  .product-facts {
+    display: flex;
+    min-height: 21px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin-top: 10px;
+    font-size: 11.5px;
+    color: var(--text-quiet);
+  }
+  .product-fact strong {
+    color: var(--text-dim);
+    font-weight: 650;
+  }
+  .product-fact-warn { color: var(--warning); }
+  .product-fact-accent { color: var(--accent); }
   .product-price {
     margin-top: auto;
     display: flex;
@@ -289,7 +328,7 @@ html[data-theme='light'] {
     align-items: flex-end;
     justify-content: space-between;
     gap: 8px;
-    padding-top: 16px;
+    padding-top: 14px;
   }
   .product-price-label {
     display: block;
@@ -299,7 +338,7 @@ html[data-theme='light'] {
   .product-price-pay {
     display: block;
     font-family: var(--font-mono);
-    font-size: 21px;
+    font-size: 22px;
     font-weight: 700;
     line-height: 1.25;
     color: var(--accent);
@@ -321,14 +360,22 @@ html[data-theme='light'] {
     font-weight: 600;
     color: var(--danger);
   }
-  .product-meta {
-    margin-top: 10px;
+  .product-action {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 6px 12px;
-    font-size: 11.5px;
-    color: var(--text-quiet);
+    justify-content: space-between;
+    gap: 8px;
+    margin: 13px -18px -14px;
+    border-top: 1px solid var(--stroke-quiet);
+    padding: 10px 18px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    transition: background var(--fast), color var(--fast);
+  }
+  .product-card:hover .product-action {
+    background: var(--surface-sunken);
+    color: var(--accent);
   }
 
   /* 详情页价格：单一强调色，现价与划线价并排，省下的金额单独成标签。 */

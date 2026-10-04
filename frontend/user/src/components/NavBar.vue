@@ -41,20 +41,23 @@ async function logout() {
 
 <template>
   <header class="site-header">
-    <div class="mx-auto flex h-16 w-full max-w-6xl items-center gap-4 px-4 sm:px-6">
+    <div class="site-header-inner mx-auto flex h-16 w-full max-w-6xl items-center gap-3 px-4 sm:px-6">
       <RouterLink to="/" class="flex items-center gap-2.5 font-semibold tracking-tight">
         <img v-if="site.logo" :src="site.logo" :alt="site.name" class="brand-mark object-cover" />
         <span v-else class="brand-mark">{{ site.initials }}</span>
-        <span class="hidden text-[15px] sm:block">{{ site.name }}</span>
+        <span class="min-w-0">
+          <span class="hidden max-w-[10rem] truncate text-[15px] sm:block">{{ site.name }}</span>
+          <span class="hidden text-[10.5px] font-normal text-[var(--text-quiet)] sm:block">数字商品商店</span>
+        </span>
       </RouterLink>
 
-      <nav class="ml-4 hidden items-center gap-6 lg:flex">
-        <RouterLink to="/" class="nav-item">商品</RouterLink>
-        <RouterLink to="/activities" class="nav-item">活动</RouterLink>
+      <nav class="site-nav ml-3 hidden items-center gap-1 lg:flex">
+        <RouterLink to="/" class="nav-item nav-pill">商品</RouterLink>
+        <RouterLink to="/activities" class="nav-item nav-pill">活动</RouterLink>
         <template v-if="auth.isAuthenticated">
-          <RouterLink to="/orders" class="nav-item">我的订单</RouterLink>
-          <RouterLink v-if="!isHome" to="/support" class="nav-item">客服中心</RouterLink>
-          <RouterLink to="/profile" class="nav-item relative">
+          <RouterLink to="/orders" class="nav-item nav-pill">我的订单</RouterLink>
+          <RouterLink v-if="!isHome" to="/support" class="nav-item nav-pill">客服中心</RouterLink>
+          <RouterLink to="/profile" class="nav-item nav-pill relative">
             个人中心
             <span
               v-if="inbox.unread"
@@ -66,7 +69,7 @@ async function logout() {
         </template>
       </nav>
 
-      <div class="ml-auto flex items-center gap-2">
+      <div class="site-header-actions ml-auto flex items-center gap-1.5">
         <button
           class="btn btn-ghost !px-2.5"
           :title="theme.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
@@ -77,8 +80,8 @@ async function logout() {
         </button>
 
         <template v-if="auth.isAuthenticated">
-          <RouterLink to="/profile" class="btn btn-quiet btn-sm max-w-[8rem] gap-2 sm:max-w-[12rem]">
-            <span class="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--surface-hi)] text-[11px] font-bold">
+          <RouterLink to="/profile" class="account-chip max-w-[8rem] gap-2 sm:max-w-[12rem]">
+            <span class="account-avatar">
               <img v-if="avatar" :src="avatar" alt="" class="size-full object-cover" />
               <span v-else>{{ initial }}</span>
             </span>
@@ -92,8 +95,8 @@ async function logout() {
           </RouterLink>
           <!-- Plain anchor: /admin is a separate SPA, so it needs a full load.
                Narrow phones list this in the ☰ drawer instead, next to 退出登录. -->
-          <a v-if="auth.canEnterAdmin" href="/admin/" class="btn btn-quiet btn-sm hidden sm:inline-flex">进入后台</a>
-          <button class="btn btn-ghost btn-sm hidden sm:inline-flex" @click="logout">退出</button>
+          <a v-if="auth.canEnterAdmin" href="/admin/" class="header-action hidden sm:inline-flex">进入后台</a>
+          <button class="header-action hidden sm:inline-flex" @click="logout">退出</button>
         </template>
         <template v-else>
           <RouterLink to="/login" class="btn btn-ghost btn-sm">登录</RouterLink>
@@ -101,7 +104,7 @@ async function logout() {
         </template>
 
         <button
-          class="btn btn-quiet btn-sm lg:hidden"
+          class="mobile-menu-button lg:hidden"
           :aria-label="menuOpen ? '关闭菜单' : '打开菜单'"
           :aria-expanded="menuOpen"
           @click="menuOpen = !menuOpen"
@@ -136,3 +139,66 @@ async function logout() {
     </nav>
   </header>
 </template>
+
+<style scoped>
+.site-header-inner { gap: 12px; }
+.site-nav { gap: 2px; }
+.nav-pill {
+  border-radius: var(--radius-sm);
+  padding: 7px 11px;
+}
+.nav-item.router-link-active::after { display: none; }
+.nav-pill.router-link-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.account-chip,
+.header-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 5px 10px 5px 6px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background var(--fast), border-color var(--fast), color var(--fast);
+}
+.account-chip:hover,
+.header-action:hover {
+  border-color: var(--stroke-hi);
+  background: var(--surface-hi);
+  color: var(--text);
+}
+.header-action { padding: 5px 10px; font-weight: 500; }
+.account-avatar {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  flex-shrink: 0;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--surface-hi);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+.mobile-menu-button {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 16px;
+}
+@media (min-width: 1024px) {
+  .mobile-menu-button { display: none; }
+}
+</style>

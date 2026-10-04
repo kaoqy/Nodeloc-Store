@@ -64,12 +64,12 @@ function goSettings() {
 
     <div :class="['transition-[padding] duration-300', collapsed ? 'lg:pl-[72px]' : 'lg:pl-[248px]']">
       <header class="site-header sticky top-0 z-20">
-        <div class="admin-topbar flex h-[60px] items-center gap-2.5 px-4 sm:px-6">
+        <div class="admin-topbar flex h-[64px] items-center gap-2.5 px-4 sm:px-6">
           <button class="icon-btn lg:hidden" type="button" aria-label="打开导航菜单" @click="navOpen = true">
             <AdminIcon name="menu" :size="18" />
           </button>
 
-          <div class="min-w-0">
+          <div class="admin-titleblock min-w-0">
             <h1 class="truncate text-[16px] font-bold leading-tight">{{ pageTitle }}</h1>
             <nav v-if="crumbs.length" class="crumb-row mt-0.5 hidden items-center gap-1.5 text-[11.5px] sm:flex" aria-label="路径">
               <template v-for="(crumb, index) in crumbs" :key="crumb.path">
@@ -86,7 +86,7 @@ function goSettings() {
             </nav>
           </div>
 
-          <div class="ml-auto flex items-center gap-1">
+          <div class="admin-toolbar ml-auto flex items-center gap-1">
             <RouterLink
               v-if="auth.allows('notifications', 'view')"
               to="/notifications"
@@ -157,7 +157,7 @@ function goSettings() {
       <!-- 点击空白处收起管理员菜单 -->
       <div v-if="userMenu" class="fixed inset-0 z-10" @click="userMenu = false" />
 
-      <main class="px-4 pb-14 pt-6 sm:px-6">
+      <main class="admin-main px-4 pb-14 pt-6 sm:px-6">
         <RouterView v-slot="{ Component, route: view }">
           <Transition name="page" mode="out-in">
             <component :is="Component" :key="view.fullPath" />

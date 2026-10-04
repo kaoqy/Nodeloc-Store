@@ -189,140 +189,316 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-6xl px-4 sm:px-6">
-    <p
-      v-if="announcement"
-      class="rise-in mt-8 flex items-start gap-3 rounded-[var(--radius-sm)] border border-[var(--accent-line)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-dim)]"
-      role="status"
-    >
-      <span aria-hidden="true" class="accent-text mt-px">📣</span>
-      <span class="min-w-0 flex-1 break-words whitespace-pre-line">{{ announcement }}</span>
-      <button class="hint shrink-0 transition-colors hover:text-[var(--text)]" aria-label="关闭公告" @click="hideAnnouncement">
-        知道了
-      </button>
-    </p>
-
-    <!-- Editorial intro: what this store ships, stated plainly. -->
-    <section class="rise-in mt-12 max-w-3xl">
-      <p class="eyebrow">数字商品商店</p>
-      <h1 class="home-title mt-3 text-4xl font-bold sm:text-5xl">
-        下单、支付、<span class="accent-text">即时到货</span>
-      </h1>
-      <p class="mt-4 text-[15px] leading-relaxed text-[var(--text-dim)]">
-        使用 NodeLoc 账号登录即可购买。卡密类商品在付款完成的瞬间自动交付，人工交付的商品会进入商家的发货队列并同步到你的订单。
+  <div class="home-page">
+    <div class="mx-auto w-full max-w-6xl px-4 sm:px-6">
+      <p
+        v-if="announcement"
+        class="rise-in mt-5 flex items-start gap-3 rounded-[var(--radius-sm)] border border-[var(--accent-line)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-dim)]"
+        role="status"
+      >
+        <span class="accent-text mt-px shrink-0" aria-hidden="true">公告</span>
+        <span class="min-w-0 flex-1 break-words whitespace-pre-line">{{ announcement }}</span>
+        <button class="hint shrink-0 transition-colors hover:text-[var(--text)]" aria-label="关闭公告" @click="hideAnnouncement">
+          知道了
+        </button>
       </p>
-      <dl class="mt-7 grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-4">
-        <div>
-          <dt class="text-[var(--text-quiet)]">在售商品</dt>
-          <dd class="nums text-lg font-semibold">{{ stats ? stats.products : '—' }}</dd>
-        </div>
-        <div>
-          <dt class="text-[var(--text-quiet)]">现货可购</dt>
-          <dd class="nums text-lg font-semibold">{{ stats ? stats.stock : '—' }}</dd>
-        </div>
-        <div>
-          <dt class="text-[var(--text-quiet)]">累计成交</dt>
-          <dd class="nums text-lg font-semibold">{{ stats ? stats.sales : '—' }}</dd>
-        </div>
-        <div>
-          <dt class="text-[var(--text-quiet)]">分类</dt>
-          <dd class="nums text-lg font-semibold">{{ stats ? stats.categories : '—' }}</dd>
-        </div>
-      </dl>
-    </section>
+    </div>
 
-    <PromoStrip />
-
-    <!-- Search + category filter -->
-    <section class="catalog-toolbar mt-12 flex flex-col gap-3 lg:flex-row lg:items-center">
-      <div class="relative sm:max-w-xs sm:flex-1">
-        <input v-model="keyword" type="search" class="input !pl-9" placeholder="搜索商品…" aria-label="搜索商品" />
-        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-quiet)]">⌕</span>
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <button class="chip" :class="{ 'chip-active': activeCategory === '' }" @click="activeCategory = ''">
-          全部
-        </button>
-        <button
-          v-for="item in categories"
-          :key="item.id"
-          class="chip"
-          :class="{ 'chip-active': activeCategory === item.id }"
-          @click="activeCategory = item.id"
-        >
-          {{ item.name }}
-          <span v-if="item.product_count" class="nums opacity-60">{{ item.product_count }}</span>
-        </button>
-      </div>
-      <div class="flex flex-wrap items-center gap-3 lg:ml-auto">
-        <button class="chip" :class="{ 'chip-active': featuredOnly }" @click="featuredOnly = !featuredOnly">
-          店长推荐
-        </button>
-        <button class="chip" :class="{ 'chip-active': inStockOnly }" @click="inStockOnly = !inStockOnly">
-          仅看现货
-        </button>
-        <div class="flex items-center gap-2">
-          <label class="hint whitespace-nowrap" for="sort">排序</label>
-          <select id="sort" v-model="sortBy" class="input !w-auto !py-1.5 text-[13px]">
-            <option v-for="item in SORTS" :key="item.key" :value="item.key">{{ item.label }}</option>
-          </select>
+    <section class="home-hero">
+      <div class="mx-auto grid w-full max-w-6xl gap-8 px-4 py-9 sm:px-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)] lg:items-end lg:py-12">
+        <div class="rise-in max-w-2xl">
+          <p class="eyebrow">数字商品商店</p>
+          <h1 class="home-title mt-2 text-3xl font-bold sm:text-4xl">
+            选好商品，<span class="accent-text">支付后自动交付</span>
+          </h1>
+          <p class="mt-3 text-sm leading-relaxed text-[var(--text-dim)] sm:text-[15px]">
+            使用 NodeLoc 账号登录即可购买。卡密在付款确认后自动发放，人工交付商品会进入发货队列，进度同步到订单详情。
+          </p>
+          <div class="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[var(--text-quiet)]">
+            <span>NodeLoc 授权登录</span>
+            <span>支付结果服务端核实</span>
+            <span>订单与交付记录可查</span>
+          </div>
         </div>
+
+        <dl class="home-metrics rise-in">
+          <div>
+            <dt>在售商品</dt>
+            <dd>{{ stats ? stats.products : '—' }}</dd>
+          </div>
+          <div>
+            <dt>现货可购</dt>
+            <dd>{{ stats ? stats.stock : '—' }}</dd>
+          </div>
+          <div>
+            <dt>累计成交</dt>
+            <dd>{{ stats ? stats.sales : '—' }}</dd>
+          </div>
+          <div>
+            <dt>商品分类</dt>
+            <dd>{{ stats ? stats.categories : '—' }}</dd>
+          </div>
+        </dl>
       </div>
     </section>
 
-    <p v-if="!loading && !error && products.length" class="hint mt-5 nums" role="status">
-      共 <span class="text-[var(--text-dim)]">{{ total }}</span> 件商品 · 第 {{ page }} / {{ pageCount }} 页
-    </p>
+    <div class="mx-auto w-full max-w-6xl px-4 sm:px-6">
+      <PromoStrip />
 
-    <div v-if="error" class="card mt-8 text-center">
-      <p class="alert alert-danger text-left" role="alert">{{ error }}</p>
-      <button class="btn btn-secondary mt-5" :disabled="loading" @click="load">
-        <span v-if="loading" class="spinner" />
-        {{ loading ? '重新加载中…' : '重新加载商品' }}
-      </button>
-    </div>
+      <section id="catalog" class="catalog-layout">
+        <aside class="catalog-aside">
+          <div>
+            <p class="eyebrow">商品分类</p>
+            <h2 class="mt-1.5 text-lg font-bold">按分类浏览</h2>
+          </div>
+          <div class="catalog-categories">
+            <button class="catalog-category" :class="{ 'catalog-category-active': activeCategory === '' }" @click="activeCategory = ''">
+              <span>全部商品</span>
+              <span class="nums">{{ stats ? stats.products : '—' }}</span>
+            </button>
+            <button
+              v-for="item in categories"
+              :key="item.id"
+              class="catalog-category"
+              :class="{ 'catalog-category-active': activeCategory === item.id }"
+              @click="activeCategory = item.id"
+            >
+              <span class="truncate">{{ item.name }}</span>
+              <span class="nums">{{ item.product_count ?? 0 }}</span>
+            </button>
+          </div>
+          <div class="mt-1 grid grid-cols-2 gap-2 lg:grid-cols-1">
+            <button class="catalog-quick" :class="{ 'catalog-quick-active': featuredOnly }" @click="featuredOnly = !featuredOnly">
+              店长推荐
+            </button>
+            <button class="catalog-quick" :class="{ 'catalog-quick-active': inStockOnly }" @click="inStockOnly = !inStockOnly">
+              仅看现货
+            </button>
+          </div>
+        </aside>
 
-    <!-- Loading -->
-    <div v-else-if="loading" class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-      <div v-for="i in 6" :key="i" class="card overflow-hidden !p-0">
-        <div class="skeleton aspect-[16/9] !rounded-none" />
-        <div class="space-y-3 p-5">
-          <div class="skeleton h-4 w-2/3" />
-          <div class="skeleton h-3 w-full" />
-          <div class="skeleton h-3 w-1/2" />
+        <div class="min-w-0">
+          <div class="catalog-topbar">
+            <div class="relative min-w-0 flex-1">
+              <input v-model="keyword" type="search" class="input !pl-9" placeholder="搜索商品…" aria-label="搜索商品" />
+              <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-quiet)]">⌕</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="hint whitespace-nowrap" for="sort">排序</label>
+              <select id="sort" v-model="sortBy" class="input !w-auto !py-2 text-[13px]">
+                <option v-for="item in SORTS" :key="item.key" :value="item.key">{{ item.label }}</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="catalog-heading">
+            <div>
+              <p class="eyebrow">{{ narrowed ? '筛选结果' : '全部商品' }}</p>
+              <h2 class="mt-1 text-xl font-bold">
+                {{ activeCategory === '' ? '在售商品' : categories.find((item) => item.id === activeCategory)?.name || '在售商品' }}
+              </h2>
+            </div>
+            <p v-if="!loading && !error" class="hint nums" role="status">
+              共 <span class="text-[var(--text-dim)]">{{ total }}</span> 件 · 第 {{ page }} / {{ pageCount }} 页
+            </p>
+          </div>
+
+          <div v-if="error" class="card text-center">
+            <p class="alert alert-danger text-left" role="alert">{{ error }}</p>
+            <button class="btn btn-secondary mt-5" :disabled="loading" @click="load">
+              <span v-if="loading" class="spinner" />
+              {{ loading ? '重新加载中…' : '重新加载商品' }}
+            </button>
+          </div>
+
+          <div v-else-if="loading" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div v-for="i in 6" :key="i" class="card overflow-hidden !p-0">
+              <div class="skeleton aspect-[16/9] !rounded-none" />
+              <div class="space-y-3 p-5">
+                <div class="skeleton h-4 w-2/3" />
+                <div class="skeleton h-3 w-full" />
+                <div class="skeleton h-3 w-1/2" />
+              </div>
+            </div>
+          </div>
+
+          <template v-else-if="products.length">
+            <div class="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <ProductCard v-for="product in products" :key="product.id" :product="product" />
+            </div>
+
+            <nav v-if="pageCount > 1" class="mt-10 flex flex-wrap items-center justify-center gap-2" aria-label="分页">
+              <button class="btn btn-quiet btn-sm" :disabled="page <= 1" @click="page -= 1">← 上一页</button>
+              <template v-for="item in pageCount" :key="item">
+                <button
+                  v-if="item === 1 || item === pageCount || Math.abs(item - page) <= 1"
+                  class="btn btn-sm"
+                  :class="item === page ? 'btn-primary' : 'btn-quiet'"
+                  @click="page = item"
+                >
+                  {{ item }}
+                </button>
+                <span v-else-if="item === 2 || item === pageCount - 1" class="hint">…</span>
+              </template>
+              <button class="btn btn-quiet btn-sm" :disabled="page >= pageCount" @click="page += 1">下一页 →</button>
+            </nav>
+          </template>
+
+          <div v-else class="card py-20 text-center">
+            <p class="text-[var(--text-quiet)]" aria-hidden="true">◍</p>
+            <p class="mt-3 font-semibold">{{ narrowed ? '没有匹配的商品' : '店铺还没有上架商品' }}</p>
+            <p class="mt-1.5 text-sm text-[var(--text-quiet)]">
+              {{ narrowed ? '换个关键词或分类试试' : '管理员在后台上架商品后即可在此购买' }}
+            </p>
+            <button v-if="narrowed" class="btn btn-secondary btn-sm mt-6" @click="resetFilters">清除筛选</button>
+          </div>
         </div>
-      </div>
-    </div>
-
-    <template v-else-if="products.length">
-      <div class="stagger mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        <ProductCard v-for="product in products" :key="product.id" :product="product" />
-      </div>
-
-      <nav v-if="pageCount > 1" class="mt-10 flex items-center justify-center gap-2" aria-label="分页">
-        <button class="btn btn-quiet btn-sm" :disabled="page <= 1" @click="page -= 1">← 上一页</button>
-        <template v-for="item in pageCount" :key="item">
-          <button
-            v-if="item === 1 || item === pageCount || Math.abs(item - page) <= 1"
-            class="btn btn-sm"
-            :class="item === page ? 'btn-primary' : 'btn-quiet'"
-            @click="page = item"
-          >
-            {{ item }}
-          </button>
-          <span v-else-if="item === 2 || item === pageCount - 1" class="hint">…</span>
-        </template>
-        <button class="btn btn-quiet btn-sm" :disabled="page >= pageCount" @click="page += 1">下一页 →</button>
-      </nav>
-    </template>
-
-    <div v-else class="card mt-8 py-20 text-center">
-      <p class="text-[var(--text-quiet)]" aria-hidden="true">◍</p>
-      <p class="mt-3 font-semibold">{{ narrowed ? '没有匹配的商品' : '店铺还没有上架商品' }}</p>
-      <p class="mt-1.5 text-sm text-[var(--text-quiet)]">
-        {{ narrowed ? '换个关键词或分类试试' : '管理员在后台上架商品后即可在此购买' }}
-      </p>
-      <button v-if="narrowed" class="btn btn-secondary btn-sm mt-6" @click="resetFilters">清除筛选</button>
+      </section>
     </div>
   </div>
 </template>
+
+<style scoped>
+.home-hero {
+  margin-top: 18px;
+  border-block: 1px solid var(--stroke);
+  background: var(--surface-sunken);
+}
+
+.home-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--stroke);
+}
+
+.home-metrics > div {
+  min-width: 0;
+  padding: 13px 16px;
+  border-right: 1px solid var(--stroke-quiet);
+  border-bottom: 1px solid var(--stroke-quiet);
+}
+
+.home-metrics dt {
+  color: var(--text-quiet);
+  font-size: 11.5px;
+}
+
+.home-metrics dd {
+  margin-top: 2px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.catalog-layout {
+  display: grid;
+  gap: 30px;
+  margin-top: 42px;
+}
+
+.catalog-aside {
+  min-width: 0;
+}
+
+.catalog-categories {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.catalog-categories::-webkit-scrollbar {
+  display: none;
+}
+
+.catalog-category,
+.catalog-quick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: left;
+  transition: border-color var(--fast), background var(--fast), color var(--fast);
+}
+
+.catalog-category {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+}
+
+.catalog-quick {
+  justify-content: center;
+  padding: 8px 12px;
+}
+
+.catalog-category:hover,
+.catalog-quick:hover {
+  border-color: var(--stroke-hi);
+  color: var(--text);
+}
+
+.catalog-category-active,
+.catalog-quick-active {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.catalog-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--stroke);
+  padding-bottom: 14px;
+}
+
+.catalog-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 22px 0 16px;
+}
+
+@media (min-width: 640px) {
+  .home-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .catalog-layout {
+    grid-template-columns: 214px minmax(0, 1fr);
+    gap: 34px;
+  }
+
+  .catalog-aside {
+    position: sticky;
+    top: 82px;
+    align-self: start;
+  }
+
+  .catalog-categories {
+    display: grid;
+    overflow: visible;
+    margin-top: 12px;
+  }
+
+  .catalog-category {
+    width: 100%;
+    padding-inline: 11px;
+  }
+}
+</style>

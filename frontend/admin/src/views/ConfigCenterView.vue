@@ -32,7 +32,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-type TabKey = 'support' | 'commerce' | 'activity' | 'site' | 'remind' | 'safety'
+type TabKey = 'support' | 'commerce' | 'activity' | 'site' | 'remind'
 
 interface TabDef {
   key: TabKey
@@ -47,7 +47,6 @@ const TABS: TabDef[] = [
   { key: 'activity', label: '营销规则', hint: '参与限制与优惠叠加', resources: ['config_center', 'activities'] },
   { key: 'site', label: '站点展示', hint: '前台露出的品牌信息', resources: ['config_center'] },
   { key: 'remind', label: '提醒事件', hint: '哪些事件要提醒、发给谁', resources: ['notification_templates', 'config_center'] },
-  { key: 'safety', label: '风控与保留', hint: '限频、二次确认与数据保留', resources: ['config_center'] },
 ]
 
 const visibleTabs = computed(() =>
@@ -101,18 +100,10 @@ const DEFAULT_VALUES: Record<string, string> = {
   'ticket/allow_reopen': 'true',
   'ticket/allow_cancel': 'true',
   'ticket/enable_rating': 'true',
-  'order/unpaid_cancel_hours': '2',
-  'order/auto_deliver_retry': 'true',
-  'product/default_stock_alert': '5',
   'product/show_sold_count': 'true',
   'activity/default_per_user_limit': '1',
   'activity/block_activity_stacking': 'true',
   'site/footer_show_version': 'true',
-  'risk/coupon_max_attempts': '10',
-  'risk/require_second_confirm': 'true',
-  'retention/audit_log_days': '180',
-  'retention/ticket_days': '365',
-  'upload/max_image_mb': '8',
 }
 
 const FIELD_META: Record<string, FieldMeta> = {
@@ -154,35 +145,6 @@ const FIELD_META: Record<string, FieldMeta> = {
     hint: '开启后工单结束会请买家打分，分数进入总览页的满意度统计。',
     preview: (c) => (isTruthy(c.value) ? '结单后请买家打分' : '结单直接结束，不打扰买家'),
   },
-  'order/unpaid_cancel_hours': {
-    unit: '小时',
-    range: { min: 1, max: 720 },
-    affects: '未支付订单的自动关单时间',
-    hint: (c) => `下单后 ${c.value || '—'} 小时内未支付，订单自动关闭并释放库存，买家需要重新下单。`,
-    preview: (c) => {
-      const hours = Number(c.value)
-      if (!Number.isFinite(hours) || hours <= 0) return ''
-      return hours < 24 ? `${hours} 小时后释放库存` : `${Math.round((hours / 24) * 10) / 10} 天后释放库存`
-    },
-  },
-  'order/auto_deliver_retry': {
-    onLabel: '自动重试',
-    offLabel: '不自动重试',
-    affects: '交付队列的后台重试',
-    hint: '自动发货失败时后台定期重试，直到成功或需要人工介入。关闭后失败的订单停在「待人工发货」。',
-    preview: (c) => (isTruthy(c.value) ? '失败订单会自动重试交付' : '失败订单停在「待人工发货」'),
-  },
-  'product/default_stock_alert': {
-    unit: '张',
-    range: { min: 0, max: 100000 },
-    affects: '总览页的库存预警列表',
-    hint: (c) => `卡密剩余低于 ${c.value || '—'} 张时，总览页把商品列入库存预警，提醒补货。填 0 表示不做预警。`,
-    preview: (c) => {
-      const n = Number(c.value)
-      if (!Number.isFinite(n) || n <= 0) return '不产生库存预警'
-      return `剩余 ≤ ${n} 张时预警`
-    },
-  },
   'product/show_sold_count': {
     onLabel: '显示销量',
     offLabel: '隐藏销量',
@@ -215,54 +177,6 @@ const FIELD_META: Record<string, FieldMeta> = {
     hint: '在店铺页脚展示当前版本，方便核对线上是否是最新构建。',
     preview: (c) => (isTruthy(c.value) ? '页脚显示一行版本号' : '页脚不显示版本号'),
   },
-  'risk/coupon_max_attempts': {
-    unit: '次/分钟',
-    range: { min: 1, max: 600 },
-    affects: '优惠码校验接口',
-    hint: (c) => `同一来源每分钟最多尝试 ${c.value || '—'} 次优惠码，超出会被限流，防止有人逐个猜码。`,
-    preview: (c) => {
-      const n = Number(c.value)
-      return Number.isFinite(n) && n > 0 ? `每分钟放行 ${n} 次校验` : ''
-    },
-  },
-  'risk/require_second_confirm': {
-    onLabel: '需要二次确认',
-    offLabel: '无需二次确认',
-    affects: '退款、发券等高金额写操作',
-    hint: '开启后，退款、发券这类写操作需要买家本人再确认一次；涉及金钱的活动卡片同样会强制二次确认。',
-    preview: (c) => (isTruthy(c.value) ? '高风险操作会先弹确认' : '高风险操作一步完成'),
-  },
-  'retention/audit_log_days': {
-    unit: '天',
-    range: { min: 7, max: 3650 },
-    affects: '后台操作记录',
-    hint: (c) => `后台操作记录保留 ${c.value || '—'} 天，超期可由清理任务删除；排查纠纷时先看这里。`,
-    preview: (c) => {
-      const n = Number(c.value)
-      return Number.isFinite(n) && n > 0 ? `约保留 ${Math.round(n / 30)} 个月` : ''
-    },
-  },
-  'retention/ticket_days': {
-    unit: '天',
-    range: { min: 7, max: 3650 },
-    affects: '已关闭工单',
-    hint: (c) => `已关闭工单保留 ${c.value || '—'} 天，便于日后复查；早于该期限的可由清理任务删除。`,
-    preview: (c) => {
-      const n = Number(c.value)
-      if (!Number.isFinite(n) || n <= 0) return ''
-      return `约保留 ${Math.round(n / 30)} 个月`
-    },
-  },
-  'upload/max_image_mb': {
-    unit: 'MB',
-    range: { min: 1, max: 20 },
-    affects: '商品封面与客服头像上传',
-    hint: (c) => `商品封面与客服头像单张图片不超过 ${c.value || '—'} MB，超过会被拒绝上传。`,
-    preview: (c) => {
-      const n = Number(c.value)
-      return Number.isFinite(n) && n > 0 ? `单张上限 ${n} MB` : ''
-    },
-  },
 }
 
 /** 每个标签页由哪些分组组成，以及分组内的标题与说明。 */
@@ -288,18 +202,9 @@ const TAB_SECTIONS: Record<TabKey, GroupBlock[]> = {
   ],
   commerce: [
     {
-      group: 'order', title: '订单与交付',
-      intro: '未支付订单的保留时长，以及自动发货失败后的处理方式。',
+      group: 'product', title: '商品展示',
+      intro: '控制前台商品卡片是否显示销量。',
       parts: [
-        { title: '未支付订单', keys: ['unpaid_cancel_hours'] },
-        { title: '自动交付', keys: ['auto_deliver_retry'] },
-      ],
-    },
-    {
-      group: 'product', title: '商品规则',
-      intro: '库存预警阈值与前台展示方式。',
-      parts: [
-        { title: '库存预警', keys: ['default_stock_alert'] },
         { title: '前台展示', keys: ['show_sold_count'] },
       ],
     },
@@ -324,30 +229,6 @@ const TAB_SECTIONS: Record<TabKey, GroupBlock[]> = {
     },
   ],
   remind: [],
-  safety: [
-    {
-      group: 'risk', title: '风控与限频',
-      intro: '防止优惠码被暴力猜测，以及高风险写操作的确认策略。',
-      parts: [
-        { title: '优惠码防刷', keys: ['coupon_max_attempts'] },
-        { title: '高风险操作', keys: ['require_second_confirm'] },
-      ],
-    },
-    {
-      group: 'retention', title: '数据保留',
-      intro: '各类记录保留多久，超期可由清理任务删除。',
-      parts: [
-        { title: '保留期限', keys: ['audit_log_days', 'ticket_days'] },
-      ],
-    },
-    {
-      group: 'upload', title: '文件上传',
-      intro: '图片上传的体积上限。',
-      parts: [
-        { title: '图片限制', keys: ['max_image_mb'] },
-      ],
-    },
-  ],
 }
 
 function metaOf(config: SystemConfig): FieldMeta {
@@ -480,9 +361,6 @@ const LEGACY_TABS: Record<string, TabKey> = {
   site: 'site',
   notify: 'remind',
   remind: 'remind',
-  risk: 'safety',
-  retention: 'safety',
-  upload: 'safety',
 }
 
 /** 已经彻底下线的后台地址：老书签不再映射到任何分组。 */

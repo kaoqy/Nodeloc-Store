@@ -144,11 +144,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-4xl px-4 py-10 sm:px-6">
-    <header class="mb-8 flex items-end justify-between gap-4">
+  <div class="mx-auto w-full max-w-4xl px-4 py-9 sm:px-6">
+    <header class="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
         <p class="eyebrow">进行中与历史订单</p>
-        <h1 class="mt-2 text-2xl font-bold">我的订单</h1>
+        <h1 class="mt-2 text-2xl font-bold sm:text-3xl">我的订单</h1>
       </div>
       <p v-if="!loading && orders.length" class="hint nums whitespace-nowrap">共 {{ total }} 笔</p>
     </header>
@@ -172,10 +172,10 @@ onMounted(() => {
       点开订单选「继续支付」即可。
     </p>
 
-    <div class="mb-4 flex flex-wrap items-center gap-2">
+    <div class="order-toolbar mb-5">
       <input
         v-model="query"
-        class="input w-full max-w-xs"
+        class="input min-w-0 flex-1"
         type="search"
         placeholder="按订单号 / 交易号 / 商品名搜索"
         aria-label="搜索我的订单"
@@ -185,7 +185,7 @@ onMounted(() => {
       <button v-if="query" class="btn btn-quiet btn-sm" @click="query = ''; search()">清除</button>
     </div>
 
-    <div class="mb-6 flex flex-wrap gap-2" role="group" aria-label="按订单状态筛选">
+    <div class="order-filters mb-6" role="group" aria-label="按订单状态筛选">
       <button
         v-for="item in FILTERS"
         :key="item.key || 'all'"
@@ -200,8 +200,8 @@ onMounted(() => {
     </div>
 
     <div v-if="loading" class="space-y-3">
-      <div v-for="i in 4" :key="i" class="card flex items-center gap-4 !py-5">
-        <div class="skeleton size-14 !rounded-md" />
+      <div v-for="i in 4" :key="i" class="card order-row flex items-center gap-4 !py-5">
+        <div class="skeleton size-14 !rounded-[var(--radius-sm)]" />
         <div class="flex-1 space-y-2">
           <div class="skeleton h-4 w-1/3" />
           <div class="skeleton h-3 w-1/2" />
@@ -223,9 +223,9 @@ onMounted(() => {
         <li v-for="order in orders" :key="order.id">
           <RouterLink
             :to="`/orders/${order.order_no}`"
-            class="card flex items-center gap-4 !p-4 transition-colors hover:border-[var(--stroke-hi)] order-row"
+            class="card order-row flex items-center gap-4 !p-4"
           >
-            <div class="grid size-14 shrink-0 place-items-center overflow-hidden rounded-md border border-[var(--stroke-quiet)] bg-[var(--surface-sunken)]">
+            <div class="order-thumb">
               <img
                 v-if="order.product?.image_path"
                 :src="order.product.image_path"
@@ -237,7 +237,7 @@ onMounted(() => {
               </span>
             </div>
 
-            <div class="min-w-0 flex-1">
+            <div class="order-main min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2">
                 <h2 class="truncate text-[15px] font-semibold">
                   {{ order.product?.name || '数字商品' }}
@@ -259,7 +259,7 @@ onMounted(() => {
               </p>
             </div>
 
-            <div class="shrink-0 text-right">
+            <div class="order-summary shrink-0 text-right">
               <p class="nums text-[15px] font-bold">{{ money(order.total_amount) }}</p>
               <span class="mt-1.5 badge" :class="orderStatus(order.status).badge">
                 {{ orderStatus(order.status).label }}
@@ -289,3 +289,78 @@ onMounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.order-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 10px;
+}
+
+.order-filters {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.order-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.order-row {
+  transition: border-color var(--fast), background var(--fast), transform 200ms var(--spring);
+}
+
+.order-row:hover {
+  border-color: var(--stroke-hi);
+  background: var(--surface-hi);
+  transform: translateY(-1px);
+}
+
+.order-thumb {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.order-summary {
+  min-width: 92px;
+  border-left: 1px solid var(--stroke-quiet);
+  padding-left: 16px;
+}
+
+@media (max-width: 520px) {
+  .order-row {
+    align-items: flex-start !important;
+    flex-wrap: wrap;
+  }
+
+  .order-main {
+    flex-basis: calc(100% - 70px);
+  }
+
+  .order-summary {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--stroke-quiet);
+    border-left: 0;
+    padding-top: 10px;
+    padding-left: 0;
+  }
+}
+</style>

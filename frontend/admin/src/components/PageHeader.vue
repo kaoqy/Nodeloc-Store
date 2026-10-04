@@ -20,7 +20,7 @@ withDefaults(
   <div class="page-head" :class="bordered ? 'border-b border-[var(--stroke)] pb-4' : ''">
     <div class="min-w-0">
       <h2 class="truncate">{{ title }}</h2>
-      <p v-if="description" class="quiet mt-1 max-w-3xl text-[12.5px] leading-relaxed">{{ description }}</p>
+      <p v-if="description" class="page-head-description quiet mt-1 max-w-3xl text-[12.5px] leading-relaxed">{{ description }}</p>
       <slot name="meta" />
     </div>
     <div v-if="$slots.actions" class="page-actions">

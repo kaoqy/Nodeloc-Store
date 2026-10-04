@@ -382,18 +382,21 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6">
-    <header class="mb-7">
-      <p class="eyebrow">账号、积分与通知</p>
-      <h1 class="mt-2 text-2xl font-bold">个人中心</h1>
+  <div class="profile-page mx-auto w-full max-w-5xl px-4 py-9 sm:px-6">
+    <header class="mb-6 flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <p class="eyebrow">账号、积分与通知</p>
+        <h1 class="mt-2 text-2xl font-bold sm:text-3xl">个人中心</h1>
+      </div>
+      <p class="hint max-w-md">资料、订单、积分和站内通知都在这里集中管理。</p>
     </header>
 
     <p v-if="message" class="alert alert-success mb-5" role="status">{{ message }}</p>
     <p v-if="error" class="alert alert-danger mb-5" role="alert">{{ error }}</p>
 
-    <section class="card">
+    <section class="card profile-summary">
       <div class="profile-hero flex items-start gap-4">
-        <div class="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--stroke)] bg-[var(--surface-hi)] text-xl font-bold">
+        <div class="profile-avatar grid size-[72px] shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--stroke-hi)] bg-[var(--surface-hi)] text-xl font-bold">
           <img v-if="avatar" :src="avatar" :alt="displayName" class="size-full object-cover" />
           <span v-else>{{ initials }}</span>
         </div>
@@ -413,7 +416,7 @@ onMounted(async () => {
             {{ user.bio }}
           </p>
         </div>
-        <div v-if="!editing" class="flex shrink-0 flex-col items-end gap-2">
+        <div v-if="!editing" class="flex shrink-0 flex-wrap items-end justify-end gap-2">
           <button class="btn btn-quiet btn-sm" @click="startEditing">编辑资料</button>
           <button class="btn btn-quiet btn-sm" :disabled="uploadingAvatar" @click="avatarInput?.click()">
             {{ uploadingAvatar ? '上传中…' : '换头像' }}
@@ -425,20 +428,20 @@ onMounted(async () => {
 
       <div class="my-5 divider" />
 
-      <dl class="grid grid-cols-2 gap-x-6 gap-y-4 text-sm sm:grid-cols-4">
-        <div>
+      <dl class="profile-stats mt-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <div class="profile-stat">
           <dt class="text-[var(--text-quiet)]">用户 ID</dt>
           <dd class="nums mt-1">{{ user?.id ?? '—' }}</dd>
         </div>
-        <div>
+        <div class="profile-stat">
           <dt class="text-[var(--text-quiet)]">积分</dt>
           <dd class="nums mt-1">{{ user?.points ?? 0 }}</dd>
         </div>
-        <div>
+        <div class="profile-stat">
           <dt class="text-[var(--text-quiet)]">注册时间</dt>
           <dd class="mt-1">{{ when(user?.created_at) }}</dd>
         </div>
-        <div>
+        <div class="profile-stat">
           <dt class="text-[var(--text-quiet)]">上次登录</dt>
           <dd class="mt-1">{{ when(user?.last_login_at) }}</dd>
         </div>
@@ -693,3 +696,40 @@ onMounted(async () => {
     </nav>
   </div>
 </template>
+
+<style scoped>
+.profile-summary {
+  overflow: hidden;
+}
+
+.profile-avatar {
+  box-shadow: 0 0 0 4px var(--surface-hi);
+}
+
+.profile-stats {
+  border-top: 1px solid var(--stroke-quiet);
+  padding-top: 18px;
+}
+
+.profile-stat {
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  padding: 10px 12px;
+}
+
+.profile-stat dd {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .profile-hero {
+    flex-wrap: wrap;
+  }
+}
+</style>

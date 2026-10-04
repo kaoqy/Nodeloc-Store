@@ -71,9 +71,9 @@ func TestSystemConfigValueReadsSavedValue(t *testing.T) {
 // than silently leaving a risky feature on.
 func TestSystemConfigBoolRejectsGarbage(t *testing.T) {
 	service := newConfigService(t, []domain.SystemConfig{
-		{Base: models.Base{ID: 1}, Group: "risk", Key: "require_second_confirm", Value: "maybe", ValueType: "bool"},
+		{Base: models.Base{ID: 1}, Group: "ticket", Key: "allow_reopen", Value: "maybe", ValueType: "bool"},
 	})
-	if service.SystemConfigBool(context.Background(), "risk", "require_second_confirm", true) {
+	if service.SystemConfigBool(context.Background(), "ticket", "allow_reopen", true) {
 		t.Fatal("garbage value was treated as enabled")
 	}
 }

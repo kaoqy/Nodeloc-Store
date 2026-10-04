@@ -128,6 +128,9 @@ func (s *Service) Initialized() bool {
 // Status is the payload for GET /api/v1/system/status.
 func (s *Service) Status() map[string]any {
 	initialized := s.Initialized()
+	s.mu.Lock()
+	db := s.db
+	s.mu.Unlock()
 	status := map[string]any{
 		"initialized": initialized,
 		"version":     Version,
@@ -147,6 +150,9 @@ func (s *Service) Status() map[string]any {
 			app["footer_note"] = rt.App.FooterNote
 			app["footer_links"] = rt.App.FooterLinks
 			app["announcement"] = rt.App.Announcement
+			// The footer version switch lives in 业务配置 so the storefront and the
+			// configuration centre read one value instead of the footer guessing.
+			app["show_version"] = s.configBool(db, "site", "footer_show_version", true)
 			status["features"] = map[string]any{
 				"registration": rt.Features.RegistrationEnabled(),
 				"checkin":      rt.Features.CheckinEnabled(),
@@ -163,6 +169,27 @@ func (s *Service) Status() map[string]any {
 		status["app"] = app
 	}
 	return status
+}
+
+// configBool reads one boolean from the cross-module configuration table. The
+// system service owns the public status response, so it needs this one small
+// reader instead of importing the support module and creating a cycle.
+func (s *Service) configBool(db *gorm.DB, group, key string, fallback bool) bool {
+	if db == nil {
+		return fallback
+	}
+	var row models.SystemConfig
+	if err := db.Where("\"group\" = ? AND key = ?", group, key).First(&row).Error; err != nil {
+		return fallback
+	}
+	switch strings.ToLower(strings.TrimSpace(row.Value)) {
+	case "1", "true", "on", "yes":
+		return true
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return fallback
+	}
 }
 
 // ShellIdentity is the copy an HTML document needs before its JavaScript boots:

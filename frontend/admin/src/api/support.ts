@@ -243,8 +243,8 @@ export const listAgents = () =>
 
 export const saveAgent = (agent: Partial<CustomerServiceAgent>) =>
   agent.id
-    ? client.put('/admin/agents/' + agent.id, agent).then((r) => r.data.agent as CustomerServiceAgent)
-    : client.post('/admin/agents', agent).then((r) => r.data.agent as CustomerServiceAgent)
+    ? client.put<{ data: CustomerServiceAgent }>('/admin/agents/' + agent.id, agent).then((r) => r.data.data)
+    : client.post<{ data: CustomerServiceAgent }>('/admin/agents', agent).then((r) => r.data.data)
 
 export const deleteAgent = (id: number) => client.delete('/admin/agents/' + id)
 

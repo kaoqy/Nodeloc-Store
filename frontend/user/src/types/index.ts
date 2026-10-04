@@ -226,6 +226,7 @@ export interface SiteStatus {
     footer_note?: string
     footer_links?: FooterLink[]
     announcement?: string
+    show_version?: boolean
   }
   features?: {
     registration?: boolean

@@ -12,6 +12,7 @@ export const useSiteStore = defineStore('site', () => {
   const logo = ref('')
   const initialized = ref(true)
   const version = ref('')
+  const showVersion = ref(true)
 
   // Everything below is the shop owner's wording, typed in 后台设置. The
   // storefront only renders it.
@@ -40,6 +41,7 @@ export const useSiteStore = defineStore('site', () => {
         footerNote.value = status.app.footer_note || ''
         footerLinks.value = status.app.footer_links ?? []
         announcement.value = status.app.announcement || ''
+        showVersion.value = status.app.show_version !== false
       }
       if (status.features) {
         registrationEnabled.value = status.features.registration !== false
@@ -77,6 +79,7 @@ export const useSiteStore = defineStore('site', () => {
     logo,
     initialized,
     version,
+    showVersion,
     footerText,
     footerNote,
     footerLinks,
