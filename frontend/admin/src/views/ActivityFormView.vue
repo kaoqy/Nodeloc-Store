@@ -157,7 +157,12 @@ const editingIndex = ref(-1)
 const coupons = ref<{ id: number; code: string }[]>([])
 
 function parseTiers(text: string): { threshold: number; amount: number }[] {
-  const tiers = JSON.parse(text || '[]') as { threshold?: number; amount?: number }[]
+  let tiers: { threshold?: number; amount?: number }[]
+  try {
+    tiers = JSON.parse(text || '[]') as { threshold?: number; amount?: number }[]
+  } catch {
+    throw new Error('阶梯配置不是合法 JSON，请检查格式后再保存')
+  }
   if (!Array.isArray(tiers) || tiers.length === 0) throw new Error('阶梯档位至少要有一档')
   return tiers.map((tier) => ({
     threshold: Number(tier.threshold) || 0,
@@ -193,7 +198,13 @@ function buildConfig(value: RuleDraft): string {
 }
 
 function loadDraft(kind: string, config: string) {
-  const parsed = JSON.parse(config || '{}') as Record<string, unknown>
+  let parsed: Record<string, unknown> = {}
+  try {
+    parsed = JSON.parse(config || '{}') as Record<string, unknown>
+  } catch {
+    // 历史坏配置不能拖垮整个编辑页；按空规则打开，保存时会写成合法 JSON。
+    parsed = {}
+  }
   const num = (key: string, fallback: number) => {
     const value = Number(parsed[key])
     return Number.isFinite(value) && value !== 0 ? value : fallback
@@ -226,20 +237,20 @@ function ruleConfigSummary(item: ActivityRule) {
       case 'percent_off':
         return config.percent + ' 折（' + config.percent + '%）'
       case 'amount_off':
-        return '每单减 ' + config.amount + ' 元'
+        return '每单减 ' + config.amount + ' NL'
       case 'fixed_price':
-        return '折后单价 ' + config.price + ' 元'
+        return '折后单价 ' + config.price + ' NL'
       case 'full_reduce': {
         const tiers = (JSON.parse(item.config).tiers ?? []) as { threshold: number; amount: number }[]
         if (tiers.length) return tiers.map((tier) => '满 ' + tier.threshold + ' 减 ' + tier.amount).join('，')
-        return '满 ' + config.threshold + ' 元减 ' + config.amount + ' 元'
+        return '满 ' + config.threshold + ' NL 减 ' + config.amount + ' NL'
       }
       case 'full_quantity':
         return config.per_unit
-          ? '满 ' + config.quantity + ' 件每件减 ' + config.per_unit + ' 元'
-          : '满 ' + config.quantity + ' 件减 ' + config.amount + ' 元'
+          ? '满 ' + config.quantity + ' 件每件减 ' + config.per_unit + ' NL'
+          : '满 ' + config.quantity + ' 件减 ' + config.amount + ' NL'
       case 'bulk_price':
-        return '满 ' + config.quantity + ' 件单价 ' + config.price + ' 元'
+        return '满 ' + config.quantity + ' 件单价 ' + config.price + ' NL'
       case 'coupon_lock':
         return '指定优惠券 #' + config.coupon_id
       case 'gift_coupon':

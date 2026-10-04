@@ -52,16 +52,16 @@ const disabled = computed(() => props.saving || !props.dirty)
 
 <template>
   <div
-    class="sticky top-[72px] z-10 flex flex-wrap items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--stroke)] bg-[var(--glass)] px-3 py-2 backdrop-blur"
+    class="save-bar"
     role="toolbar"
     aria-label="配置操作"
   >
-    <span class="quiet text-xs">
+    <span class="save-bar-status quiet text-xs">
       {{ canManage ? (dirty ? '有未保存的改动' : '已是最新') : '只读' }}
       <template v-if="hint"> · {{ hint }}</template>
     </span>
 
-    <div class="ml-auto flex flex-wrap gap-2">
+    <div class="save-bar-actions">
       <button
         v-if="testable && canManage"
         type="button"
@@ -95,8 +95,59 @@ const disabled = computed(() => props.saving || !props.dirty)
         :disabled="disabled || !canManage"
         @click="emit('save')"
       >
+        <span v-if="saving" class="spinner spinner-light !size-3.5" />
         {{ saving ? '保存中…' : saveLabel }}
       </button>
     </div>
   </div>
 </template>
+
+<style scoped>
+.save-bar {
+  position: sticky;
+  top: 72px;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: var(--glass);
+  padding: 8px 12px;
+  backdrop-filter: blur(14px);
+}
+
+.save-bar-status {
+  min-width: 0;
+  flex: 1;
+}
+
+.save-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .save-bar {
+    position: sticky;
+    top: auto;
+    bottom: 10px;
+    align-items: stretch;
+  }
+
+  .save-bar-status {
+    flex-basis: 100%;
+  }
+
+  .save-bar-actions {
+    width: 100%;
+  }
+
+  .save-bar-actions .btn {
+    flex: 1;
+  }
+}
+</style>

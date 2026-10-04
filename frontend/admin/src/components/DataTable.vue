@@ -67,8 +67,12 @@ const emit = defineEmits<{ retry: []; clearFilters: []; change: [page: number] }
       </button>
     </div>
 
-    <div v-else-if="loading" class="table-container">
-      <div class="space-y-2 p-4">
+    <div v-else-if="loading" class="card data-loading" role="status" aria-live="polite">
+      <div class="data-loading-head">
+        <span class="spinner" />
+        <span>正在加载数据…</span>
+      </div>
+      <div class="space-y-2">
         <div v-for="i in 6" :key="i" class="skeleton h-9 w-full" />
       </div>
     </div>
@@ -120,3 +124,18 @@ const emit = defineEmits<{ retry: []; clearFilters: []; change: [page: number] }
     </template>
   </div>
 </template>
+
+<style scoped>
+.data-loading {
+  padding: 14px;
+}
+
+.data-loading-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+</style>

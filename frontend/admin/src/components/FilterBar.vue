@@ -7,11 +7,55 @@ defineProps<{ count?: string }>()
 </script>
 
 <template>
-  <div class="card flex flex-wrap items-center gap-2 !p-3">
-    <slot />
-    <span v-if="count" class="quiet nums ml-auto text-xs">{{ count }}</span>
-    <div v-if="$slots.actions" class="flex flex-wrap gap-2" :class="count ? '' : 'ml-auto'">
-      <slot name="actions" />
+  <div class="card filter-bar !p-3">
+    <div class="filter-bar-fields">
+      <slot />
+    </div>
+    <div class="filter-bar-tail">
+      <span v-if="count" class="quiet nums text-xs">{{ count }}</span>
+      <div v-if="$slots.actions" class="flex flex-wrap gap-2">
+        <slot name="actions" />
+      </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.filter-bar-fields,
+.filter-bar-tail {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-bar-tail {
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .filter-bar,
+  .filter-bar-fields,
+  .filter-bar-tail {
+    width: 100%;
+  }
+
+  .filter-bar-tail {
+    margin-left: 0;
+    justify-content: space-between;
+  }
+
+  .filter-bar :deep(.input) {
+    max-width: 100%;
+  }
+}
+</style>

@@ -40,6 +40,16 @@ const checkedAt = ref('')
 // Whether the page is quietly reloading for delivery, so the empty delivery box
 // can say so instead of looking like a dead end.
 const deliveryPolling = ref(false)
+const formValueEntries = computed<[string, string][]>(() => {
+  const raw = order.value?.form_values
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return Object.entries(parsed).map(([key, value]) => [key, String(value ?? '')])
+  } catch {
+    return []
+  }
+})
 const notice = computed(() => paymentNotice(typeof route.query.pay === 'string' ? route.query.pay : ''))
 let settleTimer: number | undefined
 let deliveryTimer: number | undefined
@@ -239,7 +249,7 @@ async function refreshDelivery() {
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6">
+  <div class="order-detail-page mx-auto w-full max-w-4xl px-4 py-9 sm:px-6">
     <!-- 已经读到手的订单不会被轮询刷成一片灰骨架：等发货时每 6 秒重载一次，
          把内容换成骨架等于把买家刚看到的卡密藏起来。 -->
     <div v-if="loading && !order" class="space-y-5">
@@ -263,7 +273,7 @@ async function refreshDelivery() {
 
       <p v-if="notice" class="alert" :class="notice.badge" role="status">{{ notice.label }}</p>
 
-      <section class="card">
+      <section class="card order-overview">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
             <p class="eyebrow">订单详情</p>
@@ -281,10 +291,25 @@ async function refreshDelivery() {
           <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
         </div>
 
+        <div class="order-meta-grid">
+          <div>
+            <dt>下单时间</dt>
+            <dd class="nums">{{ when(order.created_at) }}</dd>
+          </div>
+          <div>
+            <dt>交付状态</dt>
+            <dd>{{ fulfillmentStatus(order.fulfillment_status, order.status).label }}</dd>
+          </div>
+          <div>
+            <dt>商品数量</dt>
+            <dd class="nums">× {{ order.quantity }}</dd>
+          </div>
+        </div>
+
         <div class="my-5 divider" />
 
-        <div class="flex items-start gap-4">
-          <div class="grid size-16 shrink-0 place-items-center overflow-hidden rounded-md border border-[var(--stroke-quiet)] bg-[var(--surface-sunken)]">
+        <div class="order-product-row flex items-start gap-4">
+          <div class="order-product-thumb">
             <img
               v-if="order.product?.image_path"
               :src="order.product.image_path"
@@ -308,7 +333,7 @@ async function refreshDelivery() {
               {{ money(order.unit_price) }} × {{ order.quantity }}
             </p>
           </div>
-          <div class="text-right">
+          <div class="order-product-total text-right">
             <p class="hint">实付</p>
             <p class="nums accent-text text-xl font-bold">{{ money(order.total_amount) }}</p>
           </div>
@@ -342,7 +367,12 @@ async function refreshDelivery() {
         </div>
         <p v-if="error" class="alert alert-warning mt-5" role="alert">{{ error }}</p>
 
-        <div v-if="order.status === 'pending'" class="mt-5 flex flex-wrap items-center gap-3">
+        <div v-if="order.status === 'pending'" class="order-action-bar mt-5">
+          <div>
+            <p class="text-sm font-semibold">这笔订单还未完成支付</p>
+            <p class="hint mt-0.5">已扣款时先确认支付结果，不要重复付款。</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
           <button class="btn btn-primary" :disabled="paying" @click="pay">
             <span v-if="paying" class="spinner spinner-light" />
             {{ paying ? '跳转支付中…' : '继续支付' }}
@@ -352,15 +382,16 @@ async function refreshDelivery() {
             {{ confirming ? '确认中…' : '我已支付，去确认' }}
           </button>
           <RouterLink to="/" class="btn btn-quiet btn-sm">返回挑选</RouterLink>
+          </div>
         </div>
-        <div v-else-if="awaitingDelivery" class="mt-5 flex flex-wrap items-center gap-3">
+        <div v-else-if="awaitingDelivery" class="order-action-bar order-action-wait mt-5">
           <p class="flex-1 text-sm text-[var(--text-dim)]">
             <span v-if="order.fulfillment_status === 'waiting_stock'">卡密库存已临时售罄，补货后商店会自动为你交付。</span>
             <span v-else-if="order.fulfillment_status === 'manual_pending'">商家正在人工交付，完成后这里会显示结果与说明。</span>
             <span v-else-if="order.fulfillment_status === 'plugin_pending'">商店正在通过插件为你交付，完成后这里会自动显示结果。</span>
             <span v-else>支付已完成，交付通常几秒内到达，本页会自动刷新。</span>
           </p>
-          <button class="btn btn-quiet btn-sm" :disabled="loading" @click="refreshDelivery">
+          <button class="btn btn-quiet btn-sm shrink-0" :disabled="loading" @click="refreshDelivery">
             {{ loading ? '刷新中…' : '立即刷新交付' }}
           </button>
         </div>
@@ -459,12 +490,114 @@ async function refreshDelivery() {
             <dt class="text-[var(--text-quiet)]">我的备注</dt>
             <dd class="mt-0.5 break-words whitespace-pre-line text-[var(--text-dim)]">{{ order.customer_note }}</dd>
           </div>
-          <div v-if="order.form_values" class="min-w-0">
+          <div v-if="formValueEntries.length" class="min-w-0">
             <dt class="text-[var(--text-quiet)]">购买信息</dt>
-            <dd class="mt-0.5 text-[var(--text-dim)]"><div v-for="(value, key) in JSON.parse(order.form_values)" :key="key" class="break-words">{{ key }}：{{ value }}</div></dd>
+            <dd class="mt-0.5 text-[var(--text-dim)]"><div v-for="([key, value]) in formValueEntries" :key="key" class="break-words">{{ key }}：{{ value }}</div></dd>
           </div>
         </dl>
       </section>
     </div>
   </div>
 </template>
+
+<style scoped>
+.order-overview {
+  border-top: 2px solid var(--accent-line);
+}
+
+.order-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-sm);
+  background: var(--stroke-quiet);
+}
+
+.order-meta-grid > div {
+  min-width: 0;
+  background: var(--surface-sunken);
+  padding: 10px 12px;
+}
+
+.order-meta-grid dt {
+  color: var(--text-quiet);
+  font-size: 11px;
+}
+
+.order-meta-grid dd {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-product-thumb {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.order-product-total {
+  min-width: 88px;
+}
+
+.order-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  padding: 13px 14px;
+}
+
+.order-action-wait {
+  border-color: var(--warning-soft);
+  background: var(--warning-soft);
+}
+
+@media (max-width: 640px) {
+  .order-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .order-meta-grid > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .order-product-row {
+    flex-wrap: wrap;
+  }
+
+  .order-product-total {
+    width: 100%;
+    border-top: 1px solid var(--stroke-quiet);
+    padding-top: 10px;
+    text-align: left !important;
+  }
+
+  .order-action-bar {
+    align-items: stretch;
+  }
+
+  .order-action-bar > div:last-child {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
+</style>

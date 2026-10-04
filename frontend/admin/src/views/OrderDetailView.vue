@@ -19,6 +19,16 @@ const showDeliver = ref(false)
 closeOnEscape(showDeliver, false)
 const deliveryContent = ref('')
 const copied = ref(false)
+const formValueEntries = computed<[string, string][]>(() => {
+  const raw = order.value?.form_values
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return Object.entries(parsed).map(([key, value]) => [key, String(value ?? '')])
+  } catch {
+    return []
+  }
+})
 
 // Every button below moves the order or the money, so they belong to
 // orders:manage. A 客服 account with only orders:view reads this same screen and
@@ -283,9 +293,9 @@ onMounted(load)
               <dt class="quiet">备注</dt>
               <dd class="min-w-0 break-words text-right">{{ order.customer_note || '—' }}</dd>
             </div>
-            <div v-if="order.form_values" class="border-t border-[var(--stroke)] pt-2">
+            <div v-if="formValueEntries.length" class="border-t border-[var(--stroke)] pt-2">
               <dt class="quiet">购买信息</dt>
-              <dd class="mt-1 text-right"><div v-for="(value, key) in JSON.parse(order.form_values)" :key="key" class="break-words">{{ key }}：{{ value }}</div></dd>
+              <dd class="mt-1 text-right"><div v-for="([key, value]) in formValueEntries" :key="key" class="break-words">{{ key }}：{{ value }}</div></dd>
             </div>
           </dl>
         </div>

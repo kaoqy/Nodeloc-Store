@@ -481,6 +481,7 @@ html[data-theme='light'] {
     border-bottom: 1px solid var(--stroke-quiet);
     vertical-align: middle;
     background: var(--surface);
+    height: 56px;
   }
   .table-container tbody tr:last-child td, .table tbody tr:last-child td { border-bottom: 0; }
   .table-container tbody tr { transition: background var(--fast); }
@@ -488,6 +489,14 @@ html[data-theme='light'] {
   /* Opt-in wrapping for a cell that carries a sentence rather than a value. */
   .table-container td.wrap, .table td.wrap { white-space: normal; min-width: 18ch; }
   .table-container td.actions, .table td.actions { text-align: right; white-space: nowrap; }
+  .table-container td.text-right .btn, .table-container td.actions .btn {
+    vertical-align: middle;
+  }
+  .table-container td.text-right > .flex,
+  .table-container td.actions > .flex {
+    min-height: 36px;
+    align-items: center;
+  }
 
   /* ── Feedback states ── */
   .alert {
@@ -644,13 +653,34 @@ html[data-theme='light'] {
   .overlay > * { max-height: calc(100dvh - 24px); width: min(100%, 42rem); }
   .table-container { border-radius: var(--radius-sm); max-height: none; }
   .table-container::after {
-    content: '左右滑动查看更多';
+    content: '左右滑动查看完整表格';
     display: block;
+    position: sticky;
+    left: 0;
     padding: 7px 12px;
     color: var(--text-quiet);
     font-size: 11px;
     border-top: 1px solid var(--stroke-quiet);
     background: var(--surface);
+  }
+  .table-container thead th,
+  .table-container td {
+    padding-inline: 12px;
+  }
+  .table-container td.actions,
+  .table-container td.text-right {
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    background: var(--surface);
+    box-shadow: -10px 0 14px -14px var(--text);
+  }
+  .table-container thead th:last-child {
+    position: sticky;
+    right: 0;
+    z-index: 3;
+    background: var(--bg-raise);
+    box-shadow: -10px 0 14px -14px var(--text);
   }
 }
 
@@ -675,6 +705,10 @@ html[data-theme='light'] {
      slivers — a product name stacked one character per line — instead of using
      the width the scroll is offering. Long prose cells opt back in with .wrap. */
   .table-container td:not(.wrap) { white-space: nowrap; }
+  .table-container td {
+    height: auto;
+    min-height: 52px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

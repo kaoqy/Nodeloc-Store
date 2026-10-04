@@ -348,7 +348,7 @@ watch(
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
+  <div class="product-detail-page mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
     <div v-if="loading" class="grid gap-8 lg:grid-cols-[1.5fr_1fr]">
       <div class="space-y-4">
         <div class="skeleton aspect-[16/9] w-full !rounded-lg" />
@@ -378,7 +378,7 @@ watch(
           ← 全部商品
         </RouterLink>
 
-        <div class="card mt-4 overflow-hidden !p-0">
+        <div class="card product-showcase mt-4 overflow-hidden !p-0">
           <div class="aspect-[16/9] w-full bg-[var(--surface-sunken)]">
             <img
               v-if="product.image_path"
@@ -393,18 +393,29 @@ watch(
             </div>
           </div>
 
-          <div class="p-6 sm:p-8">
+          <div class="product-showcase-body p-6 sm:p-8">
+            <div class="product-showcase-head">
+              <div class="min-w-0">
+                <p class="eyebrow">{{ product.category?.name || '数字商品' }}</p>
+                <h1 class="mt-2 break-words text-2xl font-bold sm:text-3xl">{{ product.name }}</h1>
+              </div>
+              <span class="product-delivery-badge" :class="product.product_type === 'card' ? 'is-auto' : 'is-manual'">
+                {{ product.product_type === 'card' ? '自动交付' : '人工交付' }}
+              </span>
+            </div>
             <div class="flex flex-wrap items-center gap-2">
-              <span v-if="product.category" class="badge badge-neutral">{{ product.category.name }}</span>
               <span class="badge" :class="product.product_type === 'card' ? 'badge-teal' : 'badge-accent'">
                 {{ product.product_type === 'card' ? '付款后自动交付' : '商家人工交付' }}
               </span>
               <span v-if="product.is_featured" class="badge badge-accent">店长推荐</span>
             </div>
 
-            <h1 class="mt-4 break-words text-3xl font-bold">{{ product.name }}</h1>
-            <p v-if="product.summary" class="mt-2 text-[15px] text-[var(--text-dim)]">{{ product.summary }}</p>
-            <p class="hint mt-2 nums">已售 {{ product.sold_count ?? 0 }} 件</p>
+            <p v-if="product.summary" class="mt-4 text-[15px] leading-relaxed text-[var(--text-dim)]">{{ product.summary }}</p>
+            <div class="product-showcase-meta">
+              <span class="nums">已售 {{ product.sold_count ?? 0 }} 件</span>
+              <span v-if="cardStock !== null && !soldOut" class="nums">现货 {{ cardStock }} 件</span>
+              <span v-if="soldOut" class="text-[var(--warning)]">暂时缺货</span>
+            </div>
             <p v-if="product.delivery_instructions" class="card-quiet mt-5 break-words whitespace-pre-line text-sm leading-relaxed text-[var(--text-dim)]">
               {{ product.delivery_instructions }}
             </p>
@@ -428,7 +439,14 @@ watch(
         </section>
       </section>
 
-      <aside class="card lg:sticky lg:top-24">
+      <aside class="card purchase-panel lg:sticky lg:top-24">
+        <div class="purchase-head">
+          <div>
+            <p class="eyebrow">结算</p>
+            <h2 class="mt-1 text-lg font-bold">确认购买</h2>
+          </div>
+          <span class="badge badge-neutral">安全支付</span>
+        </div>
         <div class="detail-price">
           <span class="detail-price-label">{{ activitySaving > 0 ? '活动价' : '现价' }}</span>
           <div class="detail-price-row">
@@ -488,8 +506,8 @@ watch(
             <textarea id="note" v-model="note" class="input" maxlength="500" placeholder="选填，例如规格要求"></textarea>
           </div>
 
-          <ul v-if="applicablePromos.length" class="space-y-2">
-            <li v-for="promo in applicablePromos" :key="promo.code" class="card-quiet px-3 py-2.5">
+          <ul v-if="applicablePromos.length" class="purchase-promos space-y-2">
+            <li v-for="promo in applicablePromos" :key="promo.code" class="purchase-promo px-3 py-2.5">
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <p class="mono text-sm font-semibold">{{ promo.code }}</p>
@@ -546,7 +564,7 @@ watch(
 
           <!-- 折扣明细：活动、优惠码逐项列出，最后一项才是真正要付的钱。
                买家在点下支付之前就应该能自己算出这个数。 -->
-          <div class="space-y-1.5 text-sm">
+          <div class="purchase-total space-y-1.5 text-sm">
             <div class="flex items-baseline justify-between text-[var(--text-dim)]">
               <span>商品原价 <span class="quiet">× {{ quantity }}</span></span>
               <span class="nums">{{ money(wasPrice > 0 ? wasPrice * quantity : gross) }}</span>
@@ -610,3 +628,106 @@ watch(
     </div>
   </div>
 </template>
+
+<style scoped>
+.product-showcase {
+  border-radius: var(--radius-lg);
+}
+
+.product-showcase-body {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, var(--accent-soft)), var(--surface) 180px);
+}
+
+.product-showcase-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.product-delivery-badge {
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--stroke);
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.product-delivery-badge.is-auto {
+  border-color: color-mix(in srgb, var(--teal) 36%, transparent);
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.product-delivery-badge.is-manual {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.product-showcase-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 12px;
+  color: var(--text-quiet);
+  font-size: 12.5px;
+}
+
+.purchase-panel {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.purchase-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--stroke-quiet);
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+}
+
+.purchase-promos {
+  max-height: 190px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.purchase-promo {
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.purchase-total {
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  padding: 12px;
+}
+
+.purchase-total > div:last-child {
+  border-top: 1px solid var(--stroke);
+  padding-top: 10px;
+}
+
+@media (max-width: 640px) {
+  .product-showcase-head {
+    flex-direction: column;
+  }
+
+  .product-showcase-body {
+    padding: 18px;
+  }
+
+  .purchase-panel {
+    box-shadow: var(--shadow-sm);
+  }
+}
+</style>
