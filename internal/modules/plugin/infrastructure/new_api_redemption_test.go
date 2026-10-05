@@ -47,7 +47,7 @@ func TestNewAPIRequestCarriesOnlyKeyAndQuota(t *testing.T) {
 		raw, _ := io.ReadAll(r.Body)
 		gotBody = string(raw)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"success":true,"data":{"key":"abc123xyz7890"}}`))
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"id":1,"name":"","key":"abc123xyz7890","status":1,"quota":100000}}`))
 	}))
 	defer server.Close()
 
@@ -58,9 +58,9 @@ func TestNewAPIRequestCarriesOnlyKeyAndQuota(t *testing.T) {
 		TotalPrice: 100,
 		Quantity:   1,
 		FormValues: map[string]string{
-			"__plugin_config": `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"1000","success_field":"data.key"}`,
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"1000","success_field":"data.key"}`,
 			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
-			"nl_amount":       "100",
+			"nl_amount":        "100",
 		},
 	})
 	if err != nil {
@@ -100,9 +100,9 @@ func TestNewAPIUncertainResponseDoesNotClaimSuccess(t *testing.T) {
 		TotalPrice: 10,
 		Quantity:   1,
 		FormValues: map[string]string{
-			"__plugin_config": `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
 			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
-			"nl_amount":       "10",
+			"nl_amount":        "10",
 		},
 	})
 	if err != nil {
@@ -113,6 +113,124 @@ func TestNewAPIUncertainResponseDoesNotClaimSuccess(t *testing.T) {
 	}
 	if strings.Contains(result.Content, "已到账") || strings.Contains(result.Note, "已交付") {
 		t.Fatalf("uncertain result claimed success: %+v", result)
+	}
+}
+
+func TestNewAPIDataStringEnvelopeIsSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":"abc123xyz7890"}`))
+	}))
+	defer server.Close()
+
+	transport := &rewriteTransport{target: server.URL}
+	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
+	result, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
+		OrderNo:    "NL3",
+		TotalPrice: 10,
+		Quantity:   1,
+		FormValues: map[string]string{
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
+			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
+			"nl_amount":        "10",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if result.Uncertain {
+		t.Fatalf("data string envelope marked uncertain: %+v", result)
+	}
+	if !strings.Contains(result.Content, "abc123xyz7890") {
+		t.Fatalf("delivery content = %q", result.Content)
+	}
+}
+
+func TestNewAPIBareRedemptionObjectIsSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":1,"name":"","key":"abc123xyz7890","status":1,"quota":100000}`))
+	}))
+	defer server.Close()
+
+	transport := &rewriteTransport{target: server.URL}
+	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
+	result, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
+		OrderNo:    "NL5",
+		TotalPrice: 10,
+		Quantity:   1,
+		FormValues: map[string]string{
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
+			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
+			"nl_amount":        "10",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if result.Uncertain {
+		t.Fatalf("bare redemption object marked uncertain: %+v", result)
+	}
+	if !strings.Contains(result.Content, "abc123xyz7890") {
+		t.Fatalf("delivery content = %q", result.Content)
+	}
+}
+
+func TestNewAPIHTTPErrorIsHardFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"success":false,"message":"bad request"}`))
+	}))
+	defer server.Close()
+
+	transport := &rewriteTransport{target: server.URL}
+	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
+	result, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
+		OrderNo:    "NL6",
+		TotalPrice: 10,
+		Quantity:   1,
+		FormValues: map[string]string{
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
+			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
+			"nl_amount":        "10",
+		},
+	})
+	if err == nil {
+		t.Fatal("HTTP 400 was accepted as created")
+	}
+	if result.Uncertain {
+		t.Fatalf("definite HTTP failure marked uncertain: %+v", result)
+	}
+	if !strings.Contains(err.Error(), "400") {
+		t.Fatalf("status code lost: %v", err)
+	}
+}
+
+func TestNewAPIFailedEnvelopeIsAHardFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":false,"message":"quota invalid","data":null}`))
+	}))
+	defer server.Close()
+
+	transport := &rewriteTransport{target: server.URL}
+	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
+	_, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
+		OrderNo:    "NL4",
+		TotalPrice: 10,
+		Quantity:   1,
+		FormValues: map[string]string{
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
+			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
+			"nl_amount":        "10",
+		},
+	})
+	if err == nil {
+		t.Fatal("success=false was accepted as created")
+	}
+	if !strings.Contains(err.Error(), "quota invalid") {
+		t.Fatalf("provider message lost: %v", err)
 	}
 }
 

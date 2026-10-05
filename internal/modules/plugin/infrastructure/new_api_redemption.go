@@ -24,6 +24,12 @@ import (
 // codes after payment.
 const NewAPIRedemptionKey = "new-api-redemption-v1"
 
+// errNewAPIDefiniteFailure marks responses that prove New-API rejected the
+// request. These must surface as hard delivery errors instead of being
+// downgraded to the uncertain (manual review) path, which exists only for
+// responses whose outcome cannot be determined.
+var errNewAPIDefiniteFailure = errors.New("New-API 明确拒绝了创建请求")
+
 const (
 	newAPIKeyLength     = 13
 	newAPIKeyAlphabet   = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -35,12 +41,13 @@ const (
 
 // NewAPIRedemption creates one redemption code through New-API's admin API.
 //
-// New-API's HTTP contract in this repository's scope is only the request
-// contract: POST /api/redemption/ with a key and quota. The upstream response
-// shape is not documented in this repository, so the adapter does not invent a
-// success shape. It accepts only an explicitly configured response path or a
-// small, documented set of standard success markers; anything else is returned
-// as an uncertain result so the order is not marked as delivered.
+// New-API's documented contract is POST /api/redemption/ with a key and quota,
+// answered by an ApiResponse envelope ({ success, message, data }) whose data
+// carries the created Redemption (including key). The published create example
+// does not show the exact payload, so the adapter accepts the envelope, a bare
+// Redemption object, and a data string. Only an explicit success response with
+// a key is treated as delivered; an unparseable or ambiguous body becomes an
+// uncertain result so the order is never silently marked as delivered.
 type NewAPIRedemption struct {
 	client        *http.Client
 	runtimeConfig contract.RuntimeConfigProvider
@@ -121,8 +128,8 @@ func (p *NewAPIRedemption) Manifest() contract.Manifest {
 				Label:       "成功响应的兑换码字段",
 				Type:        "text",
 				Required:    false,
-				Placeholder: "例如 data.key",
-				Help:        "New-API 响应格式未在本仓库确认。填写响应中兑换码字段的点路径后，适配器只会从该路径提取；未填写时只接受明确的成功标记，否则标记为待人工确认，不会标记已交付。",
+				Placeholder: "默认 data.key",
+				Help:        "New-API 官方 ApiResponse 为 { success, message, data }，兑换码在 Redemption.key。默认按 data.key 提取；仅在自建版本改过响应结构时才需要覆盖。",
 			},
 		},
 		// These fields describe the buyer's purchase form. They are delivered to
@@ -231,6 +238,9 @@ func (p *NewAPIRedemption) Deliver(ctx context.Context, request contract.Deliver
 	}
 	created, evidence, err := extractRedemptionResult(responseBody, status, strings.TrimSpace(config["success_field"]))
 	if err != nil {
+		if errors.Is(err, errNewAPIDefiniteFailure) {
+			return contract.DeliveryResult{}, err
+		}
 		return contract.DeliveryResult{
 			Content:   uncertainDeliveryContent(request, key, quota, status),
 			Note:      "New-API 请求已发出，但响应无法确认兑换码是否创建；请管理员核对后再处理，系统不会自动重复创建。",
@@ -417,7 +427,7 @@ func decodePluginConfig(raw string) (map[string]string, error) {
 
 func extractRedemptionResult(body []byte, status int, field string) (string, string, error) {
 	if status < 200 || status >= 300 {
-		return "", "", fmt.Errorf("New-API 返回 HTTP %d", status)
+		return "", "", fmt.Errorf("%w: New-API 返回 HTTP %d", errNewAPIDefiniteFailure, status)
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
 		return "", "New-API 返回了空响应。", errors.New("New-API 空响应")
@@ -426,49 +436,79 @@ func extractRedemptionResult(body []byte, status int, field string) (string, str
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", "New-API 返回了非 JSON 响应。", errors.New("New-API 响应不是 JSON")
 	}
-	if field != "" {
-		if value, ok := lookupPath(payload, field); ok {
-			text := strings.TrimSpace(fmt.Sprint(value))
-			if text != "" {
-				return text, "响应字段 " + field + " 已确认兑换码。", nil
+
+	// New-API's documented admin response envelope is
+	//   { "success": boolean, "message": string, "data": ... }
+	// and the documented Redemption object carries key/quota/status.
+	// The create endpoint's example is not published, so accept both the
+	// envelope and a bare Redemption object, but never treat a missing key as
+	// success.
+	if success, ok := payload["success"].(bool); ok {
+		if !success {
+			message := textValue(payload["message"])
+			if message == "" {
+				message = "New-API 报告创建失败。"
 			}
+			return "", message, fmt.Errorf("%w: %s", errNewAPIDefiniteFailure, message)
 		}
-		return "", "响应里没有找到配置的成功字段 " + field + "。", errors.New("New-API 响应缺少兑换码")
-	}
-	if success, ok := payload["success"].(bool); ok && success {
-		for _, candidate := range []string{"key", "code", "redemption_key"} {
-			if value, ok := lookupPath(payload, candidate); ok {
-				text := strings.TrimSpace(fmt.Sprint(value))
-				if text != "" {
-					return text, "响应成功标记已确认兑换码。", nil
-				}
-			}
+		if key, ok := redemptionKeyInData(payload["data"], field); ok {
+			return key, "New-API 返回 success=true 且包含兑换码 key。", nil
 		}
+		return "", "New-API 报告 success=true，但没有返回兑换码 key。", errors.New("New-API 响应缺少兑换码")
 	}
-	message := strings.TrimSpace(fmt.Sprint(payload["message"]))
-	if message == "<nil>" {
-		message = ""
+
+	// Some self-hosted builds return the Redemption object directly.
+	if key := textValue(payload["key"]); key != "" {
+		return key, "New-API 直接返回了兑换码对象。", nil
 	}
-	if message == "" {
-		message = "New-API 响应没有成功标记或兑换码字段。"
-	}
-	return "", message, errors.New("New-API 无法确认兑换码")
+	return "", "New-API 响应既没有 ApiResponse.success，也没有 Redemption.key。", errors.New("New-API 响应格式未知")
 }
 
-func lookupPath(payload map[string]any, path string) (any, bool) {
-	var current any = payload
+func redemptionKeyInData(data any, field string) (string, bool) {
+	path := strings.TrimSpace(field)
+	if path == "" {
+		path = "key"
+	}
+	path = strings.TrimPrefix(path, "data.")
+	// The envelope's data may be the redemption key itself rather than a
+	// Redemption object, e.g. {"success":true,"data":"abc123xyz7890"}.
+	if path == "key" {
+		if text, ok := data.(string); ok {
+			if key := strings.TrimSpace(text); key != "" {
+				return key, true
+			}
+		}
+	}
+	current := data
 	for _, part := range strings.Split(path, ".") {
 		object, ok := current.(map[string]any)
 		if !ok {
-			return nil, false
+			return "", false
 		}
 		next, ok := object[part]
 		if !ok {
-			return nil, false
+			return "", false
 		}
 		current = next
 	}
-	return current, true
+	if key := textValue(current); key != "" {
+		return key, true
+	}
+	// Redemption data may be nested under an object with a "key" member even
+	// when the configured path points at the object itself.
+	if object, ok := current.(map[string]any); ok {
+		if key := textValue(object["key"]); key != "" {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func textValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
 }
 
 func uncertainDeliveryContent(request contract.DeliveryRequest, key string, quota int64, status int) string {
