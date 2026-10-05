@@ -259,6 +259,12 @@ func (s *Service) UpdateProductPatch(ctx context.Context, id uint, input *domain
 	soldCount := product.SoldCount
 	createdAt := product.CreatedAt
 	deletedAt := product.DeletedAt
+	// New-API is amount-type and the edit screen no longer sends a price, but a
+	// legacy row may carry one that currently makes it orderable. Keep it unless
+	// the caller explicitly sends a different non-zero price, so editing a
+	// product's amount bounds does not silently turn a working product into one
+	// that cannot be priced.
+	storedPrice := product.Price
 	if changed == nil {
 		*product = *input
 	} else {
@@ -339,6 +345,9 @@ func (s *Service) UpdateProductPatch(ctx context.Context, id uint, input *domain
 	}
 	if product.ProductType == domain.ProductTypeManual {
 		product.StockCount = 0
+	}
+	if product.DeliveryChannel == domain.DeliveryChannelNewAPI && product.Price <= 0 && storedPrice > 0 {
+		product.Price = storedPrice
 	}
 	// Only a form edit (changed == nil) or an explicit channel change re-checks
 	// preconditions. A list-page toggle such as 下架 must not be blocked because
@@ -1140,13 +1149,12 @@ func normalizeProduct(product *domain.Product) error {
 		if product.MinTopupAmount > product.MaxTopupAmount {
 			return fmt.Errorf("%w: New-API 商品单次最少充值额度不能大于最多充值额度。", domain.ErrInvalidInput)
 		}
-		// The order flow charges the existing product price (price × quantity);
-		// this channel has no amount→price rule of its own. A zero price would
-		// save fine here and then fail every checkout with a vague "not
-		// purchasable", so refuse it at the source with a message naming the fix.
-		if product.Price <= 0 {
-			return fmt.Errorf("%w: New-API 商品需要填写大于 0 的售价（NL），下单金额按售价 × 数量计算。", domain.ErrInvalidInput)
-		}
+		// This channel is configured with the two amount bounds only. It has no
+		// product price of its own: the money side has no rule that turns a
+		// top-up amount into a chargeable amount, and inventing one here would
+		// fabricate a price. A price that already exists on a legacy row is kept
+		// (see UpdateProductPatch) so such a product keeps selling; a brand new
+		// product has none and the checkout reports the missing rule.
 		return nil
 	case domain.DeliveryChannelCard, domain.DeliveryChannelManual:
 		// fallthrough to the existing product_type checks below

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/domain"
 )
 
@@ -67,17 +68,54 @@ func TestNewAPIProductRejectsMissingBounds(t *testing.T) {
 	}
 }
 
-// A New-API product with no price would save here and then fail every checkout
-// with a vague "not purchasable"; the channel has no amount→price rule, so the
-// save must refuse it up front and name the fix.
-func TestNewAPIProductRejectsZeroPrice(t *testing.T) {
+// New-API is an amount-type channel: it has no product price, and saving one
+// with price 0 must succeed on the product level. The missing chargeable-amount
+// rule is reported at checkout, not by rejecting the product.
+func TestNewAPIProductSavesWithoutPrice(t *testing.T) {
 	repo := &restockProducts{}
 	service := newPatchService(repo)
 	product := newAPIProduct()
 	product.Price = 0
-	err := service.CreateProduct(context.Background(), product)
-	if !errors.Is(err, domain.ErrInvalidInput) {
-		t.Fatalf("zero-price New-API product returned %v, want ErrInvalidInput", err)
+	if err := service.CreateProduct(context.Background(), product); err != nil {
+		t.Fatalf("price-less New-API product was refused: %v", err)
+	}
+	if product.Price != 0 {
+		t.Fatalf("product price = %d, want 0 for the amount-type channel", product.Price)
+	}
+}
+
+// A legacy New-API row may carry a price that currently makes it orderable. A
+// full edit from the amount-type screen sends no price (0); that must not wipe
+// the stored value and silently break a product that was working.
+func TestNewAPIFullEditKeepsLegacyPrice(t *testing.T) {
+	repo := &restockProducts{product: &domain.Product{
+		Base:            models.Base{ID: 5},
+		Name:            "New-API 充值",
+		Slug:            "topup",
+		Price:           7,
+		DeliveryChannel: domain.DeliveryChannelNewAPI,
+		MinTopupAmount:  10,
+		MaxTopupAmount:  100,
+		IsPublished:     true,
+	}}
+	service := newPatchService(repo)
+	next := &domain.Product{
+		Name:            "New-API 充值",
+		Slug:            "topup",
+		Price:           0,
+		DeliveryChannel: domain.DeliveryChannelNewAPI,
+		MinTopupAmount:  20,
+		MaxTopupAmount:  200,
+		IsPublished:     true,
+	}
+	if _, err := service.UpdateProductPatch(context.Background(), 5, next, nil); err != nil {
+		t.Fatalf("full edit: %v", err)
+	}
+	if repo.product.Price != 7 {
+		t.Fatalf("legacy price was wiped: %d", repo.product.Price)
+	}
+	if repo.product.MinTopupAmount != 20 || repo.product.MaxTopupAmount != 200 {
+		t.Fatalf("amount bounds not saved: %d/%d", repo.product.MinTopupAmount, repo.product.MaxTopupAmount)
 	}
 }
 

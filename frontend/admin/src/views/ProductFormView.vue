@@ -53,11 +53,14 @@ const isNewAPI = computed(() => form.delivery_channel === 'new_api')
 const isManual = computed(() => !isCard.value && !isNewAPI.value)
 const invalid = computed(() => {
   if (!form.name.trim() || !form.slug.trim()) return true
-  // The shop charges product.price × quantity through the existing order rule,
-  // so every sellable product — New-API included — must carry a positive price.
+  // New-API products are amount-type goods: they are configured with a top-up
+  // range only, so they have no product price to require here. Every other
+  // channel still charges through the existing price × quantity rule.
+  if (isNewAPI.value) return false
   return !Number.isInteger(Number(form.price)) || Number(form.price) <= 0
 })
 const priceError = computed(() => {
+  if (isNewAPI.value) return ''
   if (!form.name.trim() || !form.slug.trim()) return ''
   if (!Number.isInteger(Number(form.price)) || Number(form.price) <= 0) {
     return '请填写大于 0 的整数售价（NL）；下单金额按“售价 × 数量”由服务端计算。'
@@ -97,10 +100,14 @@ function payload(): Partial<Product> {
     max_topup_amount: isNewAPI.value ? Number(form.max_topup_amount) || 0 : 0,
     delivery_instructions: form.delivery_instructions,
     require_contact: form.require_contact,
-    price: Number(form.price) || 0,
+    // New-API is amount-type and carries no product price; other channels keep
+    // the existing price × quantity rule.
+    price: isNewAPI.value ? 0 : Number(form.price) || 0,
     original_price: form.original_price === null || Number.isNaN(Number(form.original_price))
       ? null
-      : Number(form.original_price),
+      : isNewAPI.value
+        ? null
+        : Number(form.original_price),
     stock_visible: form.stock_visible,
     stock_count: form.stock_count,
     is_published: form.is_published,
@@ -320,8 +327,49 @@ onMounted(load)
           </div>
         </div>
 
-        <div class="card">
-          <h3 class="mb-4 text-sm font-semibold">{{ isNewAPI ? '价格与充值额度' : '价格与库存' }}</h3>
+        <!-- New-API 是额度型商品：只有最少/最多两个额度字段，没有售价、划线价、
+             库存或兑换比例。其它渠道继续用原来的价格与库存表单。 -->
+        <div v-if="isNewAPI" class="card">
+          <h3 class="mb-1 text-sm font-semibold">充值额度范围</h3>
+          <p class="hint mb-4">用户下单时只需填写本次充值额度，系统按该额度创建兑换码。</p>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label class="label" for="p-min-topup">单次最少充值额度 *</label>
+              <input
+                id="p-min-topup"
+                v-model.number="form.min_topup_amount"
+                type="number"
+                min="1"
+                step="1"
+                class="input nums"
+                :class="{ 'input-error': Boolean(topupError) }"
+                :aria-invalid="Boolean(topupError)"
+              />
+              <p class="hint mt-1.5">买家每次至少可充值的额度（正整数）。</p>
+            </div>
+            <div>
+              <label class="label" for="p-max-topup">单次最多充值额度 *</label>
+              <input
+                id="p-max-topup"
+                v-model.number="form.max_topup_amount"
+                type="number"
+                min="1"
+                step="1"
+                class="input nums"
+                :class="{ 'input-error': Boolean(topupError) }"
+                :aria-invalid="Boolean(topupError)"
+              />
+              <p class="hint mt-1.5">买家每次最多可充值的额度（正整数）。</p>
+            </div>
+            <p v-if="topupError" class="alert alert-danger sm:col-span-2" role="alert">{{ topupError }}</p>
+          </div>
+          <p class="hint mt-4">
+            本渠道不设置售价、单价或兑换比例。若店铺尚未配置该额度的计价规则，买家下单会被明确告知，而不是显示虚假价格。
+          </p>
+        </div>
+
+        <div v-else class="card">
+          <h3 class="mb-4 text-sm font-semibold">价格与库存</h3>
           <div class="grid gap-4 sm:grid-cols-2">
             <div>
               <label class="label" for="p-price">售价（NL）*</label>
@@ -335,46 +383,14 @@ onMounted(load)
                 :class="{ 'input-error': Boolean(priceError) }"
                 :aria-invalid="Boolean(priceError)"
               />
-              <p v-if="isNewAPI" class="hint mt-1.5">
-                金额按现有规则「售价 × 购买数量」由服务端计算；充值额度只用于换算 quota，两者单位不同。
-              </p>
-              <p v-else class="hint mt-1.5">下单金额按“售价 × 数量”由服务端计算。</p>
+              <p class="hint mt-1.5">下单金额按“售价 × 数量”由服务端计算。</p>
               <p v-if="priceError" class="field-error" role="alert">{{ priceError }}</p>
             </div>
             <div>
               <label class="label" for="p-original">划线原价（可选，NL）</label>
               <input id="p-original" v-model.number="form.original_price" type="number" min="0" step="1" class="input nums" />
             </div>
-            <template v-if="isNewAPI">
-              <div>
-                <label class="label" for="p-min-topup">单次最少充值额度 *</label>
-                <input
-                  id="p-min-topup"
-                  v-model.number="form.min_topup_amount"
-                  type="number"
-                  min="1"
-                  step="1"
-                  class="input nums"
-                  :aria-invalid="Boolean(topupError)"
-                />
-                <p class="hint mt-1.5">买家每次至少可充值的额度（正整数）。</p>
-              </div>
-              <div>
-                <label class="label" for="p-max-topup">单次最多充值额度 *</label>
-                <input
-                  id="p-max-topup"
-                  v-model.number="form.max_topup_amount"
-                  type="number"
-                  min="1"
-                  step="1"
-                  class="input nums"
-                  :aria-invalid="Boolean(topupError)"
-                />
-                <p class="hint mt-1.5">买家每次最多可充值的额度（正整数）。</p>
-              </div>
-              <p v-if="topupError" class="alert alert-danger sm:col-span-2" role="alert">{{ topupError }}</p>
-            </template>
-            <div v-else-if="isEdit">
+            <div v-if="isEdit">
               <span class="label">当前库存</span>
               <p class="nums mt-1.5 text-lg font-semibold">
                 {{ isCard ? form.stock_count : '—' }}
@@ -387,7 +403,7 @@ onMounted(load)
               <span class="label">初始库存</span>
               <p class="hint mt-2.5">新建后为 0，导入卡密后自动计算。</p>
             </div>
-            <label v-if="!isNewAPI" class="flex items-center gap-2.5 self-end pb-1 text-sm">
+            <label class="flex items-center gap-2.5 self-end pb-1 text-sm">
               <input v-model="form.stock_visible" type="checkbox" class="accent-[var(--accent)]" />
               在商品页显示库存
             </label>

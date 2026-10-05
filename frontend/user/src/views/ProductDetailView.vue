@@ -61,9 +61,14 @@ const limit = computed(() => {
 })
 
 const soldOut = computed(() => limit.value === 0)
+// New-API 商品本身不含价格。若店铺也没有给出“额度→金额”的计价规则，服务端
+// 无法得出 NodeLoc 要收的金额；这不是缺货，必须在付款前如实说明，而不是让买家
+// 点一次、再看一次失败。旧行若保留了售价，则可以正常下单。
+const pricingUnavailable = computed(() => isNewAPIDelivery.value && unitPrice.value <= 0)
 const buyLabel = computed(() => {
   if (!site.paymentsEnabled) return '本店暂停收款'
   if (soldOut.value) return '暂时缺货'
+  if (pricingUnavailable.value) return '暂不可下单：缺少计价规则'
   if (submittingPhase.value === 'order') return '正在创建订单…'
   if (submittingPhase.value === 'payment') return '正在打开支付…'
   if (submitting.value) return '处理中…'
@@ -306,6 +311,10 @@ async function purchase() {
   const item = product.value
   if (!item || submitting.value) return
   if (!site.paymentsEnabled) return
+  if (pricingUnavailable.value) {
+    error.value = '该额度型商品还没有配置计价规则，暂时无法下单；请联系店家。'
+    return
+  }
   if (unpaidOrderNo.value) {
     // 刚才那一单还挂在这里。主按钮再点一次不该再开一张新单——买家会以为试第二次
     // 是无害的，而两家店里会同时躺着两笔待付款，其中一笔可能被付掉两次。
@@ -520,6 +529,7 @@ watch(
             <div class="product-showcase-meta">
               <span class="nums">已售 {{ product.sold_count ?? 0 }} 件</span>
               <span v-if="cardStock !== null && !soldOut" class="nums">现货 {{ cardStock }} 件</span>
+              <span v-if="isNewAPIDelivery && topupRangeLabel" class="nums">充值额度 {{ topupRangeLabel }}</span>
               <span v-if="soldOut" class="text-[var(--warning)]">暂时缺货</span>
             </div>
             <div v-if="product.delivery_instructions" class="product-delivery-note mt-5">
@@ -562,7 +572,14 @@ watch(
           <p class="quiet text-xs">当前商品</p>
           <p class="mt-1 truncate font-semibold">{{ product.name }}</p>
         </div>
-        <div class="detail-price">
+        <div v-if="isNewAPIDelivery" class="detail-price detail-price-topup">
+          <span class="detail-price-label">单次充值额度</span>
+          <div class="detail-price-row">
+            <span class="detail-price-pay nums">{{ topupRangeLabel || '以商品配置为准' }}</span>
+          </div>
+          <p class="hint mt-2">额度型商品，按本次填写额度下单；不展示商品售价。</p>
+        </div>
+        <div v-else class="detail-price">
           <span class="detail-price-label">{{ activitySaving > 0 ? '活动价' : '现价' }}</span>
           <div class="detail-price-row">
             <span class="detail-price-pay">{{ money(unitPrice) }}</span>
@@ -600,6 +617,9 @@ watch(
             </p>
             <p v-if="topupRangeLabel" class="hint mt-2">
               本商品单次充值额度：<span class="nums font-semibold">{{ topupRangeLabel }}</span>。
+            </p>
+            <p v-if="pricingUnavailable" class="alert alert-warning mt-3" role="status">
+              该额度型商品还没有配置“额度 → 金额”的计价规则，暂时无法下单。请联系店家，而不是重复提交。
             </p>
           </div>
 
@@ -711,7 +731,7 @@ watch(
             <textarea id="note" v-model="note" class="input" maxlength="500" placeholder="选填，例如规格要求"></textarea>
           </div>
 
-          <ul v-if="applicablePromos.length" class="purchase-promos space-y-2">
+          <ul v-if="!isNewAPIDelivery && applicablePromos.length" class="purchase-promos space-y-2">
             <li v-for="promo in applicablePromos" :key="promo.code" class="purchase-promo px-3 py-2.5">
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
@@ -739,7 +759,7 @@ watch(
             </li>
           </ul>
 
-          <div v-if="site.couponsEnabled">
+          <div v-if="!isNewAPIDelivery && site.couponsEnabled">
             <label class="label" for="coupon">优惠码</label>
             <div class="flex gap-2">
               <input
@@ -774,22 +794,30 @@ watch(
               <span class="min-w-0 truncate">商品</span>
               <span class="min-w-0 truncate text-right font-semibold">{{ product.name }}</span>
             </div>
-            <div class="flex items-baseline justify-between text-[var(--text-dim)]">
+            <div v-if="isNewAPIDelivery" class="flex items-baseline justify-between text-[var(--text-dim)]">
+              <span>本次充值额度</span>
+              <span class="nums">{{ nlAmount > 0 ? nlAmount : '—' }}</span>
+            </div>
+            <div v-if="isNewAPIDelivery" class="flex items-baseline justify-between text-[var(--text-dim)]">
+              <span>应付金额</span>
+              <span class="quiet">以订单结算为准</span>
+            </div>
+            <div v-else class="flex items-baseline justify-between text-[var(--text-dim)]">
               <span>
-                {{ isNewAPIDelivery ? '商品售价' : '商品原价' }}
-                <span v-if="!isNewAPIDelivery" class="quiet">× {{ quantity }}</span>
+                商品原价
+                <span class="quiet">× {{ quantity }}</span>
               </span>
               <span class="nums">{{ money(wasPrice > 0 ? wasPrice * quantity : gross) }}</span>
             </div>
-            <div v-if="activitySaving > 0" class="flex items-baseline justify-between text-[var(--success)]">
+            <div v-if="!isNewAPIDelivery && activitySaving > 0" class="flex items-baseline justify-between text-[var(--success)]">
               <span>活动折扣<span v-if="product.activity_name" class="quiet"> · {{ product.activity_name }}</span></span>
               <span class="nums">-{{ money(activitySaving * quantity) }}</span>
             </div>
-            <div v-if="discount" class="flex items-baseline justify-between text-[var(--success)]">
+            <div v-if="!isNewAPIDelivery && discount" class="flex items-baseline justify-between text-[var(--success)]">
               <span>优惠码减免</span>
               <span class="nums">-{{ money(discount) }}</span>
             </div>
-            <div class="flex items-baseline justify-between border-t border-[var(--stroke-quiet)] pt-2">
+            <div v-if="!isNewAPIDelivery" class="flex items-baseline justify-between border-t border-[var(--stroke-quiet)] pt-2">
               <span class="text-[var(--text-dim)]">应付合计</span>
               <span class="nums accent-text text-2xl font-bold">{{ money(payable) }}</span>
             </div>
@@ -815,7 +843,7 @@ watch(
           <button
             class="btn btn-primary btn-lg w-full"
             type="submit"
-            :disabled="submitting || soldOut || !site.paymentsEnabled"
+            :disabled="submitting || soldOut || pricingUnavailable || !site.paymentsEnabled"
           >
             <span v-if="submitting" class="spinner spinner-light" />
             {{ buyLabel }}

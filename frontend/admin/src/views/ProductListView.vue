@@ -25,7 +25,7 @@ const canManage = computed(() => auth.allows('products', 'manage'))
 const COLUMNS: Column[] = [
   { label: '商品' },
   { label: '类型', hideOnMobile: true },
-  { label: '价格', numeric: true },
+  { label: '价格 / 额度', numeric: true },
   { label: '库存', numeric: true, hideOnMobile: true },
   { label: '已售', numeric: true, hideOnMobile: true },
   { label: '状态' },
@@ -210,7 +210,15 @@ onMounted(load)
           <span v-else-if="product.product_type === 'card'">卡密</span>
           <span v-else>人工交付</span>
         </td>
-        <td class="nums">{{ money(product.price) }}</td>
+        <td class="nums">
+          <template v-if="product.delivery_channel === 'new_api'">
+            <span class="badge-accent">额度充值</span>
+            <div class="quiet mt-1 text-[11px]">
+              {{ product.min_topup_amount }}–{{ product.max_topup_amount }}
+            </div>
+          </template>
+          <template v-else>{{ money(product.price) }}</template>
+        </td>
         <td class="nums hide-on-mobile">
           {{ product.product_type === 'card' ? product.stock_count : '—' }}
           <span v-if="product.product_type === 'card' && product.stock_count <= 3" class="badge-warning ml-1">紧张</span>

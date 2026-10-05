@@ -108,6 +108,16 @@ func Classify(err error) *Failure {
 		return &Failure{Code: "not_found", Status: http.StatusNotFound, Message: "没有找到这个订单。", Detail: err.Error()}
 	case errors.Is(err, domain.ErrProductNotPurchasable):
 		return &Failure{Code: "product_unavailable", Status: http.StatusNotFound, Message: "该商品已下架或暂不可购。"}
+	case errors.Is(err, ErrNewAPIPricingRuleMissing):
+		// Distinguish "the shop has not defined how a top-up amount becomes a
+		// chargeable amount" from "this product is off the shelf". The buyer can
+		// do nothing; the operator must supply the missing pricing rule.
+		return &Failure{
+			Code:    "new_api_pricing_rule_missing",
+			Status:  http.StatusServiceUnavailable,
+			Message: "该额度型商品还没有配置计价规则，暂时无法下单；请联系店家。",
+			Detail:  err.Error(),
+		}
 	case errors.Is(err, domain.ErrInsufficientStock):
 		return &Failure{Code: "insufficient_stock", Status: http.StatusConflict, Message: "卡密库存不足，请稍后再试或联系店家补货。"}
 	case errors.Is(err, domain.ErrNotPayable):

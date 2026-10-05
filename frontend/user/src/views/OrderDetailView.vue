@@ -335,12 +335,16 @@ async function refreshDelivery() {
             </RouterLink>
             <p v-else class="text-[15px] font-semibold">数字商品</p>
             <p class="hint mt-1 nums">
-              {{ money(order.unit_price) }} × {{ order.quantity }}
+              <template v-if="order.product?.delivery_channel === 'new_api'">
+                额度型商品<template v-if="order.topup_amount"> · 本次充值额度 {{ order.topup_amount }}</template>
+              </template>
+              <template v-else>{{ money(order.unit_price) }} × {{ order.quantity }}</template>
             </p>
           </div>
           <div class="order-product-total text-right">
             <p class="hint">实付</p>
-            <p class="nums accent-text text-xl font-bold">{{ money(order.total_amount) }}</p>
+            <p v-if="order.product?.delivery_channel === 'new_api' && order.total_amount <= 0" class="hint">以订单结算为准</p>
+            <p v-else class="nums accent-text text-xl font-bold">{{ money(order.total_amount) }}</p>
           </div>
         </div>
 

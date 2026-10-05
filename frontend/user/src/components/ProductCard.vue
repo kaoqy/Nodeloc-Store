@@ -8,6 +8,15 @@ const props = defineProps<{ product: Product }>()
 const site = useSiteStore()
 const imageFailed = ref(false)
 
+// New-API 是额度型商品：没有商品价格，卡片以充值额度范围代替价格，
+// 不能显示 0 元或任何虚构金额。
+const isTopup = computed(() => props.product.delivery_channel === 'new_api')
+const topupRange = computed(() => {
+  const min = Number(props.product.min_topup_amount || 0)
+  const max = Number(props.product.max_topup_amount || 0)
+  return min > 0 && max > 0 ? `${min} – ${max}` : ''
+})
+
 /**
  * 价格区只有三件事，必须一眼分清：
  *   pay    —— 现在真正要付的钱（有活动就是活动价）
@@ -27,7 +36,12 @@ const saving = computed(() => (onSale.value ? Number(props.product.activity_savi
 const offPercent = computed(() => (was.value > 0 ? Math.round((saving.value / was.value) * 100) : 0))
 
 const soldOut = computed(
-  () => props.product.stock_visible && props.product.product_type === 'card' && props.product.auto_deliver && props.product.stock_count <= 0,
+  () =>
+    !isTopup.value &&
+    props.product.stock_visible &&
+    props.product.product_type === 'card' &&
+    props.product.auto_deliver &&
+    props.product.stock_count <= 0,
 )
 </script>
 
@@ -57,7 +71,7 @@ const soldOut = computed(
       </div>
 
       <span class="product-delivery">
-        {{ product.product_type === 'card' ? '自动发货' : '人工交付' }}
+        {{ isTopup ? '额度充值' : product.product_type === 'card' ? '自动发货' : '人工交付' }}
       </span>
     </div>
 
@@ -85,7 +99,16 @@ const soldOut = computed(
         <span v-if="product.activity_name" class="product-fact product-fact-accent">{{ product.activity_name }}</span>
       </div>
 
-      <div class="product-price">
+      <div v-if="isTopup" class="product-price product-price-topup">
+        <div class="min-w-0">
+          <span class="product-price-label">单次充值额度</span>
+          <span class="product-topup-range nums">
+            {{ topupRange || '以商品页为准' }}
+          </span>
+        </div>
+        <span class="badge-accent">额度充值</span>
+      </div>
+      <div v-else class="product-price">
         <div class="min-w-0">
           <span class="product-price-label">{{ onSale ? '活动价' : '售价' }}</span>
           <span class="product-price-pay">{{ money(pay) }}</span>
@@ -97,7 +120,7 @@ const soldOut = computed(
       </div>
 
       <div class="product-action">
-        <span>{{ soldOut ? '查看补货状态' : '查看商品' }}</span>
+        <span>{{ isTopup ? '立即充值' : soldOut ? '查看补货状态' : '查看商品' }}</span>
         <span aria-hidden="true">→</span>
       </div>
     </div>

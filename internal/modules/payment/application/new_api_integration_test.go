@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -81,7 +82,6 @@ func TestNewAPIProductPipelineWithRealModules(t *testing.T) {
 	product := &models.Product{
 		Name:            "New-API 充值",
 		Slug:            "topup",
-		Price:           5,
 		DeliveryChannel: "new_api",
 		MinTopupAmount:  10,
 		MaxTopupAmount:  100,
@@ -111,6 +111,37 @@ func TestNewAPIProductPipelineWithRealModules(t *testing.T) {
 	)
 	paymentService.SetPluginDeliverer(bridge)
 
+	// A brand-new New-API product carries no price. The shop has no rule that
+	// turns a top-up amount into a chargeable amount, so checkout must refuse it
+	// with the specific missing-rule error rather than "product unavailable",
+	// and must not create an order.
+	_, err = paymentService.CreateOrder(context.Background(), CreateOrderInput{
+		UserID:     7,
+		ProductID:  product.ID,
+		Slug:       product.Slug,
+		Quantity:   1,
+		FormValues: map[string]string{"nl_amount": "50"},
+	})
+	if !errors.Is(err, ErrNewAPIPricingRuleMissing) {
+		t.Fatalf("price-less New-API checkout returned %v, want ErrNewAPIPricingRuleMissing", err)
+	}
+	var orderCount int64
+	if err := db.Model(&models.Order{}).Where("product_id = ?", product.ID).Count(&orderCount).Error; err != nil {
+		t.Fatalf("count orders: %v", err)
+	}
+	if orderCount != 0 {
+		t.Fatalf("a missing-pricing checkout created %d orders, want 0", orderCount)
+	}
+
+	// With a legacy price set, the same product orders and stores the amount.
+	stored, err := catalogService.GetProduct(context.Background(), product.ID)
+	if err != nil {
+		t.Fatalf("reload product: %v", err)
+	}
+	stored.Price = 5
+	if _, err := catalogService.UpdateProduct(context.Background(), stored.ID, stored); err != nil {
+		t.Fatalf("set legacy price: %v", err)
+	}
 	order, err := paymentService.CreateOrder(context.Background(), CreateOrderInput{
 		UserID:     7,
 		ProductID:  product.ID,
@@ -119,7 +150,7 @@ func TestNewAPIProductPipelineWithRealModules(t *testing.T) {
 		FormValues: map[string]string{"nl_amount": "50"},
 	})
 	if err != nil {
-		t.Fatalf("CreateOrder: %v", err)
+		t.Fatalf("CreateOrder with price: %v", err)
 	}
 	if order.TopupAmount != 50 || order.ProductID != product.ID {
 		t.Fatalf("order = %+v, want product %d topup 50", order, product.ID)
