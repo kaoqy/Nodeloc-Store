@@ -164,7 +164,7 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 		Staff: staffRoster{db: db, identity: identityMod.Service},
 	})
 	auditMod := audit.Wire(db)
-	pluginMod := plugin.Wire(db)
+	pluginMod := plugin.Wire(db, newAPIRuntimeConfig{sys: sys, db: db})
 	// 活动定价挂到支付模块上：下单金额仍由后端计算，活动只贡献结构化规则。
 	paymentMod.Service.SetActivityPricing(activityMod.Service)
 	// 活动的默认限次与叠加策略来自配置中心。
@@ -273,6 +273,42 @@ func (b activityPricerBridge) PriceFor(ctx context.Context, userID, productID ui
 // default-value port.
 type activityDefaults struct {
 	support *supportapplication.Service
+}
+
+// newAPIRuntimeConfig adapts the system module's runtime settings to the plugin
+// module without making plugin infrastructure import the settings package.
+type newAPIRuntimeConfig struct {
+	sys *system.Service
+	db  *gorm.DB
+}
+
+func (n newAPIRuntimeConfig) NewAPIConfig(ctx context.Context) (map[string]string, map[string]string, error) {
+	var runtime *system.RuntimeConfig
+	if n.sys != nil {
+		cfg, err := n.sys.NewAPIConfig()
+		if err != nil {
+			return nil, nil, err
+		}
+		runtime = &system.RuntimeConfig{NewAPI: cfg}
+	} else if n.db != nil {
+		loaded, err := system.LoadRuntime(n.db)
+		if err != nil {
+			return nil, nil, err
+		}
+		runtime = loaded
+	}
+	if runtime == nil {
+		return map[string]string{}, map[string]string{}, nil
+	}
+	cfg := runtime.NewAPI
+	return map[string]string{
+		"base_url":      cfg.BaseURL,
+		"admin_user_id": cfg.AdminUserID,
+		"quota_per_nl":  cfg.QuotaPerNL,
+		"success_field": cfg.SuccessField,
+	}, map[string]string{
+		"admin_access_token": cfg.AdminAccessToken,
+	}, nil
 }
 
 func (a activityDefaults) PerUserLimit(ctx context.Context) int {

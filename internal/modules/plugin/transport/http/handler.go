@@ -25,13 +25,46 @@ func NewHandler(service *application.Service) *Handler { return &Handler{service
 // 插件管理后台页面已下线；支付交付所需的 provider、绑定与履约逻辑仍由
 // 内部 service 服务，后台不再暴露安装、卸载或配置管理路由。
 func (h *Handler) RegisterRoutes(engine gin.IRouter, jwtConfig *config.JWTConfig, accounts middleware.AccountReader) {
-	_ = accounts
-	_ = jwtConfig
-
 	// The storefront asks what a product needs from a plugin. It is public
 	// because it renders before login and says nothing secret.
 	public := engine.Group("/api/v1")
 	public.GET("/products/:id/plugin", h.DescribeProduct)
+
+	// Minimal product-channel wiring for the New-API provider. This is not the
+	// retired plugin-management surface: it only toggles one product's delivery
+	// channel and is guarded by the product-editing permission.
+	admin := engine.Group("/api/v1/admin", middleware.JWTMiddleware(jwtConfig))
+	guard := middleware.RequirePermission(accounts, "products", "manage")
+	admin.GET("/products/:id/new-api-delivery", guard, h.GetNewAPIProduct)
+	admin.PUT("/products/:id/new-api-delivery", guard, h.SetNewAPIProduct)
+}
+
+type newAPIProductRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+func (h *Handler) GetNewAPIProduct(c *gin.Context) {
+	productID := uint(atoiDefault(c.Param("id"), 0))
+	enabled, err := h.service.NewAPIProductEnabled(c.Request.Context(), productID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"enabled": enabled}})
+}
+
+func (h *Handler) SetNewAPIProduct(c *gin.Context) {
+	productID := uint(atoiDefault(c.Param("id"), 0))
+	var request newAPIProductRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "code": "invalid_input"})
+		return
+	}
+	if err := h.service.SetNewAPIProduct(c.Request.Context(), productID, request.Enabled); err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"enabled": request.Enabled}})
 }
 
 // DescribeProduct answers the storefront's 「这个商品需要插件做什么」 question.

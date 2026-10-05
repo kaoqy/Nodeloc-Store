@@ -689,7 +689,11 @@ func (h *Handler) AdminFulfillOrder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "order_no is required"})
 		return
 	}
-	order, err := h.service.FulfillOrder(c.Request.Context(), orderNo)
+	var request struct {
+		ConfirmExternalRetry bool `json:"confirm_external_retry"`
+	}
+	_ = c.ShouldBindJSON(&request)
+	order, err := h.service.FulfillOrderConfirmed(c.Request.Context(), orderNo, request.ConfirmExternalRetry)
 	if err != nil {
 		writeError(c, err)
 		return

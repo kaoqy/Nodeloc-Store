@@ -108,6 +108,12 @@ func (s *Service) Deliver(ctx context.Context, info OrderInfo) (*contract.Delive
 	formValues["__remote_name"] = binding.RemoteName
 	formValues["__match_field"] = matchField
 	formValues["__plugin_config"] = strings.TrimSpace(plugin.Settings)
+	// Secrets are handed to the provider through the request map, never through
+	// the database-facing plugin object or the API response. Providers must use
+	// them only for the outbound request and must not log or echo them.
+	if strings.TrimSpace(plugin.ConfigSecrets) != "" {
+		formValues["__plugin_secrets"] = strings.TrimSpace(plugin.ConfigSecrets)
+	}
 
 	result, err := provider.Deliver(ctx, contract.DeliveryRequest{
 		OrderID:    info.ID,

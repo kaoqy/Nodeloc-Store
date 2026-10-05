@@ -19,14 +19,63 @@ import (
 type Service struct {
 	repo     contract.Repository
 	registry contract.Registry
+	runtime  contract.RuntimeConfigProvider
 	now      func() time.Time
 }
 
-func NewService(repo contract.Repository, registry contract.Registry) (*Service, error) {
+func NewService(repo contract.Repository, registry contract.Registry, runtime ...contract.RuntimeConfigProvider) (*Service, error) {
 	if repo == nil || registry == nil {
 		return nil, errors.New("plugin service dependencies are required")
 	}
-	return &Service{repo: repo, registry: registry, now: time.Now}, nil
+	var runtimeConfig contract.RuntimeConfigProvider
+	if len(runtime) > 0 {
+		runtimeConfig = runtime[0]
+	}
+	return &Service{repo: repo, registry: registry, runtime: runtimeConfig, now: time.Now}, nil
+}
+
+// EnsureBuiltinProvider registers a provider that is part of this build so the
+// product-channel UI can bind it without restoring the retired plugin catalog.
+// It never enables the provider: the shop owner still has to configure it.
+func (s *Service) EnsureBuiltinProvider(ctx context.Context, key string) error {
+	existing, err := s.repo.FindPluginByKey(ctx, key)
+	if err != nil && !errors.Is(err, domain.ErrPluginNotFound) {
+		return err
+	}
+	if existing != nil {
+		if key == "new-api-redemption-v1" && !existing.IsEnabled {
+			existing.IsEnabled = true
+			return s.repo.UpdatePlugin(ctx, existing)
+		}
+		return nil
+	}
+	provider, ok := s.registry.Lookup(key)
+	if !ok {
+		return fmt.Errorf("%w: provider %s is not registered", domain.ErrInvalidInput, key)
+	}
+	manifest := provider.Manifest()
+	capabilities, err := json.Marshal(manifest.Capabilities)
+	if err != nil {
+		return err
+	}
+	settings, err := json.Marshal(map[string]string{})
+	if err != nil {
+		return err
+	}
+	plugin := &domain.Plugin{
+		Key:          manifest.Key,
+		Name:         manifest.Name,
+		Description:  manifest.Description,
+		Version:      manifest.Version,
+		Author:       manifest.Author,
+		// New-API's credentials live in the system settings section, so its
+		// enrollment is a built-in channel that is always enabled once present.
+		// The product binding is what decides whether any product uses it.
+		IsEnabled:    key == "new-api-redemption-v1",
+		Settings:     string(settings),
+		Capabilities: string(capabilities),
+	}
+	return s.repo.CreatePlugin(ctx, plugin)
 }
 
 // CatalogEntry is one provider as 插件管理 shows it: what it is, whether the

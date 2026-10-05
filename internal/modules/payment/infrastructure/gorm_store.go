@@ -268,6 +268,15 @@ func (s *GormStore) MarkOrderDeliveryPending(ctx context.Context, orderNo, note 
 		Updates(map[string]any{"fulfillment_status": "pending", "delivery_note": note}).Error
 }
 
+// MarkOrderPluginReview parks an uncertain external delivery for a human. It
+// never rewrites an order that already delivered, and the status is excluded
+// from the automatic retry query below.
+func (s *GormStore) MarkOrderPluginReview(ctx context.Context, orderNo, note string) error {
+	return s.db.WithContext(ctx).Model(&models.Order{}).
+		Where("order_no = ? AND fulfillment_status NOT IN ?", strings.TrimSpace(orderNo), []string{"delivered", "completed"}).
+		Updates(map[string]any{"fulfillment_status": "plugin_review", "delivery_note": note}).Error
+}
+
 // ListUndeliveredPaidOrders returns paid orders still owed a delivery: those
 // whose automatic delivery never ran, and those parked in 等待补货 that a later
 // card import should have released. The money is already captured in both, so

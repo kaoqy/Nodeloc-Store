@@ -5,6 +5,7 @@
 package system
 
 import (
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -19,9 +20,49 @@ type RuntimeConfig struct {
 	App      AppConfig      `json:"app"`
 	OAuth    OAuthConfig    `json:"oauth"`
 	Payment  PaymentConfig  `json:"payment"`
+	NewAPI   NewAPIConfig   `json:"new_api"`
 	SMTP     SMTPConfig     `json:"smtp"`
 	Features FeaturesConfig `json:"features"`
 	Theme    ThemeConfig    `json:"theme"`
+}
+
+// NewAPIConfig configures the New-API redemption-code delivery channel. The
+// store creates a redemption code after payment; it does not credit a New-API
+// account directly, so buyers are told to redeem the code themselves.
+type NewAPIConfig struct {
+	Enabled *bool `json:"enabled"`
+	// BaseURL is the New-API site root. The adapter appends /api/redemption/.
+	BaseURL string `json:"base_url"`
+	// AdminAccessToken is write-only and masked on read.
+	AdminAccessToken string `json:"admin_access_token"`
+	AdminUserID      string `json:"admin_user_id"`
+	// QuotaPerNL is quota per one NL of paid order amount.
+	QuotaPerNL string `json:"quota_per_nl"`
+	// SuccessField is the dot path to the redemption key in the provider's
+	// response. It must be confirmed against the real New-API deployment.
+	SuccessField string `json:"success_field"`
+}
+
+func (n NewAPIConfig) On() bool { return n.Enabled != nil && *n.Enabled }
+
+// MissingFields names what prevents the channel from working.
+func (n NewAPIConfig) MissingFields() []string {
+	missing := make([]string, 0, 5)
+	if strings.TrimSpace(n.BaseURL) == "" {
+		missing = append(missing, "base_url")
+	}
+	if strings.TrimSpace(n.AdminAccessToken) == "" {
+		missing = append(missing, "admin_access_token")
+	}
+	if strings.TrimSpace(n.AdminUserID) == "" {
+		missing = append(missing, "admin_user_id")
+	}
+	if strings.TrimSpace(n.QuotaPerNL) == "" {
+		missing = append(missing, "quota_per_nl")
+	}
+	// SuccessField is intentionally optional: without it the adapter only
+	// accepts explicit success markers and otherwise parks the order for review.
+	return missing
 }
 
 type AppConfig struct {
@@ -287,6 +328,7 @@ func Default() *RuntimeConfig {
 			Scopes:  "openid profile",
 		},
 		Payment:  PaymentConfig{Enabled: &yes},
+		NewAPI:   NewAPIConfig{Enabled: new(bool)},
 		SMTP:     SMTPConfig{Enabled: new(bool), Port: 587, Secure: "starttls"},
 		Features: FeaturesConfig{Checkin: &yes, Coupons: &yes, StockAlertThreshold: &threshold},
 		Theme:    ThemeConfig{Primary: defaultAccent, Locale: defaultLocale},
@@ -307,6 +349,9 @@ func (r *RuntimeConfig) MergeDefaults() {
 	}
 	if r.OAuth.Scopes == "" {
 		r.OAuth.Scopes = d.OAuth.Scopes
+	}
+	if r.NewAPI.Enabled == nil {
+		r.NewAPI.Enabled = d.NewAPI.Enabled
 	}
 	if r.Theme.Primary == "" {
 		r.Theme.Primary = d.Theme.Primary
@@ -362,6 +407,11 @@ func (r *RuntimeConfig) Normalize() {
 	if oauth := strings.TrimSpace(r.OAuth.BaseURL); oauth != "" && isProviderOrigin(oauth) {
 		r.OAuth.BaseURL = strings.TrimRight(oauth, "/")
 	}
+	r.NewAPI.BaseURL = normalizeNewAPIBaseURL(r.NewAPI.BaseURL)
+	r.NewAPI.AdminAccessToken = shared.TrimCredential(r.NewAPI.AdminAccessToken)
+	r.NewAPI.AdminUserID = strings.TrimSpace(r.NewAPI.AdminUserID)
+	r.NewAPI.QuotaPerNL = strings.TrimSpace(r.NewAPI.QuotaPerNL)
+	r.NewAPI.SuccessField = strings.TrimSpace(r.NewAPI.SuccessField)
 
 	// The host the store's own URLs are built from. A 站点域名 pasted with its
 	// scheme and a trailing slash would otherwise reach NodeLoc as
@@ -517,6 +567,45 @@ func normalizeCallbackURL(scheme string, in string) string {
 		return ""
 	}
 	return strings.TrimRight(parsed.String(), "/")
+}
+
+// normalizeNewAPIBaseURL accepts only a plain HTTP(S) origin. The provider
+// repeats this check at delivery time; doing it on save too means the shop
+// owner sees the refusal while editing, not after a paid order.
+func normalizeNewAPIBaseURL(in string) string {
+	value := strings.TrimSpace(in)
+	if value == "" {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	if host == "" || isUnsafeNewAPIHost(host) {
+		return ""
+	}
+	return strings.TrimRight(parsed.String(), "/")
+}
+
+func isUnsafeNewAPIHost(host string) bool {
+	switch host {
+	case "localhost", "localhost.localdomain", "metadata.google.internal",
+		"169.254.169.254", "100.100.100.200":
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
 }
 
 // RedirectURI resolves the OAuth callback URL, deriving it from the site

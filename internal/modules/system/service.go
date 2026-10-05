@@ -567,6 +567,17 @@ func (s *Service) SMTPConfig() (SMTPConfig, error) {
 	return rt.SMTP, nil
 }
 
+// NewAPIConfig returns the unmasked New-API delivery configuration to trusted
+// in-process callers only. It is deliberately separate from GetSettings, whose
+// response is masked for the browser.
+func (s *Service) NewAPIConfig() (NewAPIConfig, error) {
+	rt, err := s.currentRuntime()
+	if err != nil {
+		return NewAPIConfig{}, err
+	}
+	return rt.NewAPI, nil
+}
+
 // GetSettings returns the runtime config with secrets redacted.
 func (s *Service) GetSettings() (map[string]any, error) {
 	rt, err := s.currentRuntime()
@@ -577,6 +588,7 @@ func (s *Service) GetSettings() (map[string]any, error) {
 	view.OAuth.ClientSecret = maskSecret(view.OAuth.ClientSecret)
 	view.Payment.Token = maskSecret(view.Payment.Token)
 	view.Payment.SecretKey = maskSecret(view.Payment.SecretKey)
+	view.NewAPI.AdminAccessToken = maskSecret(view.NewAPI.AdminAccessToken)
 	view.SMTP.Password = maskSecret(view.SMTP.Password)
 	// An absent switch means 「开」, but the settings form needs a real checkbox:
 	// resolving it here keeps a store that never touched 注册 from saving the
@@ -590,6 +602,7 @@ func (s *Service) GetSettings() (map[string]any, error) {
 	// 「支付已启用」 while every buyer is refused at 下单.
 	missing := rt.Payment.MissingCredentials()
 	oauthMissing := rt.OAuthMissing()
+	newAPIMissing := rt.NewAPI.MissingFields()
 	return map[string]any{
 		"settings":         view,
 		"payment_ready":    rt.Payment.On() && len(missing) == 0,
@@ -600,6 +613,8 @@ func (s *Service) GetSettings() (map[string]any, error) {
 		"oauth_ready":    rt.OAuth.On() && len(oauthMissing) == 0,
 		"oauth_missing":  oauthMissing,
 		"oauth_warnings": rt.OAuthWarnings(),
+		"new_api_ready":    rt.NewAPI.On() && len(newAPIMissing) == 0 && rt.NewAPI.BaseURL != "",
+		"new_api_missing": newAPIMissing,
 	}, nil
 }
 
@@ -637,6 +652,7 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	next.Payment.PaymentID = shared.TrimCredential(next.Payment.PaymentID)
 	next.Payment.Token = shared.TrimCredential(next.Payment.Token)
 	next.Payment.SecretKey = shared.TrimCredential(next.Payment.SecretKey)
+	next.NewAPI.AdminAccessToken = shared.TrimCredential(next.NewAPI.AdminAccessToken)
 
 	// The SPA echoes the mask placeholder for a secret it did not touch; only that
 	// placeholder preserves the stored value. An emptied field is a real clearing.
@@ -649,6 +665,9 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	if next.Payment.SecretKey == Redacted {
 		next.Payment.SecretKey = existing.Payment.SecretKey
 	}
+	if next.NewAPI.AdminAccessToken == Redacted {
+		next.NewAPI.AdminAccessToken = existing.NewAPI.AdminAccessToken
+	}
 	if next.SMTP.Password == Redacted {
 		next.SMTP.Password = existing.SMTP.Password
 	}
@@ -659,6 +678,9 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	// document, so the stored choice carries over.
 	if next.Payment.Enabled == nil {
 		next.Payment.Enabled = existing.Payment.Enabled
+	}
+	if next.NewAPI.Enabled == nil {
+		next.NewAPI.Enabled = existing.NewAPI.Enabled
 	}
 	// A settings document that does not mention a switch at all is an older one,
 	// not an instruction to turn it on, so the stored value carries over first.
@@ -683,6 +705,11 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	// cannot finish a login, with nothing on the page to explain why.
 	if next.OAuth.ClientID == "" || next.OAuth.ClientSecret == "" {
 		return validationError("NodeLoc OAuth Client ID / Secret 不能为空")
+	}
+	if next.NewAPI.On() {
+		if missing := next.NewAPI.MissingFields(); len(missing) > 0 {
+			return validationError("New-API 发货渠道已启用但配置不完整：%s", strings.Join(missing, "、"))
+		}
 	}
 
 	if err := SaveRuntime(db, &next); err != nil {

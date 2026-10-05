@@ -40,8 +40,12 @@ export const deliverOrder = (orderNo: string, deliveryContent: string) =>
 
 // Retries automatic delivery, e.g. after card stock was restocked for an order
 // parked in waiting_stock.
-export const fulfillOrder = (orderNo: string) =>
-  client.post<{ data: Order }>(`/admin/orders/${orderNo}/fulfill`).then((r) => r.data.data)
+export const fulfillOrder = (orderNo: string, confirmExternalRetry = false) =>
+  client
+    .post<{ data: Order }>(`/admin/orders/${orderNo}/fulfill`, {
+      confirm_external_retry: confirmExternalRetry,
+    })
+    .then((r) => r.data.data)
 
 // 查单：让服务端拿这单去问 NodeLoc，已付就直接置为已支付并走发货流程。
 // 「尚未到账」不是错误，而是 result.settled === false，所以两者要分开看。

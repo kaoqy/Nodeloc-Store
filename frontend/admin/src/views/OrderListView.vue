@@ -74,6 +74,7 @@ const FULFILLMENT_LABEL: Record<string, string> = {
   manual_pending: '人工待发',
   waiting_stock: '等待补货',
   plugin_pending: '交付中',
+  plugin_review: '待人工确认',
   failed: '发货异常',
 }
 

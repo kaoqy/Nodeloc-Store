@@ -2,7 +2,13 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import WorkbenchHeader from '../components/WorkbenchHeader.vue'
-import { createProduct, getProduct, updateProduct } from '../api/products'
+import {
+  createProduct,
+  getProduct,
+  getProductNewAPIDelivery,
+  setProductNewAPIDelivery,
+  updateProduct,
+} from '../api/products'
 import { listCategories } from '../api/categories'
 import ImageField from '../components/ImageField.vue'
 import { errorMessage } from '../utils/format'
@@ -17,7 +23,11 @@ const isEdit = computed(() => productId.value > 0)
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
+const notice = ref('')
 const categories = ref<Category[]>([])
+const newAPIEnabled = ref(false)
+const newAPILoading = ref(false)
+const newAPISaving = ref(false)
 
 const form = reactive({
   name: '',
@@ -121,11 +131,36 @@ async function load() {
         category_id: product.category_id ?? null,
         form_schema: formFields,
       })
+      if (product.id) {
+        newAPILoading.value = true
+        try {
+          newAPIEnabled.value = await getProductNewAPIDelivery(product.id)
+        } catch {
+          newAPIEnabled.value = false
+        } finally {
+          newAPILoading.value = false
+        }
+      }
     }
   } catch (err) {
     error.value = errorMessage(err, '加载商品失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function toggleNewAPIDelivery() {
+  if (!isEdit.value || newAPISaving.value) return
+  const next = !newAPIEnabled.value
+  newAPISaving.value = true
+  error.value = ''
+  try {
+    newAPIEnabled.value = await setProductNewAPIDelivery(productId.value, next)
+    notice.value = next ? '已启用 New-API 兑换码发货。' : '已关闭 New-API 兑换码发货。'
+  } catch (err) {
+    error.value = errorMessage(err, '更新 New-API 发货渠道失败')
+  } finally {
+    newAPISaving.value = false
   }
 }
 
@@ -181,6 +216,7 @@ onMounted(load)
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-else-if="invalidPriceHint" class="alert alert-warning" role="status">{{ invalidPriceHint }}</p>
+    <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 
     <div class="grid gap-5 lg:grid-cols-3">
       <div class="space-y-5 lg:col-span-2">
@@ -326,6 +362,37 @@ onMounted(load)
               <p class="hint mt-1.5">数字越小越靠前。</p>
             </div>
           </div>
+        </div>
+
+        <div class="card">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-semibold">New-API 兑换码发货</h3>
+              <p class="hint mt-1 leading-relaxed">
+                付款成功后创建 New-API 兑换码并交付给买家。买家需自行到 New-API 平台兑换，
+                系统不会自动充值到买家账户。
+              </p>
+              <p class="hint mt-1 leading-relaxed">
+                商品售价和购买数量决定用户实付金额；购买表单里的 NL 数量只用于计算兑换 quota，
+                两者不会混为同一个单位。
+              </p>
+            </div>
+            <button
+              class="switch shrink-0"
+              :class="{ 'switch-on': newAPIEnabled }"
+              type="button"
+              role="switch"
+              :aria-checked="newAPIEnabled"
+              :disabled="!isEdit || newAPILoading || newAPISaving"
+              aria-label="启用 New-API 兑换码发货"
+              @click="toggleNewAPIDelivery"
+            />
+          </div>
+          <p v-if="!isEdit" class="hint mt-3">先保存商品，之后即可切换到 New-API 发货渠道。</p>
+          <p v-else class="hint mt-3">
+            当前状态：{{ newAPIEnabled ? '已启用' : '未启用' }}。
+            需要先在「系统设置 → New-API 发货」配置 API 地址、管理员凭据和 quota 比例。
+          </p>
         </div>
 
         <div class="card">

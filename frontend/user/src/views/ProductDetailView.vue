@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProductCard from '../components/ProductCard.vue'
 import { couponQuoteMessage, getProduct, listProducts, listStoreCoupons, quoteCoupon } from '../api/products'
+import { getProductPlugin, type ProductPluginDescriptor } from '../api/plugins'
 import { checkoutAdvice, createOrder, createPayment, paymentSettled } from '../api/payment'
 import { errorMessage, errorStatus } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -39,6 +40,7 @@ const quote = ref<CouponQuote | null>(null)
 const couponError = ref('')
 const quoting = ref(false)
 const promos = ref<StorefrontCoupon[]>([])
+const pluginDescriptor = ref<ProductPluginDescriptor | null>(null)
 
 // Bumped every time the address names a new product. Related goods link to each
 // other inside this same component, so requests from the page the buyer left can
@@ -84,6 +86,19 @@ const gross = computed(() => unitPrice.value * quantity.value)
 /** What NodeLoc is asked to collect: the quoted discount is already off it. */
 const payable = computed(() => (quote.value?.accepted ? quote.value.payable : gross.value))
 const discount = computed(() => (quote.value?.accepted ? quote.value.discount : 0))
+const pluginFormFields = computed(() => pluginDescriptor.value?.form_schema ?? [])
+const isNewAPIDelivery = computed(() => pluginDescriptor.value?.plugin_key === 'new-api-redemption-v1')
+const nlAmount = computed(() => {
+  const parsed = Number(formValues.value.nl_amount || 0)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+})
+const newAPIQuotaPreview = computed(() => {
+  if (!isNewAPIDelivery.value) return ''
+  const ratio = Number(pluginDescriptor.value?.quota_per_nl || 0)
+  if (nlAmount.value <= 0 || !Number.isFinite(ratio) || ratio <= 0) return ''
+  const quota = nlAmount.value * ratio
+  return Number.isSafeInteger(quota) ? String(quota) : ''
+})
 
 /**
  * The shelf only shows the promotions this item can actually be bought with: a
@@ -135,6 +150,19 @@ function validatePurchaseForm(): boolean {
       errors[field.key] = `${field.label}最多 ${maxLength} 个字符`
     }
   }
+  for (const field of pluginFormFields.value) {
+    const value = String(formValues.value[field.key] ?? '').trim()
+    if (field.required && !value) {
+      errors[field.key] = `请填写${field.label}`
+      continue
+    }
+    if (value && field.type === 'number') {
+      const parsed = Number(value)
+      if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isInteger(parsed)) {
+        errors[field.key] = `${field.label}必须是正整数`
+      }
+    }
+  }
   if (item.require_contact && !contact.value.trim()) {
     errors.contact = '请填写联系方式'
   }
@@ -164,6 +192,15 @@ async function loadPromos() {
     // A shelf that failed to load must not take the purchase down with it: the
     // 优惠码 field still works with a code the buyer already has.
     promos.value = []
+  }
+}
+
+async function loadPluginDescriptor(item: Product) {
+  pluginDescriptor.value = null
+  try {
+    pluginDescriptor.value = await getProductPlugin(item.id)
+  } catch {
+    pluginDescriptor.value = null
   }
 }
 
@@ -357,6 +394,7 @@ async function load(slug: string) {
   couponError.value = ''
   quoting.value = false
   promos.value = []
+  pluginDescriptor.value = null
   submitting.value = false
   submittingPhase.value = ''
   // 上一件商品留下的「继续未支付的这一单」必须跟着旧商品一起清掉：只要它还挂着，
@@ -372,6 +410,7 @@ async function load(slug: string) {
     if (item) {
       void loadRelated(item)
       void loadPromos()
+      void loadPluginDescriptor(item)
       // A code that rode through the sign-in round trip is priced again on
       // arrival, so the buyer comes back to the number they left.
       if (couponCode.value) void applyQuote()
@@ -536,6 +575,14 @@ watch(
             <span v-else>现货 <span class="nums">{{ cardStock }}</span> 件</span>
           </div>
 
+          <div v-if="isNewAPIDelivery" class="new-api-delivery-note">
+            <p class="eyebrow">New-API 兑换码交付</p>
+            <p class="mt-2 text-sm leading-relaxed text-[var(--text-dim)]">
+              付款成功后，系统会创建一张 New-API 兑换码交付给你。你需要到 New-API 平台自行兑换；
+              这里不会自动充值到你的 New-API 账户。
+            </p>
+          </div>
+
           <div v-if="product.form_schema?.length" class="space-y-4">
             <div v-for="field in product.form_schema" :key="field.key">
               <label class="label" :for="`custom-${field.key}`">{{ field.label }} <span v-if="field.required" class="accent-text">*</span></label>
@@ -570,6 +617,41 @@ watch(
                 {{ fieldErrors[field.key] }}
               </p>
             </div>
+          </div>
+
+          <div v-if="pluginFormFields.length" class="space-y-4">
+            <div v-for="field in pluginFormFields" :key="`plugin-${field.key}`">
+              <label class="label" :for="`plugin-${field.key}`">
+                {{ field.label }} <span v-if="field.required" class="accent-text">*</span>
+              </label>
+              <input
+                :id="`plugin-${field.key}`"
+                v-model="formValues[field.key]"
+                class="input"
+                :class="{ 'input-error': fieldErrors[field.key] }"
+                :type="field.type === 'number' ? 'number' : 'text'"
+                :required="field.required"
+                :maxlength="field.max_length || 255"
+                :placeholder="field.placeholder"
+                :aria-invalid="Boolean(fieldErrors[field.key])"
+                :aria-describedby="fieldErrors[field.key] ? `plugin-${field.key}-error` : undefined"
+                @input="clearFieldError(field.key)"
+              />
+              <p v-if="field.help" class="hint mt-1.5">{{ field.help }}</p>
+              <p v-if="fieldErrors[field.key]" :id="`plugin-${field.key}-error`" class="field-error" role="alert">
+                {{ fieldErrors[field.key] }}
+              </p>
+            </div>
+          </div>
+
+          <div v-if="isNewAPIDelivery" class="new-api-quota-preview">
+            <div class="flex items-center justify-between gap-3">
+              <span class="quiet text-xs">预计兑换 quota</span>
+              <span class="nums font-semibold">{{ newAPIQuotaPreview || '填写 NL 数量后显示' }}</span>
+            </div>
+            <p class="hint mt-1.5">
+              最终 quota 由服务端按订单实付金额和后台配置重新计算；此处只用于填写确认。
+            </p>
           </div>
 
           <div v-if="product.require_contact">

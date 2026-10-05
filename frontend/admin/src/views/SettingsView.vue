@@ -26,6 +26,7 @@ const SETTINGS_TABS = [
   { key: 'site', label: '站点与品牌', hint: '站名、域名、Logo 与外观' },
   { key: 'oauth', label: 'NodeLoc 登录', hint: 'OAuth 凭据与登录记录' },
   { key: 'payment', label: '支付设置', hint: 'Nodeloc Payments 凭据' },
+  { key: 'new_api', label: 'New-API 发货', hint: '兑换码渠道与 quota 换算' },
   { key: 'content', label: '内容与功能', hint: '公告、页脚与功能开关' },
   { key: 'smtp', label: '邮件通知', hint: 'SMTP 与发信测试' },
 ] as const
@@ -51,6 +52,7 @@ function discard() {
     Object.assign(settings.app, saved.app)
     Object.assign(settings.oauth, saved.oauth)
     Object.assign(settings.payment, saved.payment)
+    Object.assign(settings.new_api, saved.new_api)
     Object.assign(settings.smtp, saved.smtp)
     Object.assign(settings.features, saved.features)
     Object.assign(settings.theme, saved.theme)
@@ -97,6 +99,14 @@ const settings = reactive<RuntimeSettings>({
   oauth: { enabled: true, base_url: '', client_id: '', client_secret: '', redirect_uri: '', scopes: '' },
   smtp: { enabled: false, host: '', port: 587, username: '', password: '', secure: 'starttls', from: '' },
   payment: { enabled: true, payment_id: '', token: '', secret_key: '', base_url: '' },
+  new_api: {
+    enabled: false,
+    base_url: '',
+    admin_access_token: '',
+    admin_user_id: '',
+    quota_per_nl: '',
+    success_field: '',
+  },
   features: { enabled_registration: true, enabled_checkin: true, enabled_coupons: true, stock_alert_threshold: 5 },
   theme: { theme_primary: '#f2704a', default_locale: 'zh-CN' },
 })
@@ -138,6 +148,7 @@ const missingLabels = computed(() => serverMissing.value.map((name) => MISSING_L
 // an OAuth Client ID typed into the Payment ID box. The store checks the shape on
 // save; guessing it here would only drift from what the server actually reads.
 const serverWarnings = ref<string[]>([])
+const serverNewAPIMissing = ref<string[]>([])
 const paymentBlocked = computed(
   () => settings.payment.enabled && (paymentIncomplete.value || serverMissing.value.length > 0),
 )
@@ -214,12 +225,14 @@ async function refreshReadiness() {
     const doc = await getRuntimeSettings()
     serverMissing.value = doc.payment_missing ?? []
     serverWarnings.value = doc.payment_warnings ?? []
+    serverNewAPIMissing.value = doc.new_api_missing ?? []
     oauthMissing.value = doc.oauth_missing ?? []
     oauthWarnings.value = doc.oauth_warnings ?? []
   } catch {
     // A failed diagnostic read must not block the page that fixes the problem.
     serverMissing.value = []
     serverWarnings.value = []
+    serverNewAPIMissing.value = []
     oauthMissing.value = []
     oauthWarnings.value = []
   }
@@ -241,7 +254,7 @@ function removeFooterLink(index: number) {
 
 /** 掩码代表「保持原值」，显式清除才是真的删除。 */
 function clearSecret(
-  target: 'oauth-secret' | 'payment-token' | 'payment-secret' | 'smtp-pass',
+  target: 'oauth-secret' | 'payment-token' | 'payment-secret' | 'smtp-pass' | 'new-api-token',
 ) {
   switch (target) {
     case 'oauth-secret':
@@ -255,6 +268,9 @@ function clearSecret(
       break
     case 'smtp-pass':
       settings.smtp.password = ''
+      break
+    case 'new-api-token':
+      settings.new_api.admin_access_token = ''
       break
   }
   message.value = '已标记为清除，保存后旧密钥会从运行时配置中删除。'
@@ -302,6 +318,7 @@ async function load() {
     settings.app.footer_links = (result.app.footer_links ?? []).map((link) => ({ ...link }))
     Object.assign(settings.oauth, result.oauth)
     Object.assign(settings.payment, result.payment)
+    Object.assign(settings.new_api, result.new_api)
     if (result.smtp) Object.assign(settings.smtp, result.smtp)
     Object.assign(settings.features, result.features)
     Object.assign(settings.theme, result.theme)
@@ -309,6 +326,7 @@ async function load() {
     snapshot.value = JSON.stringify(settings)
     serverMissing.value = document.payment_missing ?? []
     serverWarnings.value = document.payment_warnings ?? []
+    serverNewAPIMissing.value = document.new_api_missing ?? []
     oauthMissing.value = document.oauth_missing ?? []
     oauthWarnings.value = document.oauth_warnings ?? []
     lastProbe.value = readStoredProbe()
@@ -763,6 +781,87 @@ onBeforeUnmount(() => {
             </div>
             <p v-if="paymentProbeNote" class="codebox text-xs">{{ paymentProbeNote.text }}</p>
           </div>
+        </div>
+
+        <!-- New-API redemption delivery -->
+        <div v-show="settingsTab === 'new_api'" class="card">
+          <div class="mb-5 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h3 class="font-semibold">New-API 兑换码发货</h3>
+              <p class="hint mt-0.5">
+                付款成功后创建兑换码并交付给买家。这是兑换码交付，不是自动充值到账。
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span v-if="settings.new_api.enabled && serverNewAPIMissing.length" class="badge badge-danger">还发不了码</span>
+              <span class="hint">{{ settings.new_api.enabled ? '已启用' : '已禁用' }}</span>
+              <button
+                class="switch"
+                :class="{ 'switch-on': settings.new_api.enabled }"
+                type="button"
+                role="switch"
+                :aria-checked="settings.new_api.enabled"
+                aria-label="启用 New-API 兑换码发货"
+                @click="settings.new_api.enabled = !settings.new_api.enabled"
+              />
+            </div>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="sm:col-span-2">
+              <label class="label" for="new-api-base">API 基础地址</label>
+              <input
+                id="new-api-base"
+                v-model="settings.new_api.base_url"
+                class="input mono"
+                placeholder="https://new-api.example.com"
+              />
+              <p class="hint mt-1">
+                系统实际请求 <span class="mono">{{ settings.new_api.base_url || 'https://new-api.example.com' }}/api/redemption/</span>。
+                仅允许 HTTP/HTTPS 公网地址，内网和云元数据地址会被拒绝。
+              </p>
+            </div>
+            <div>
+              <label class="label" for="new-api-token">管理员 AccessToken</label>
+              <div class="flex gap-2">
+                <input
+                  id="new-api-token"
+                  v-model="settings.new_api.admin_access_token"
+                  type="password"
+                  class="input mono min-w-0 flex-1"
+                  placeholder="保持 ******** 则不修改"
+                  autocomplete="off"
+                />
+                <button class="btn btn-quiet btn-sm shrink-0" type="button" @click="clearSecret('new-api-token')">清除</button>
+              </div>
+              <p class="hint mt-1">对应 Authorization Bearer；只在服务端保存，不会回显明文。</p>
+            </div>
+            <div>
+              <label class="label" for="new-api-user">管理员用户 ID</label>
+              <input id="new-api-user" v-model="settings.new_api.admin_user_id" class="input mono" inputmode="numeric" placeholder="例如 1" />
+              <p class="hint mt-1">对应 New-Api-User 请求头，必须是正整数。</p>
+            </div>
+            <div>
+              <label class="label" for="new-api-ratio">每 NL 兑换 quota</label>
+              <input id="new-api-ratio" v-model="settings.new_api.quota_per_nl" class="input nums" inputmode="numeric" placeholder="例如 100000" />
+              <p class="hint mt-1">quota = 订单实付 NL × 这个比例；后端重新计算，不使用前端 quota。</p>
+            </div>
+            <div>
+              <label class="label" for="new-api-field">成功响应兑换码字段</label>
+              <input id="new-api-field" v-model="settings.new_api.success_field" class="input mono" placeholder="例如 data.key" />
+              <p class="hint mt-1">
+                New-API 响应格式必须按你的实际部署确认。填写响应点路径后才会按该字段提取；
+                无法确认时会进入待人工确认，不会自动重复创建兑换码。
+              </p>
+            </div>
+          </div>
+
+          <p v-if="settings.new_api.enabled && serverNewAPIMissing.length" class="alert alert-warning mt-4" role="alert">
+            渠道已启用但缺少：{{ serverNewAPIMissing.join('、') }}。
+          </p>
+          <p class="alert alert-warning mt-4" role="status">
+            New-API 的响应格式尚未在本仓库确认。适配器只集中解析配置的成功字段或明确成功标记；其他响应会标记为待人工确认，不会伪造成功。
+          </p>
         </div>
 
         <div v-show="settingsTab === 'smtp'" class="card">

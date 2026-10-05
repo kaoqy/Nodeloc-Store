@@ -78,6 +78,11 @@ type DeliveryResult struct {
 	Content   string
 	Note      string
 	Reference string
+	// Uncertain marks a delivery whose upstream request was sent but whose
+	// result could not be confirmed. The order must not be marked delivered;
+	// the shop operator reviews it instead of letting an automatic retry create
+	// a second external resource.
+	Uncertain bool
 }
 
 // Provider is the runtime half of a plugin: the code that checks its own
@@ -102,6 +107,7 @@ type Manifest struct {
 	Author       string        `json:"author"`
 	Capabilities []string      `json:"capabilities"`
 	ConfigSchema []ConfigField `json:"config_schema"`
+	FormSchema   []FormField   `json:"form_schema,omitempty"`
 }
 
 // ConfigField is one input on a plugin's settings form. Secret fields are
@@ -117,8 +123,28 @@ type ConfigField struct {
 	Options     []string `json:"options,omitempty"`
 }
 
+// FormField is one buyer-facing purchase-form field contributed by a provider.
+// Keeping the schema here lets the storefront render it without putting any
+// provider setting or credential into the product payload.
+type FormField struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Type        string `json:"type"` // text | number
+	Required    bool   `json:"required"`
+	Placeholder string `json:"placeholder,omitempty"`
+	Help        string `json:"help,omitempty"`
+	MaxLength   int    `json:"max_length,omitempty"`
+}
+
 // Registry is the set of providers the shop's binary carries.
 type Registry interface {
 	All() []Provider
 	Lookup(key string) (Provider, bool)
+}
+
+// RuntimeConfigProvider supplies the New-API delivery channel's runtime
+// configuration. It is an interface rather than a dependency on the system
+// module so plugin infrastructure stays independent of the settings package.
+type RuntimeConfigProvider interface {
+	NewAPIConfig(ctx context.Context) (map[string]string, map[string]string, error)
 }

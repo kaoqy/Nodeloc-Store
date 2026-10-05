@@ -45,6 +45,10 @@ type OrderRepo interface {
 	MarkOrderPluginDelivering(ctx context.Context, orderNo string) error
 	// MarkOrderPluginDelivered writes a plugin's finished delivery onto the order.
 	MarkOrderPluginDelivered(ctx context.Context, orderNo, content, note string) error
+	// MarkOrderPluginReview parks a paid order whose external delivery may have
+	// happened but could not be confirmed. It is deliberately outside the
+	// automatic retry set: retrying could create a second external resource.
+	MarkOrderPluginReview(ctx context.Context, orderNo, note string) error
 	// ListUndeliveredPaidOrders returns paid orders whose delivery never
 	// completed, including those waiting for card stock to be refilled.
 	ListUndeliveredPaidOrders(ctx context.Context, limit int) ([]models.Order, error)
@@ -194,6 +198,9 @@ type PluginDeliverer interface {
 	// ValidateSelection refuses a purchase whose answers do not resolve to a
 	// delivery item, before any money moves.
 	ValidateSelection(ctx context.Context, productID uint, formValues map[string]string) error
+	// FormFields returns provider-contributed purchase-form fields that must be
+	// merged into the product's own form for validation and order storage.
+	FormFields(ctx context.Context, productID uint) ([]models.ProductFormField, error)
 }
 
 // PluginDelivery is what a plugin handed back for one order.
@@ -201,6 +208,10 @@ type PluginDelivery struct {
 	Content   string
 	Note      string
 	Reference string
+	// Uncertain means the provider may have created the goods but the answer
+	// could not be confirmed. The order stays out of the delivered state so an
+	// automatic retry cannot create a duplicate external resource.
+	Uncertain bool
 }
 
 // ErrPluginUnbound is the sentinel ErrPluginUnbound implementations return from

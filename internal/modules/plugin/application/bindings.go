@@ -219,6 +219,12 @@ type Fulfillability struct {
 	RequiresForm bool     `json:"requires_form"`
 	MappingValue string   `json:"mapping_value,omitempty"`
 	Options      []string `json:"options,omitempty"`
+	FormSchema   []contract.FormField `json:"form_schema,omitempty"`
+	// QuotaPerNL is public pricing metadata for the New-API channel. It is not a
+	// credential and lets the buyer preview how many quota their NL amount buys.
+	QuotaPerNL string `json:"quota_per_nl,omitempty"`
+	// DeliveryNote is a safe, non-secret explanation of what will be delivered.
+	DeliveryNote string `json:"delivery_note,omitempty"`
 }
 
 // DescribeProduct reports what a product's plugin contributes. It is used by the
@@ -245,6 +251,18 @@ func (s *Service) DescribeProduct(ctx context.Context, productID uint) (*Fulfill
 		return nil, err
 	}
 	describe := &Fulfillability{PluginKey: plugin.Key, PluginName: plugin.Name}
+	if provider, ok := s.registry.Lookup(plugin.Key); ok {
+		describe.FormSchema = provider.Manifest().FormSchema
+	}
+	if plugin.Key == "new-api-redemption-v1" {
+		describe.DeliveryNote = "付款后创建 New-API 兑换码交给买家；买家需自行到 New-API 平台兑换，系统不会自动充值到账户。"
+		if s.runtime != nil {
+			settings, _, err := s.runtime.NewAPIConfig(ctx)
+			if err == nil {
+				describe.QuotaPerNL = strings.TrimSpace(settings["quota_per_nl"])
+			}
+		}
+	}
 	for _, binding := range enabled {
 		if binding.Value != "" {
 			describe.RequiresForm = true
@@ -252,6 +270,102 @@ func (s *Service) DescribeProduct(ctx context.Context, productID uint) (*Fulfill
 		}
 	}
 	return describe, nil
+}
+
+// SetNewAPIProduct enables or disables the New-API redemption channel for one
+// product without restoring the retired plugin-management surface. The provider
+// needs one enabled binding to be recognised by the payment delivery router; its
+// value is deliberately empty because New-API creates a random code at payment
+// time rather than mapping the order to a pre-existing item.
+func (s *Service) SetNewAPIProduct(ctx context.Context, productID uint, enabled bool) error {
+	if productID == 0 {
+		return fmt.Errorf("%w: 请选择商品", domain.ErrInvalidInput)
+	}
+	plugins, err := s.repo.ListPlugins(ctx)
+	if err != nil {
+		return err
+	}
+	var target *domain.Plugin
+	for i := range plugins {
+		if plugins[i].Key == "new-api-redemption-v1" {
+			target = &plugins[i]
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("%w: New-API 发货渠道不在当前版本里", domain.ErrInvalidInput)
+	}
+	if enabled {
+		if err := s.requireNewAPIReady(ctx); err != nil {
+			return err
+		}
+	}
+	existing, err := s.repo.ResolveBinding(ctx, productID, "")
+	if err == nil && existing != nil {
+		existing.IsEnabled = enabled
+		return s.repo.UpdateBinding(ctx, existing)
+	}
+	if !errors.Is(err, domain.ErrBindingNotFound) {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+	return s.repo.CreateBinding(ctx, &domain.PluginBinding{
+		PluginID:   target.ID,
+		ProductID: productID,
+		Value:      "",
+		RemoteName: "New-API 兑换码",
+		RemoteRef:  "new-api-redemption-v1",
+		IsEnabled:  true,
+	})
+}
+
+func (s *Service) requireNewAPIReady(ctx context.Context) error {
+	if s.runtime == nil {
+		return fmt.Errorf("%w: New-API 运行时配置不可用", domain.ErrInvalidInput)
+	}
+	settings, secrets, err := s.runtime.NewAPIConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: 读取 New-API 配置失败：%v", domain.ErrInvalidInput, err)
+	}
+	required := []struct {
+		key   string
+		value string
+		label string
+	}{
+		{"base_url", settings["base_url"], "API 基础地址"},
+		{"admin_access_token", secrets["admin_access_token"], "管理员 AccessToken"},
+		{"admin_user_id", settings["admin_user_id"], "管理员用户 ID"},
+		{"quota_per_nl", settings["quota_per_nl"], "每 NL 兑换 quota"},
+	}
+	missing := make([]string, 0, len(required))
+	for _, item := range required {
+		if strings.TrimSpace(item.value) == "" {
+			missing = append(missing, item.label)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%w: 请先在系统设置中补全 New-API 配置：%s", domain.ErrInvalidInput, strings.Join(missing, "、"))
+	}
+	return nil
+}
+
+// NewAPIProductEnabled reports whether one product uses the New-API channel.
+func (s *Service) NewAPIProductEnabled(ctx context.Context, productID uint) (bool, error) {
+	if productID == 0 {
+		return false, nil
+	}
+	bindings, err := s.repo.ListBindingsForProduct(ctx, productID)
+	if err != nil {
+		return false, err
+	}
+	for _, binding := range bindings {
+		if binding.IsEnabled && binding.RemoteRef == "new-api-redemption-v1" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Resolve is the checkout call: it turns a product and the buyer's answered value

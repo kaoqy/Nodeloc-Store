@@ -212,6 +212,13 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 			return nil, fmt.Errorf("%w: 商品购买表单配置无效", ErrInvalidInput)
 		}
 	}
+	if s.plugins != nil {
+		extraFields, err := s.plugins.FormFields(ctx, product.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load plugin form fields: %w", err)
+		}
+		formFields = append(formFields, extraFields...)
+	}
 	formValuesJSON, err := models.ValidateProductForm(formFields, input.FormValues)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
@@ -1033,6 +1040,17 @@ func (s *Service) deliverOrder(ctx context.Context, order *models.Order) (plugin
 		// longer claims.
 		return false, s.fulfillment.Fulfill(ctx, order)
 	}
+	if result.Uncertain {
+		note := strings.TrimSpace(result.Note)
+		if note == "" {
+			note = "第三方交付结果待确认，系统不会自动重复创建。"
+		}
+		if err := s.orders.MarkOrderPluginReview(ctx, order.OrderNo, note); err != nil {
+			return false, err
+		}
+		order.FulfillmentStatus = "plugin_review"
+		return true, nil
+	}
 	if result.Content == "" {
 		result.Content = "插件已完成本次交付，请查看订单详情。"
 	}
@@ -1050,9 +1068,19 @@ func (s *Service) deliverOrder(ctx context.Context, order *models.Order) (plugin
 }
 
 func (s *Service) FulfillOrder(ctx context.Context, orderNo string) (*models.Order, error) {
+	return s.FulfillOrderConfirmed(ctx, orderNo, false)
+}
+
+// FulfillOrderConfirmed retries delivery. A plugin_review order may have
+// created an external resource already, so it requires an explicit operator
+// confirmation before another provider call is allowed.
+func (s *Service) FulfillOrderConfirmed(ctx context.Context, orderNo string, confirmExternalRetry bool) (*models.Order, error) {
 	order, err := s.orders.GetOrderByNo(ctx, strings.TrimSpace(orderNo))
 	if err != nil {
 		return nil, err
+	}
+	if order.FulfillmentStatus == "plugin_review" && !confirmExternalRetry {
+		return nil, fmt.Errorf("%w: 该订单的第三方交付结果待确认，请先在第三方后台核对后再确认重试", ErrInvalidInput)
 	}
 	if _, err := s.deliverOrder(ctx, order); err != nil {
 		return nil, err

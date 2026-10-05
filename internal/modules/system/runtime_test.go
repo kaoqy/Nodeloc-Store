@@ -38,6 +38,40 @@ func TestNormalizeStripsPasteArtefactsFromCredentials(t *testing.T) {
 	}
 }
 
+func TestNewAPIConfigRequiresCompleteFieldsWhenEnabled(t *testing.T) {
+	runtime := Default()
+	runtime.NewAPI.Enabled = boolPointer(true)
+	if missing := runtime.NewAPI.MissingFields(); len(missing) != 4 {
+		t.Fatalf("missing fields = %v, want base_url, token, admin id and quota", missing)
+	}
+	runtime.NewAPI.BaseURL = "https://new-api.example.com"
+	runtime.NewAPI.AdminAccessToken = "secret"
+	runtime.NewAPI.AdminUserID = "7"
+	runtime.NewAPI.QuotaPerNL = "100000"
+	if missing := runtime.NewAPI.MissingFields(); len(missing) != 0 {
+		t.Fatalf("complete config still reports missing %v", missing)
+	}
+}
+
+func TestNewAPIBaseURLRejectsUnsafeHosts(t *testing.T) {
+	for _, raw := range []string{
+		"http://localhost:3000",
+		"http://127.0.0.1",
+		"http://10.0.0.2",
+		"http://169.254.169.254",
+		"file:///etc/passwd",
+	} {
+		if got := normalizeNewAPIBaseURL(raw); got != "" {
+			t.Errorf("unsafe URL %q normalized to %q", raw, got)
+		}
+	}
+	if got := normalizeNewAPIBaseURL("https://new-api.example.com/"); got != "https://new-api.example.com" {
+		t.Fatalf("safe URL normalized to %q", got)
+	}
+}
+
+func boolPointer(value bool) *bool { return &value }
+
 // Payment ID and Client ID, Token and Secret Key: the two pairs on 设置 look alike,
 // sit side by side, and each swap stops the shop from taking money with an error
 // that names none of them. The store reads the shapes back.

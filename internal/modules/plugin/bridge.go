@@ -61,6 +61,7 @@ func (b *DeliveryBridge) Fulfill(ctx context.Context, order *models.Order) (*pay
 		Content:   result.Content,
 		Note:      result.Note,
 		Reference: result.Reference,
+		Uncertain: result.Uncertain,
 	}, nil
 }
 
@@ -68,6 +69,27 @@ func (b *DeliveryBridge) Fulfill(ctx context.Context, order *models.Order) (*pay
 // written, so a buyer never pays for a selection that has no delivery item.
 func (b *DeliveryBridge) ValidateSelection(ctx context.Context, productID uint, formValues map[string]string) error {
 	return b.service.ValidateSelection(ctx, productID, formValues)
+}
+
+// FormFields adapts the provider's buyer-facing form schema to the shared
+// ProductFormField shape used by the order validator.
+func (b *DeliveryBridge) FormFields(ctx context.Context, productID uint) ([]models.ProductFormField, error) {
+	describe, err := b.service.DescribeProduct(ctx, productID)
+	if err != nil || describe == nil {
+		return nil, err
+	}
+	out := make([]models.ProductFormField, 0, len(describe.FormSchema))
+	for _, field := range describe.FormSchema {
+		out = append(out, models.ProductFormField{
+			Key:         field.Key,
+			Label:       field.Label,
+			Type:        field.Type,
+			Required:    field.Required,
+			Placeholder: field.Placeholder,
+			MaxLength:   field.MaxLength,
+		})
+	}
+	return out, nil
 }
 
 func deref(value *string) string {

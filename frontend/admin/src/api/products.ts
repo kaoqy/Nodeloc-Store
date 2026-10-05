@@ -98,6 +98,17 @@ export const generateCards = (productId: number, count: number, prefix = '') =>
     .post<GeneratedCards>(`/admin/products/${productId}/cards/generate`, { count, prefix })
     .then((r) => r.data)
 
+/** New-API redemption channel for one product (independent of retired plugin management). */
+export const getProductNewAPIDelivery = (productId: number) =>
+  client
+    .get<{ data: { enabled: boolean } }>(`/admin/products/${productId}/new-api-delivery`)
+    .then((r) => r.data.data.enabled)
+
+export const setProductNewAPIDelivery = (productId: number, enabled: boolean) =>
+  client
+    .put<{ data: { enabled: boolean } }>(`/admin/products/${productId}/new-api-delivery`, { enabled })
+    .then((r) => r.data.data.enabled)
+
 export const setCardStatusBatch = (productId: number, cardIds: number[], status: string) =>
   client
     .post<{ updated: number; released: number }>(

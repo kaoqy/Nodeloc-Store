@@ -46,6 +46,7 @@ const waitingStock = computed(() => order.value?.fulfillment_status === 'waiting
 // 插件交付中: the goods are being delivered by an installed plugin, which is a
 // different queue from 等待补货 and from 等待人工发货.
 const pluginPending = computed(() => order.value?.fulfillment_status === 'plugin_pending')
+const pluginReview = computed(() => order.value?.fulfillment_status === 'plugin_review')
 const canDeliver = computed(() => isPaid.value && !delivered.value)
 
 const steps = computed(() => {
@@ -101,6 +102,13 @@ function askCancel() {
   if (!order.value) return
   if (!confirm(`取消订单 ${orderNo.value}？买家可能还在付款路上，取消后这一单不再发货。`)) return
   void run(() => cancelOrder(orderNo.value), '订单已取消')
+}
+
+/** A review-state retry can create a second external code, so it is explicit. */
+function confirmExternalRetry(): boolean {
+  return confirm(
+    '这次重试会再次请求 New-API 创建兑换码。只有在确认第三方后台没有已创建的兑换码时才继续。是否继续？',
+  )
 }
 
 async function submitDelivery() {
@@ -201,12 +209,15 @@ onMounted(load)
           取消订单
         </button>
         <button
-          v-if="canManage && (waitingStock || pluginPending)"
+          v-if="canManage && (waitingStock || pluginPending || pluginReview)"
           class="btn btn-primary btn-sm"
           :disabled="busy"
-          @click="run(() => fulfillOrder(orderNo), pluginPending ? '已重试插件交付' : '已重试自动交付')"
+          @click="run(
+            () => fulfillOrder(orderNo, pluginReview ? confirmExternalRetry() : false),
+            pluginReview ? '已重新请求并尝试确认 New-API 兑换码' : pluginPending ? '已重试插件交付' : '已重试自动交付',
+          )"
         >
-          {{ pluginPending ? '重试插件交付' : '重试自动交付' }}
+          {{ pluginReview ? '再次请求并确认' : pluginPending ? '重试插件交付' : '重试自动交付' }}
         </button>
         <button v-if="canManage && canDeliver" class="btn btn-primary btn-sm" :disabled="busy" @click="showDeliver = true">
           人工发货
@@ -224,6 +235,11 @@ onMounted(load)
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <div v-if="notice" class="alert alert-success" role="status">{{ notice }}</div>
+    <div v-if="pluginReview" class="alert alert-warning" role="status">
+      New-API 请求可能已经发出，但响应无法确认兑换码是否创建。为避免重复创建，
+      系统没有自动重试。请先到 New-API 后台核对是否已有兑换码；只有确认不会重复时，
+      再使用「再次请求并确认」。
+    </div>
 
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <div class="card !p-4">

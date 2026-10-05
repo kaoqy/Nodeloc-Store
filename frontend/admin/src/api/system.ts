@@ -101,6 +101,9 @@ export interface SettingsDocument {
   oauth_ready?: boolean
   oauth_missing?: string[]
   oauth_warnings?: string[]
+  /** New-API delivery channel: which required fields are still missing. */
+  new_api_ready?: boolean
+  new_api_missing?: string[]
 }
 
 export const getRuntimeSettings = () =>

@@ -20,6 +20,7 @@ const TONES: Record<string, string> = {
   pending_human: 'badge-warning', user_requested_human: 'badge-warning',
   waiting_confirm: 'badge-warning', manual_pending: 'badge-warning',
   waiting_stock: 'badge-warning', plugin_pending: 'badge-info', scheduled: 'badge-info',
+  plugin_review: 'badge-warning',
   draft: 'badge-neutral', paused: 'badge-warning', archived: 'badge-neutral',
   // 异常
   failed: 'badge-danger', error: 'badge-danger', rejected: 'badge-danger',
