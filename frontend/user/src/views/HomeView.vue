@@ -212,7 +212,6 @@ onMounted(async () => {
           </p>
           <div class="hero-actions">
             <a href="#catalog" class="btn btn-primary">浏览商品</a>
-            <RouterLink to="/orders" class="btn btn-secondary">我的订单</RouterLink>
           </div>
           <ul class="hero-points">
             <li>NodeLoc 授权登录</li>

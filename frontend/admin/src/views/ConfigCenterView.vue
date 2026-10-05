@@ -33,7 +33,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-type TabKey = 'support' | 'commerce' | 'activity' | 'site' | 'remind'
+type TabKey = 'support' | 'commerce' | 'activity' | 'site' | 'remind' | 'legacy'
 
 interface TabDef {
   key: TabKey
@@ -48,6 +48,7 @@ const TABS: TabDef[] = [
   { key: 'activity', label: '营销规则', hint: '参与限制与优惠叠加', resources: ['config_center', 'activities'] },
   { key: 'site', label: '站点展示', hint: '前台露出的品牌信息', resources: ['config_center'] },
   { key: 'remind', label: '提醒事件', hint: '哪些事件要提醒、发给谁', resources: ['notification_templates', 'config_center'] },
+  { key: 'legacy', label: '历史兼容', hint: '旧值仅核对，不参与当前运行', resources: ['config_center'] },
 ]
 
 const visibleTabs = computed(() =>
@@ -98,6 +99,8 @@ interface FieldMeta {
   options?: { value: string; label: string }[]
   /** 保存前的附加校验，返回非空字符串则阻止保存。 */
   validate?: (config: SystemConfig) => string
+  /** 该配置当前是否有实际执行路径。false 表示只保留历史值，不提供假开关。 */
+  effective?: boolean
 }
 
 /** 与后端 defaultSystemConfigs 对齐的出厂值，仅用于在卡片上提示「默认是多少」。 */
@@ -184,6 +187,72 @@ const FIELD_META: Record<string, FieldMeta> = {
     hint: '在店铺页脚展示当前版本，方便核对线上是否是最新构建。',
     preview: (c) => (isTruthy(c.value) ? '页脚显示一行版本号' : '页脚不显示版本号'),
   },
+  'order/unpaid_cancel_hours': {
+    effective: false,
+    unit: '小时',
+    affects: '暂无当前执行路径',
+    hint: '历史兼容项。后端会保留这个值，但当前版本没有自动关单任务读取它；请勿把它当成已生效的自动取消规则。',
+  },
+  'order/auto_deliver_retry': {
+    effective: false,
+    affects: '暂无当前执行路径',
+    hint: '历史兼容项。交付失败重试由现有订单队列与后台扫描处理，这个开关当前不会被运行时读取。',
+  },
+  'product/default_stock_alert': {
+    effective: false,
+    unit: '件',
+    affects: '请改用「系统设置 → 内容与功能 → 库存预警阈值」',
+    hint: '历史兼容项。当前库存预警阈值来自系统设置中的功能配置，这个旧值不会被读取。',
+  },
+  'risk/coupon_max_attempts': {
+    effective: false,
+    unit: '次/分钟',
+    affects: '暂无当前执行路径',
+    hint: '历史兼容项。当前版本没有优惠码尝试限流计数器，这个数值不会被运行时读取。',
+  },
+  'risk/require_second_confirm': {
+    effective: false,
+    affects: '暂无当前执行路径',
+    hint: '历史兼容项。高风险操作的确认目前由各业务页面直接处理，这个开关不会被运行时读取。',
+  },
+  'retention/audit_log_days': {
+    effective: false,
+    unit: '天',
+    affects: '暂无当前执行路径',
+    hint: '历史兼容项。当前版本没有审计日志自动清理任务，这个保留天数不会被读取。',
+  },
+  'retention/ticket_days': {
+    effective: false,
+    unit: '天',
+    affects: '暂无当前执行路径',
+    hint: '历史兼容项。当前版本没有工单自动清理任务，这个保留天数不会被读取。',
+  },
+  'upload/max_image_mb': {
+    effective: false,
+    unit: 'MB',
+    affects: '当前上传上限固定为 2 MB',
+    hint: '历史兼容项。图片上传上限由上传服务固定校验，这个旧值不会改变实际上限。',
+  },
+}
+
+/** 后端已经保留但当前没有执行路径的配置，只在“历史兼容”区展示。 */
+const HISTORICAL_KEYS = new Set([
+  'order/unpaid_cancel_hours',
+  'order/auto_deliver_retry',
+  'product/default_stock_alert',
+  'risk/coupon_max_attempts',
+  'risk/require_second_confirm',
+  'retention/audit_log_days',
+  'retention/ticket_days',
+  'upload/max_image_mb',
+])
+
+function isHistorical(config: SystemConfig): boolean {
+  return HISTORICAL_KEYS.has(`${config.group}/${config.key}`)
+}
+
+function isEffective(config: SystemConfig): boolean {
+  return metaOf(config).effective !== false && !isHistorical(config)
 }
 
 /** 每个标签页由哪些分组组成，以及分组内的标题与说明。 */
@@ -236,6 +305,7 @@ const TAB_SECTIONS: Record<TabKey, GroupBlock[]> = {
     },
   ],
   remind: [],
+  legacy: [],
 }
 
 function metaOf(config: SystemConfig): FieldMeta {
@@ -370,12 +440,18 @@ const currentBlocks = computed(() => {
           title: part.title,
           items: part.keys
             .map((key) => configs.value.find((item) => item.group === block.group && item.key === key))
-            .filter((item): item is SystemConfig => Boolean(item)),
+            .filter((item): item is SystemConfig => item !== undefined && isEffective(item)),
         }))
         .filter((part) => part.items.length > 0),
     }))
     .filter((block) => block.parts.length > 0)
 })
+
+/**
+ * 旧版本留下、当前没有执行路径的配置。它们不混进正常编辑区，
+ * 避免管理员看到一个能保存但不会生效的开关。
+ */
+const historicalConfigs = computed(() => configs.value.filter((item) => isHistorical(item)))
 
 /** 合并过的旧地址仍然认得，直接落到现在的新分组。 */
 const LEGACY_TABS: Record<string, TabKey> = {
@@ -776,12 +852,15 @@ onMounted(() => {
                     <div class="config-card-body">
                       <div class="config-card-head">
                         <p class="config-card-label">{{ config.label || config.key }}</p>
-                      <span v-if="config.value_type === 'bool'" class="config-kind">开关</span>
+                        <span v-if="config.value_type === 'bool'" class="config-kind">开关</span>
                         <span v-else-if="controlOf(config) === 'number'" class="config-kind">数值</span>
                         <span v-else-if="controlOf(config) === 'text'" class="config-kind">文本</span>
                         <span v-else-if="unitOf(config)" class="config-kind">{{ unitOf(config) }}</span>
                         <span v-else class="config-kind">文本</span>
                         <span v-if="defaultNoteOf(config)" class="config-kind config-kind-default">{{ defaultNoteOf(config) }}</span>
+                        <span :class="['config-kind', isEffective(config) ? 'config-kind-live' : 'config-kind-legacy']">
+                          {{ isEffective(config) ? '立即生效' : '仅保留旧值' }}
+                        </span>
                       </div>
                       <p v-if="affectsOf(config)" class="config-affects">
                         <span class="config-affects-tag">影响</span>
@@ -871,6 +950,34 @@ onMounted(() => {
           </SettingsSection>
           <AgentPanel v-if="tab === 'support'" />
         </template>
+
+        <SettingsSection
+          v-if="tab === 'legacy' && historicalConfigs.length"
+          title="历史兼容配置"
+          description="这些键是旧版本留下的数据，当前版本没有运行时读取它们。此处只用于核对和保留原值，不代表配置已经生效。"
+          resource="config_center"
+        >
+          <div class="config-cards">
+            <article v-for="config in historicalConfigs" :key="config.group + '/' + config.key" class="config-card config-card-legacy">
+              <div class="config-card-body">
+                <div class="config-card-head">
+                  <p class="config-card-label">{{ config.label || config.key }}</p>
+                  <span class="config-kind">旧配置</span>
+                  <span v-if="unitOf(config)" class="config-kind">{{ unitOf(config) }}</span>
+                </div>
+                <p class="config-card-hint">{{ hintOf(config) }}</p>
+                <p class="config-preview">
+                  <span class="quiet text-[10.5px] tracking-wide">当前保留值</span>
+                  <span class="mono">{{ config.value || '空' }}</span>
+                </p>
+              </div>
+            </article>
+          </div>
+        </SettingsSection>
+        <div v-else-if="tab === 'legacy'" class="card py-12 text-center">
+          <p class="font-semibold">没有历史兼容配置</p>
+          <p class="quiet mt-1 text-sm">当前库中没有需要保留的旧配置键。</p>
+        </div>
 
       </div>
     </div>
@@ -978,6 +1085,13 @@ onMounted(() => {
   transition: border-color var(--fast), background var(--fast);
 }
 .config-card:hover { border-color: var(--stroke); background: var(--surface-hi); }
+.config-card-legacy {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface-sunken) 88%, var(--warning-soft));
+}
+.config-card-legacy:hover {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--stroke));
+}
 .config-card-body { flex: 1; min-width: 0; }
 .config-card-head { display: flex; align-items: baseline; gap: 8px; }
 .config-card-label { font-size: 13.5px; font-weight: 650; }
@@ -992,6 +1106,16 @@ onMounted(() => {
   color: var(--text-quiet);
 }
 .config-kind-default { border-style: dashed; color: var(--text-dim); }
+.config-kind-live {
+  border-color: color-mix(in srgb, var(--success) 34%, transparent);
+  background: var(--success-soft);
+  color: var(--success);
+}
+.config-kind-legacy {
+  border-style: dashed;
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 34%, transparent);
+}
 .config-affects {
   display: flex;
   align-items: baseline;

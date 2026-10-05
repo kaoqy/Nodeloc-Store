@@ -193,6 +193,12 @@ onMounted(load)
           <div v-for="i in 6" :key="i" class="skeleton h-9 w-full" />
         </div>
 
+        <div v-else-if="error && !activeRole" class="card py-12 text-center">
+          <p class="font-semibold">权限目录暂时不可用</p>
+          <p class="quiet mt-1 text-sm">{{ error }}</p>
+          <button class="btn btn-secondary btn-sm mt-5" :disabled="loading" @click="load">重新加载</button>
+        </div>
+
         <template v-else-if="activeRole">
           <div class="card space-y-1">
             <div class="flex flex-wrap items-center gap-2">

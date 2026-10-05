@@ -222,7 +222,8 @@ async function submitImport() {
     const result = await batchAddCards(importProduct.value, lines)
     notice.value =
       '已导入 ' + result.created.length + ' 张卡密' +
-      (result.duplicates ? '（跳过重复 ' + result.duplicates + ' 张）' : '') +
+      (result.duplicates ? '（其中 ' + result.duplicates + ' 张是重复键，已按现有规则照常入库）' : '') +
+      (result.blank ? '，忽略空白行 ' + result.blank + ' 行' : '') +
       (result.released ? '，并自动发出 ' + result.released + ' 笔等待中的订单' : '')
     importText.value = ''
     showImport.value = false
@@ -426,7 +427,7 @@ onMounted(async () => {
           <label class="label" for="imp-text">卡密内容（每行一张）</label>
           <textarea id="imp-text" v-model="importText" class="input mono min-h-[220px] text-xs" placeholder="CARD-XXXX-YYYY&#10;CARD-ZZZZ-WWWW" />
         </div>
-        <p class="quiet text-xs">重复的卡密会被跳过，不会被重复售出。</p>
+        <p class="quiet text-xs">每行一张。重复键也会照常入库，并按现有库存规则逐张交付；空白行会被忽略。</p>
       </div>
       <template #footer>
         <div class="flex justify-end gap-2">

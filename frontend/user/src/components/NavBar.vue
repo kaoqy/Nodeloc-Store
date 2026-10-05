@@ -55,7 +55,6 @@ async function logout() {
         <RouterLink to="/" class="nav-item nav-pill">商品</RouterLink>
         <RouterLink to="/activities" class="nav-item nav-pill">活动</RouterLink>
         <template v-if="auth.isAuthenticated">
-          <RouterLink to="/orders" class="nav-item nav-pill">我的订单</RouterLink>
           <RouterLink v-if="!isHome" to="/support" class="nav-item nav-pill">客服中心</RouterLink>
           <RouterLink to="/profile" class="nav-item nav-pill relative">
             个人中心
@@ -123,7 +122,6 @@ async function logout() {
       <RouterLink to="/" class="nav-item w-full">全部商品</RouterLink>
       <RouterLink to="/activities" class="nav-item w-full">活动中心</RouterLink>
       <template v-if="auth.isAuthenticated">
-        <RouterLink to="/orders" class="nav-item w-full">我的订单</RouterLink>
         <RouterLink v-if="!isHome" to="/support" class="nav-item w-full">客服中心</RouterLink>
         <RouterLink to="/profile" class="nav-item w-full">
           个人中心<span v-if="inbox.unread" class="nums ml-2 text-[var(--accent)]">{{ badge }} 未读</span>

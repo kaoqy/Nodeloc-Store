@@ -89,7 +89,7 @@ function goSettings() {
           <div class="admin-toolbar ml-auto flex items-center gap-1">
             <RouterLink
               v-if="auth.allows('notifications', 'view')"
-              to="/notifications"
+              to="/config?tab=remind"
               class="icon-btn"
               aria-label="通知中心"
             >

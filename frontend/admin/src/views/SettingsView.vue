@@ -239,6 +239,28 @@ function removeFooterLink(index: number) {
   settings.app.footer_links?.splice(index, 1)
 }
 
+/** 掩码代表「保持原值」，显式清除才是真的删除。 */
+function clearSecret(
+  target: 'oauth-secret' | 'payment-token' | 'payment-secret' | 'smtp-pass',
+) {
+  switch (target) {
+    case 'oauth-secret':
+      settings.oauth.client_secret = ''
+      break
+    case 'payment-token':
+      settings.payment.token = ''
+      break
+    case 'payment-secret':
+      settings.payment.secret_key = ''
+      break
+    case 'smtp-pass':
+      settings.smtp.password = ''
+      break
+  }
+  message.value = '已标记为清除，保存后旧密钥会从运行时配置中删除。'
+  messageType.value = 'warn'
+}
+
 // A number input goes through an empty state while it is being retyped, so the
 // field keeps its own string and only the committed value reaches the settings.
 const stockThreshold = ref('5')
@@ -613,7 +635,11 @@ onBeforeUnmount(() => {
               </div>
               <div>
                 <label class="label" for="oauth-secret">Client Secret</label>
-                <input id="oauth-secret" v-model="settings.oauth.client_secret" type="password" class="input mono" placeholder="保持 ******** 则不修改" autocomplete="off" />
+                <div class="flex gap-2">
+                  <input id="oauth-secret" v-model="settings.oauth.client_secret" type="password" class="input mono min-w-0 flex-1" placeholder="保持 ******** 则不修改" autocomplete="off" />
+                  <button class="btn btn-quiet btn-sm shrink-0" type="button" @click="clearSecret('oauth-secret')">清除</button>
+                </div>
+                <p class="hint mt-1">已保存时显示 ********；不修改就保持原值，点「清除」并保存才会删除。</p>
               </div>
             </div>
             <div>
@@ -683,12 +709,18 @@ onBeforeUnmount(() => {
               </div>
               <div>
                 <label class="label" for="payment-token">Payment Token（tk_xxx）</label>
-                <input id="payment-token" v-model="settings.payment.token" type="password" class="input mono" placeholder="tk_xxx；保持 ******** 则不修改" autocomplete="off" />
+                <div class="flex gap-2">
+                  <input id="payment-token" v-model="settings.payment.token" type="password" class="input mono min-w-0 flex-1" placeholder="tk_xxx；保持 ******** 则不修改" autocomplete="off" />
+                  <button class="btn btn-quiet btn-sm shrink-0" type="button" @click="clearSecret('payment-token')">清除</button>
+                </div>
                 <p class="hint mt-1">文档用它签名下单与转账（SHA-256 后再作 HMAC 密钥）。与下面两项任选其一填写即可。</p>
               </div>
               <div class="sm:col-span-2">
                 <label class="label" for="payment-secret">Secret Key（商户密钥）</label>
-                <input id="payment-secret" v-model="settings.payment.secret_key" type="password" class="input mono" placeholder="保持 ******** 则不修改" autocomplete="off" />
+                <div class="flex gap-2">
+                  <input id="payment-secret" v-model="settings.payment.secret_key" type="password" class="input mono min-w-0 flex-1" placeholder="保持 ******** 则不修改" autocomplete="off" />
+                  <button class="btn btn-quiet btn-sm shrink-0" type="button" @click="clearSecret('payment-secret')">清除</button>
+                </div>
                 <p class="hint mt-1">原样用于查单签名与回调验签。NodeLoc 的支付应用只给你一串密钥时，把它填在这里或上面任意一格都可以。</p>
               </div>
               <div class="sm:col-span-2">
@@ -758,7 +790,10 @@ onBeforeUnmount(() => {
             </div>
             <div>
               <label class="label" for="smtp-pass">密码</label>
-              <input id="smtp-pass" v-model="settings.smtp.password" class="input" type="password" placeholder="保持 ******** 则不修改" autocomplete="new-password" />
+              <div class="flex gap-2">
+                <input id="smtp-pass" v-model="settings.smtp.password" class="input min-w-0 flex-1" type="password" placeholder="保持 ******** 则不修改" autocomplete="new-password" />
+                <button class="btn btn-quiet btn-sm shrink-0" type="button" @click="clearSecret('smtp-pass')">清除</button>
+              </div>
             </div>
             <div class="sm:col-span-2">
               <label class="label" for="smtp-from">发件人（名称 + 地址）</label>

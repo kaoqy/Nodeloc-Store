@@ -224,8 +224,6 @@ onMounted(() => {
     </PageHeader>
 
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-    <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
-
     <FilterBar :count="total ? '共 ' + total + ' 笔订单' : ''">
       <input
         v-model="search"
