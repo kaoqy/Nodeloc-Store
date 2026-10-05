@@ -51,11 +51,11 @@ async function submit() {
 </script>
 
 <template>
-  <div class="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-4 py-14 sm:px-0">
+  <div class="page-shell page-shell-narrow flex flex-1 flex-col justify-center py-14">
     <div class="rise-in">
       <div class="brand-mark mb-6">N</div>
       <p class="eyebrow">{{ site.name }}</p>
-      <h1 class="mt-2 text-2xl font-bold">创建本地账号</h1>
+      <h1 class="page-title mt-2">创建本地账号</h1>
       <p class="mt-2 text-sm text-[var(--text-dim)]">
         本地账号可独立完成下单与订单查询；注册后可在个人中心绑定 NodeLoc。
       </p>
@@ -69,7 +69,7 @@ async function submit() {
         <RouterLink to="/login" class="btn btn-primary mt-6">前往登录</RouterLink>
       </div>
 
-      <form v-else class="card mt-7 space-y-4" @submit.prevent="submit">
+      <form v-else class="surface-panel mt-7 space-y-4 p-5" @submit.prevent="submit">
         <div>
           <label class="label" for="username">用户名</label>
           <input

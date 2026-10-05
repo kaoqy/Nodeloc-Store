@@ -166,7 +166,7 @@ onMounted(load)
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <RouterLink to="/products" class="quiet text-xs hover:text-[var(--text)]">← 返回商品列表</RouterLink>
-        <h2 class="mt-1.5 text-xl font-bold">{{ isEdit ? '编辑商品' : '新建商品' }}</h2>
+        <h2 class="page-title mt-1.5">{{ isEdit ? '编辑商品' : '新建商品' }}</h2>
       </div>
       <div class="flex items-center gap-2">
         <button class="btn btn-secondary btn-sm" @click="router.push('/products')">取消</button>

@@ -204,7 +204,7 @@ onMounted(async () => {
       <div class="home-hero-inner">
         <div class="rise-in max-w-2xl">
           <p class="eyebrow">数字商品商店</p>
-          <h1 class="home-title mt-2 text-3xl font-bold sm:text-4xl">
+          <h1 class="home-title page-title mt-2">
             选好商品，<span class="accent-text">支付后自动交付</span>
           </h1>
           <p class="mt-3 text-sm leading-relaxed text-[var(--text-dim)] sm:text-[15px]">

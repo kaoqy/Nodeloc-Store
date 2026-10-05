@@ -398,7 +398,7 @@ watch(
 </script>
 
 <template>
-  <div class="product-detail-page mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+  <div class="product-detail-page page-shell">
     <div v-if="loading" class="grid gap-8 lg:grid-cols-[1.5fr_1fr]">
       <div class="space-y-4">
         <div class="skeleton aspect-[16/9] w-full !rounded-lg" />

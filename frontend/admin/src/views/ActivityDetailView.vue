@@ -89,7 +89,7 @@ onMounted(load)
   <section class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h2 class="text-lg font-bold">{{ activity?.name || '活动数据' }}</h2>
+        <h2 class="page-title">{{ activity?.name || '活动数据' }}</h2>
         <p class="quiet mt-1 text-xs">
           {{ activity?.subtitle || '参与情况、优惠金额与操作日志' }}
         </p>

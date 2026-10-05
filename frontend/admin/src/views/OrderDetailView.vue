@@ -166,11 +166,11 @@ onMounted(load)
   </section>
 
   <section v-else class="space-y-5">
-    <div class="flex flex-wrap items-start justify-between gap-3">
+    <div class="flex flex-wrap items-start justify-between gap-4">
       <div class="min-w-0">
         <RouterLink to="/orders" class="quiet text-xs hover:text-[var(--text)]">← 返回订单列表</RouterLink>
         <div class="mt-1.5 flex flex-wrap items-center gap-2.5">
-          <h2 class="mono truncate text-xl font-bold">{{ order.order_no }}</h2>
+          <h2 class="page-title mono truncate">{{ order.order_no }}</h2>
           <span class="badge" :class="status.badge">{{ status.label }}</span>
           <span class="badge" :class="fulfilment.badge">{{ fulfilment.label }}</span>
         </div>

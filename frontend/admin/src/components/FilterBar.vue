@@ -26,7 +26,7 @@ defineProps<{ count?: string }>()
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-3);
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   backdrop-filter: blur(8px);
 }
@@ -37,7 +37,7 @@ defineProps<{ count?: string }>()
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .filter-bar-tail {
@@ -66,6 +66,14 @@ defineProps<{ count?: string }>()
 
   .filter-bar-fields > .btn {
     flex: 0 0 auto;
+  }
+
+  .filter-bar-tail {
+    gap: var(--space-2);
+  }
+
+  .filter-bar-tail :deep(.btn) {
+    flex: 1;
   }
 }
 </style>

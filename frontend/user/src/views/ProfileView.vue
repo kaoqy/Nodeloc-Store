@@ -382,7 +382,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="profile-page mx-auto w-full max-w-5xl px-4 py-9 sm:px-6">
+  <div class="profile-page page-shell">
     <header class="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
         <p class="eyebrow">账号、积分与通知</p>
@@ -678,7 +678,7 @@ onMounted(async () => {
       </button>
     </section>
 
-    <nav class="profile-actions mt-5 grid gap-3 sm:grid-cols-3">
+    <nav class="profile-actions section-head mt-6 grid gap-3 sm:grid-cols-3">
       <RouterLink to="/orders" class="card-hover flex items-center justify-between gap-3">
         <span>
           <span class="block text-[15px] font-semibold">我的订单</span>

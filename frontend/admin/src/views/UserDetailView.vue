@@ -195,7 +195,7 @@ onMounted(load)
           </RouterLink>
         </div>
         <div class="mt-1.5 flex flex-wrap items-center gap-2.5">
-          <h2 class="truncate text-xl font-bold">{{ user.username }}</h2>
+          <h2 class="page-title truncate">{{ user.username }}</h2>
           <span class="badge" :class="current.badge">{{ current.label }}</span>
           <span class="badge" :class="user.is_active ? 'badge-success' : 'badge-danger'">
             {{ user.is_active ? '正常' : '已禁用' }}

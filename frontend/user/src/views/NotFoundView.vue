@@ -15,9 +15,9 @@ const attempted = computed(() => route.fullPath)
 
 <template>
   <div class="mx-auto w-full max-w-4xl px-4 py-16 sm:px-6">
-    <div class="card rise-in mx-auto max-w-lg text-center !py-12">
+    <div class="surface-panel rise-in mx-auto max-w-lg px-6 py-12 text-center">
       <p class="eyebrow">404</p>
-      <h1 class="mt-3 text-xl font-bold">这个地址在店里没有对应的页面</h1>
+      <h1 class="page-title mt-3">这个地址在店里没有对应的页面</h1>
       <p class="mt-3 text-sm leading-relaxed text-[var(--text-dim)]">
         链接可能来自旧的页面，或者这件商品已经下架、改名。货架上的商品随时可以重新挑。
       </p>

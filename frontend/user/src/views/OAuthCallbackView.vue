@@ -87,7 +87,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-4 py-20 sm:px-0">
+  <div class="page-shell page-shell-narrow flex flex-1 flex-col justify-center py-20">
     <div class="rise-in text-center">
       <template v-if="!error">
         <div class="spinner mx-auto !size-8" />
@@ -97,7 +97,7 @@ onMounted(async () => {
       <template v-else>
         <div class="eyebrow">登录</div>
         <h1 class="mt-2 text-lg font-bold text-[var(--danger)]">登录未完成</h1>
-        <p class="card-quiet mt-4 text-left text-sm text-[var(--text-dim)]">{{ error }}</p>
+        <p class="surface-panel mt-4 px-4 py-3 text-left text-sm text-[var(--text-dim)]">{{ error }}</p>
         <RouterLink to="/login" class="btn btn-primary mt-6">返回登录</RouterLink>
       </template>
     </div>

@@ -51,11 +51,11 @@ async function submit() {
 </script>
 
 <template>
-  <div class="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-4 py-14 sm:px-0">
+  <div class="page-shell page-shell-narrow flex flex-1 flex-col justify-center py-14">
     <div class="rise-in">
       <div class="brand-mark mb-6">N</div>
       <p class="eyebrow">{{ site.name }}</p>
-      <h1 class="mt-2 text-2xl font-bold">登录</h1>
+      <h1 class="page-title mt-2">登录</h1>
       <p class="mt-2 text-sm text-[var(--text-dim)]">
         {{ site.oauthEnabled ? '使用 NodeLoc 账号登录或注册，首次授权会自动创建本站账号。' : '用店里的账号密码登录即可下单。' }}
       </p>
@@ -77,7 +77,7 @@ async function submit() {
         </div>
       </template>
 
-      <form class="card space-y-4" @submit.prevent="submit">
+      <form class="surface-panel space-y-4 p-5" @submit.prevent="submit">
         <div>
           <label class="label" for="identifier">用户名或邮箱</label>
           <input

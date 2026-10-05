@@ -148,7 +148,7 @@ onMounted(() => {
     <header class="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
         <p class="eyebrow">订单中心</p>
-        <h1 class="mt-2 text-2xl font-bold sm:text-3xl">我的订单</h1>
+        <h1 class="page-title mt-2">我的订单</h1>
       </div>
       <p v-if="!loading && orders.length" class="hint nums whitespace-nowrap">共 {{ total }} 笔</p>
     </header>

@@ -430,7 +430,7 @@ onMounted(load)
   <section class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h2 class="text-lg font-bold">{{ editingID ? '编辑活动' : '新建活动' }}</h2>
+        <h2 class="page-title">{{ editingID ? '编辑活动' : '新建活动' }}</h2>
         <p class="quiet mt-1 text-xs">规则由后端计算，买家端看到的价格一律以服务端为准。</p>
       </div>
       <div class="flex gap-2">

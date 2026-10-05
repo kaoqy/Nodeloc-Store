@@ -278,7 +278,7 @@ async function refreshDelivery() {
           <div class="min-w-0">
             <p class="eyebrow">订单详情</p>
             <div class="flex flex-wrap items-center gap-2">
-              <h1 class="mono mt-1.5 break-all text-lg font-semibold">{{ order.order_no }}</h1>
+              <h1 class="page-title mono mt-1.5 break-all">{{ order.order_no }}</h1>
               <button
                 class="btn btn-quiet btn-sm shrink-0"
                 :aria-label="copiedNo ? '订单号已复制' : '复制订单号'"

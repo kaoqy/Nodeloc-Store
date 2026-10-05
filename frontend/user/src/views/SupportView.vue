@@ -210,11 +210,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-6xl px-4 py-9 sm:px-6">
+  <div class="page-shell">
     <header class="ticket-center-head">
       <div>
         <p class="eyebrow">工单中心</p>
-        <h1 class="mt-2 text-2xl font-bold sm:text-3xl">有问题，从这里开始</h1>
+        <h1 class="page-title mt-2">有问题，从这里开始</h1>
         <p class="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--text-dim)]">
           先看下面的常见问题；没解决就提交工单，客服会带着你的描述和订单信息跟进。
         </p>
@@ -269,7 +269,7 @@ onMounted(() => {
           {{ item.body }}
         </p>
       </article>
-      <div class="card flex flex-wrap items-center gap-3">
+      <div class="surface-panel flex flex-wrap items-center gap-3 px-5 py-4">
         <p class="text-sm text-[var(--text-dim)]">没有找到答案？直接提交工单，客服会帮你查订单。</p>
         <button class="btn btn-secondary btn-sm ml-auto" @click="startTicket">提交工单</button>
       </div>
