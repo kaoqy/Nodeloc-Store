@@ -610,10 +610,10 @@ func (s *Service) GetSettings() (map[string]any, error) {
 		"payment_warnings": rt.PaymentWarnings(),
 		// 登录 gets the same reading as 收款: the switch says what the owner wants,
 		// this says whether a buyer can actually come through the door.
-		"oauth_ready":    rt.OAuth.On() && len(oauthMissing) == 0,
-		"oauth_missing":  oauthMissing,
-		"oauth_warnings": rt.OAuthWarnings(),
-		"new_api_ready":    rt.NewAPI.On() && len(newAPIMissing) == 0 && rt.NewAPI.BaseURL != "",
+		"oauth_ready":     rt.OAuth.On() && len(oauthMissing) == 0,
+		"oauth_missing":   oauthMissing,
+		"oauth_warnings":  rt.OAuthWarnings(),
+		"new_api_ready":   rt.NewAPI.On() && len(newAPIMissing) == 0 && rt.NewAPI.BaseURL != "",
 		"new_api_missing": newAPIMissing,
 	}, nil
 }
@@ -709,6 +709,9 @@ func (s *Service) SaveSettings(update RuntimeConfig) error {
 	if next.NewAPI.On() {
 		if missing := next.NewAPI.MissingFields(); len(missing) > 0 {
 			return validationError("New-API 发货渠道已启用但配置不完整：%s", strings.Join(missing, "、"))
+		}
+		if !next.NewAPI.ValidRate() {
+			return validationError("New-API 的“NL 与美元兑换比例”必须是大于 0 的数字")
 		}
 	}
 

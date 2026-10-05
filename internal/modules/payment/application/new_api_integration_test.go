@@ -25,7 +25,7 @@ func (newAPIRuntimeStub) NewAPIConfig(context.Context) (map[string]string, map[s
 	return map[string]string{
 			"base_url":      "https://new-api.example.com",
 			"admin_user_id": "1",
-			"quota_per_nl":  "100",
+			"nl_usd_rate":   "1",
 		}, map[string]string{
 			"admin_access_token": "token",
 		}, nil

@@ -66,6 +66,14 @@ const delivered = computed(() => {
 
 const awaitingDelivery = computed(() => isPaid.value && !delivered.value && order.value?.status !== 'refunded')
 
+// Delivery has reached a state that will not change on its own: success, or a
+// parked/failed result a human must act on. The watcher stops here so a finished
+// order is not polled forever.
+const deliverySettled = computed(() => {
+  const status = order.value?.fulfillment_status ?? ''
+  return delivered.value || status === 'plugin_review' || status === 'cancelled'
+})
+
 // The shop writes an inbox message when the payment lands and another when the
 // goods do. This page is where either happens, so the unread badge on the nav
 // asks again rather than waiting for the buyer to visit their profile.
@@ -236,7 +244,7 @@ function watchDelivery() {
   deliveryTimer = window.setInterval(async () => {
     waited += 6
     await load()
-    if (delivered.value || waited >= 120) stopDeliveryWatch()
+    if (deliverySettled.value || waited >= 120) stopDeliveryWatch()
   }, 6000)
 }
 
@@ -397,7 +405,9 @@ async function refreshDelivery() {
           <p class="flex-1 text-sm text-[var(--text-dim)]">
             <span v-if="order.fulfillment_status === 'waiting_stock'">卡密库存已临时售罄，补货后商店会自动为你交付。</span>
             <span v-else-if="order.fulfillment_status === 'manual_pending'">商家正在人工交付，完成后这里会显示结果与说明。</span>
-            <span v-else-if="order.fulfillment_status === 'plugin_pending'">商店正在通过插件为你交付，完成后这里会自动显示结果。</span>
+            <span v-else-if="order.fulfillment_status === 'plugin_pending'">
+              正在生成兑换码中，请稍候。生成完成后本页会自动显示兑换码，无需手动刷新。
+            </span>
             <span v-else-if="order.fulfillment_status === 'plugin_review'">
               兑换码创建结果需要店家人工确认。为避免重复创建，请不要重复支付；如有疑问请带上订单号联系管理员。
             </span>
@@ -449,7 +459,15 @@ async function refreshDelivery() {
           <template v-else-if="awaitingDelivery">
             <span class="inline-flex items-center gap-2">
               <span v-if="deliveryPolling" class="spinner" aria-hidden="true" />
-              尚未送达{{ deliveryPolling ? '，本页正在自动刷新' : '' }}。进度见上方提示。
+              <template v-if="order.fulfillment_status === 'plugin_pending'">
+                正在生成兑换码中{{ deliveryPolling ? '，本页会自动刷新' : '' }}，生成后会直接显示在这里。
+              </template>
+              <template v-else-if="order.fulfillment_status === 'plugin_review'">
+                兑换码生成结果需要店家人工确认。为避免重复创建，请不要重复支付；如有疑问请带上订单号联系管理员。
+              </template>
+              <template v-else>
+                尚未送达{{ deliveryPolling ? '，本页正在自动刷新' : '' }}。进度见上方提示。
+              </template>
             </span>
           </template>
           <template v-else-if="order.status === 'refunded'">款项已退回，本单不再交付。</template>

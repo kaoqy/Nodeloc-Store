@@ -15,6 +15,7 @@ import (
 var (
 	ErrOrderNotFound         = domain.ErrOrderNotFound
 	ErrPaymentOrderNotFound  = domain.ErrPaymentOrderNotFound
+	ErrDeliveryInProgress    = domain.ErrDeliveryInProgress
 	ErrInsufficientStock     = domain.ErrInsufficientStock
 	ErrProductNotPurchasable = domain.ErrProductNotPurchasable
 )
@@ -514,14 +515,25 @@ func isDelivered(status string) bool {
 // already shipped the goods is retried through the same plugin instead of
 // falling into the card queue and handing the buyer a second, different item.
 func (s *GormStore) MarkOrderPluginDelivering(ctx context.Context, orderNo string) error {
-	note := "本单由插件交付，正在处理中，完成前会自动重试。"
-	return s.db.WithContext(ctx).Model(&models.Order{}).
-		Where("order_no = ?", orderNo).
+	note := "正在生成兑换码，完成后会自动更新，无需手动刷新。"
+	// Conditional update: only the caller that moves a not-yet-started order into
+	// plugin_pending wins. A second concurrent delivery attempt (duplicate
+	// callback, refresh, retry sweep) sees RowsAffected==0 and must not call the
+	// upstream again, which is what keeps one order from minting two codes.
+	result := s.db.WithContext(ctx).Model(&models.Order{}).
+		Where("order_no = ? AND fulfillment_status NOT IN ?", orderNo, []string{"plugin_pending", "plugin_review"}).
 		Updates(map[string]any{
 			"fulfillment_status": "plugin_pending",
 			"delivery_note":      note,
 			"updated_at":         time.Now().UTC(),
-		}).Error
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrDeliveryInProgress
+	}
+	return nil
 }
 
 // MarkOrderPluginDelivered writes a plugin's finished delivery onto the order

@@ -104,13 +104,6 @@ const nlAmount = computed(() => {
   const parsed = Number(formValues.value.nl_amount || 0)
   return Number.isFinite(parsed) && Number.isInteger(parsed) && parsed > 0 ? parsed : 0
 })
-const newAPIQuotaPreview = computed(() => {
-  if (!isNewAPIDelivery.value) return ''
-  const ratio = Number(pluginDescriptor.value?.quota_per_nl || 0)
-  if (nlAmount.value <= 0 || !Number.isFinite(ratio) || ratio <= 0) return ''
-  const quota = nlAmount.value * ratio
-  return Number.isSafeInteger(quota) ? String(quota) : ''
-})
 const topupRangeLabel = computed(() => {
   if (!isNewAPIDelivery.value || topupMin.value <= 0 || topupMax.value <= 0) return ''
   return `${topupMin.value} – ${topupMax.value}`
@@ -699,12 +692,8 @@ watch(
               <span class="quiet text-xs">本次充值额度</span>
               <span class="nums font-semibold">{{ nlAmount > 0 ? nlAmount : '—' }}</span>
             </div>
-            <div class="mt-1.5 flex items-center justify-between gap-3">
-              <span class="quiet text-xs">预计兑换 quota</span>
-              <span class="nums font-semibold">{{ newAPIQuotaPreview || '填写充值额度后显示' }}</span>
-            </div>
             <p class="hint mt-1.5">
-              quota 由服务端按订单保存的充值额度和后台换算比例重新计算；此处只用于填写确认。
+              兑换额度由服务端按订单实付 NL 与后台汇率计算，支付成功后自动生成兑换码。
             </p>
           </div>
 

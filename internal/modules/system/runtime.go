@@ -5,6 +5,7 @@
 package system
 
 import (
+	"math/big"
 	"net"
 	"net/url"
 	"regexp"
@@ -36,14 +37,27 @@ type NewAPIConfig struct {
 	// AdminAccessToken is write-only and masked on read.
 	AdminAccessToken string `json:"admin_access_token"`
 	AdminUserID      string `json:"admin_user_id"`
-	// QuotaPerNL is quota per one NL of paid order amount.
-	QuotaPerNL string `json:"quota_per_nl"`
-	// SuccessField is the dot path to the redemption key in the provider's
-	// response. It must be confirmed against the real New-API deployment.
-	SuccessField string `json:"success_field"`
+	// NLToUSD is how many US dollars one paid NL is worth (e.g. "1" means
+	// 1 NL = 1 USD). The upstream redemption quota is
+	//   paid NL × NLToUSD × 500000
+	// because the upstream counts 500000 quota per USD. It is deliberately a
+	// decimal string so the rate keeps its precision without float drift.
+	NLToUSD string `json:"nl_usd_rate"`
 }
 
 func (n NewAPIConfig) On() bool { return n.Enabled != nil && *n.Enabled }
+
+// ValidRate reports whether NLToUSD parses as a finite number greater than zero.
+// The quota maths lives in the provider, but the settings save still has to
+// refuse an unusable rate rather than store one the provider will reject later.
+func (n NewAPIConfig) ValidRate() bool {
+	value := strings.TrimSpace(n.NLToUSD)
+	if value == "" {
+		return false
+	}
+	parsed, ok := new(big.Rat).SetString(value)
+	return ok && parsed.Sign() > 0
+}
 
 // MissingFields names what prevents the channel from working.
 func (n NewAPIConfig) MissingFields() []string {
@@ -57,11 +71,9 @@ func (n NewAPIConfig) MissingFields() []string {
 	if strings.TrimSpace(n.AdminUserID) == "" {
 		missing = append(missing, "admin_user_id")
 	}
-	if strings.TrimSpace(n.QuotaPerNL) == "" {
-		missing = append(missing, "quota_per_nl")
+	if strings.TrimSpace(n.NLToUSD) == "" {
+		missing = append(missing, "nl_usd_rate")
 	}
-	// SuccessField is intentionally optional: without it the adapter only
-	// accepts explicit success markers and otherwise parks the order for review.
 	return missing
 }
 
@@ -410,8 +422,7 @@ func (r *RuntimeConfig) Normalize() {
 	r.NewAPI.BaseURL = normalizeNewAPIBaseURL(r.NewAPI.BaseURL)
 	r.NewAPI.AdminAccessToken = shared.TrimCredential(r.NewAPI.AdminAccessToken)
 	r.NewAPI.AdminUserID = strings.TrimSpace(r.NewAPI.AdminUserID)
-	r.NewAPI.QuotaPerNL = strings.TrimSpace(r.NewAPI.QuotaPerNL)
-	r.NewAPI.SuccessField = strings.TrimSpace(r.NewAPI.SuccessField)
+	r.NewAPI.NLToUSD = strings.TrimSpace(r.NewAPI.NLToUSD)
 
 	// The host the store's own URLs are built from. A 站点域名 pasted with its
 	// scheme and a trailing slash would otherwise reach NodeLoc as

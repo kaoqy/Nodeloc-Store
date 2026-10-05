@@ -50,7 +50,7 @@ const FULFILLMENT_STATUS: Record<string, StatusMeta> = {
   waiting_stock: { label: '等待补货', badge: 'badge-warning' },
   // 插件交付: the goods are delivered by an installed plugin, not by the shop's
   // own card/manual queue, so the buyer is told which one is running.
-  plugin_pending: { label: '插件交付中', badge: 'badge-info' },
+  plugin_pending: { label: '正在生成兑换码', badge: 'badge-info' },
   plugin_review: { label: '待人工确认', badge: 'badge-warning' },
   cancelled: { label: '已取消发货', badge: 'badge-neutral' },
 }

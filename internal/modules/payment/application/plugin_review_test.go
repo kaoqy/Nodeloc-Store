@@ -40,6 +40,53 @@ type reviewPluginDeliverer struct {
 	calls int
 }
 
+// blockingPluginDeliverer signals when it has been entered and waits, so a test
+// can observe the order's state while the external call is in flight.
+type blockingPluginDeliverer struct {
+	contract.PluginDeliverer
+	entered chan struct{}
+	release chan struct{}
+	calls   int
+}
+
+func (d *blockingPluginDeliverer) Owns(context.Context, *models.Order) (bool, error) {
+	return true, nil
+}
+
+func (d *blockingPluginDeliverer) Fulfill(context.Context, *models.Order) (*contract.PluginDelivery, error) {
+	d.calls++
+	close(d.entered)
+	<-d.release
+	return &contract.PluginDelivery{Content: "code-abc", Note: "ok"}, nil
+}
+
+// While the upstream redemption call is in flight the order must read as
+// "generating", so the buyer sees progress instead of a blank waiting state.
+func TestOrderShowsGeneratingWhileUpstreamInFlight(t *testing.T) {
+	repo := &reviewProductRepo{order: &models.Order{
+		OrderNo:           "NL-GEN-1",
+		ProductID:         3,
+		FulfillmentStatus: "pending",
+		Status:            "paid",
+	}}
+	deliverer := &blockingPluginDeliverer{entered: make(chan struct{}), release: make(chan struct{})}
+	service := &Service{orders: repo, fulfillment: &reviewFulfillment{}, features: config.FeaturesConfig{}}
+	service.SetPluginDeliverer(deliverer)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = service.FulfillOrder(context.Background(), "NL-GEN-1")
+		close(done)
+	}()
+
+	<-deliverer.entered
+	if repo.order.FulfillmentStatus != "plugin_pending" {
+		t.Fatalf("in-flight status = %q, want plugin_pending (generating)", repo.order.FulfillmentStatus)
+	}
+	close(deliverer.release)
+	<-done
+}
+
 func (d *reviewPluginDeliverer) Owns(context.Context, *models.Order) (bool, error) {
 	return true, nil
 }

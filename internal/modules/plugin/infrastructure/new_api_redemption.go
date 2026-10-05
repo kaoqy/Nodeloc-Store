@@ -3,7 +3,6 @@ package infrastructure
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -31,13 +31,17 @@ const NewAPIRedemptionKey = "new-api-redemption-v1"
 var errNewAPIDefiniteFailure = errors.New("New-API 明确拒绝了创建请求")
 
 const (
-	newAPIKeyLength     = 13
-	newAPIKeyAlphabet   = "abcdefghijklmnopqrstuvwxyz0123456789"
-	newAPIMaxQuota      = int64(1_000_000_000_000)
+	// newAPIQuotaPerUSD is the upstream's own unit: 500000 quota = 1 USD.
+	newAPIQuotaPerUSD   = int64(500000)
+	newAPIMaxQuota      = int64(1_000_000_000_000_000)
 	newAPIMaxTimeout    = 30 * time.Second
 	newAPIMaxResponse   = 1 << 20
 	newAPIRequestAccept = "application/json"
 )
+
+// redemptionCodePattern bounds what a well-formed upstream code looks like so a
+// stray HTML fragment or whitespace blob is never stored as a deliverable.
+var redemptionCodePattern = regexp.MustCompile(`^[A-Za-z0-9._-]{6,128}$`)
 
 // NewAPIRedemption creates one redemption code through New-API's admin API.
 //
@@ -116,20 +120,12 @@ func (p *NewAPIRedemption) Manifest() contract.Manifest {
 				Help:        "对应 New-Api-User 请求头，必须是正整数。",
 			},
 			{
-				Key:         "quota_per_nl",
-				Label:       "每单位充值额度兑换 quota",
-				Type:        "number",
-				Required:    true,
-				Placeholder: "例如 100000",
-				Help:        "quota = 本次充值额度 × 这个比例。只能为正整数，后端按订单保存的额度重新计算，不采用前端 quota。",
-			},
-			{
-				Key:         "success_field",
-				Label:       "成功响应的兑换码字段",
+				Key:         "nl_usd_rate",
+				Label:       "NL 与美元兑换比例",
 				Type:        "text",
-				Required:    false,
-				Placeholder: "默认 data.key",
-				Help:        "New-API 官方 ApiResponse 为 { success, message, data }，兑换码在 Redemption.key。默认按 data.key 提取；仅在自建版本改过响应结构时才需要覆盖。",
+				Required:    true,
+				Placeholder: "例如 1（表示 1 NL = 1 美元）",
+				Help:        "填写“1 NL 等于多少美元”。系统按 订单实付 NL × 该比例 × 500000 计算上游 quota（上游以 500000 quota = 1 美元），必须为正数，且由服务端计算。",
 			},
 		},
 		// The buyer's only New-API-specific input is the top-up amount itself.
@@ -160,7 +156,7 @@ func (p *NewAPIRedemption) Validate(config map[string]string, secrets map[string
 	if _, err := positiveInt(config["admin_user_id"], "管理员用户 ID"); err != nil {
 		return err
 	}
-	if _, err := positiveQuota(config["quota_per_nl"], "每单位充值额度兑换 quota"); err != nil {
+	if _, err := positiveRate(config["nl_usd_rate"], "NL 与美元兑换比例"); err != nil {
 		return err
 	}
 	return nil
@@ -199,28 +195,28 @@ func (p *NewAPIRedemption) Deliver(ctx context.Context, request contract.Deliver
 	if err != nil {
 		return contract.DeliveryResult{}, err
 	}
-	perNL, err := positiveQuota(config["quota_per_nl"], "每单位充值额度兑换 quota")
+	rate, err := positiveRate(config["nl_usd_rate"], "NL 与美元兑换比例")
 	if err != nil {
 		return contract.DeliveryResult{}, err
 	}
 
-	nlAmount, err := purchaseTopupAmount(request)
+	// The chargeable amount is the amount the server actually recorded for this
+	// order, never a client-supplied number. Both the redemption name and the
+	// quota derive from it.
+	paidNL, err := paidNLAmount(request)
 	if err != nil {
 		return contract.DeliveryResult{}, err
 	}
-	quota, err := quotaForOrder(nlAmount, int64(request.Quantity), perNL)
+	quota, err := quotaForPaidNL(paidNL, rate)
 	if err != nil {
 		return contract.DeliveryResult{}, err
-	}
-	key, err := newAPIKey()
-	if err != nil {
-		return contract.DeliveryResult{}, fmt.Errorf("生成 New-API 兑换码失败: %w", err)
 	}
 
 	payload := struct {
-		Key   string `json:"key"`
+		Name  string `json:"name"`
 		Quota int64  `json:"quota"`
-	}{Key: key, Quota: quota}
+		Count int    `json:"count"`
+	}{Name: fmt.Sprintf("%dNL", paidNL), Quota: quota, Count: 1}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return contract.DeliveryResult{}, fmt.Errorf("编码 New-API 请求失败: %w", err)
@@ -230,13 +226,13 @@ func (p *NewAPIRedemption) Deliver(ctx context.Context, request contract.Deliver
 	if err != nil {
 		return contract.DeliveryResult{}, err
 	}
-	created, evidence, err := extractRedemptionResult(responseBody, status, strings.TrimSpace(config["success_field"]))
+	created, evidence, err := extractRedemptionResult(responseBody, status)
 	if err != nil {
 		if errors.Is(err, errNewAPIDefiniteFailure) {
 			return contract.DeliveryResult{}, err
 		}
 		return contract.DeliveryResult{
-			Content:   uncertainDeliveryContent(request, key, quota, status),
+			Content:   uncertainDeliveryContent(request, fmt.Sprintf("%dNL", paidNL), quota, status),
 			Note:      "New-API 请求已发出，但响应无法确认兑换码是否创建；请管理员核对后再处理，系统不会自动重复创建。",
 			Reference: "new-api:uncertain:" + request.OrderNo,
 			Uncertain: true,
@@ -244,8 +240,8 @@ func (p *NewAPIRedemption) Deliver(ctx context.Context, request contract.Deliver
 	}
 	return contract.DeliveryResult{
 		Content: fmt.Sprintf(
-			"New-API 兑换码：%s\n本次充值额度：%d\n兑换额度：%d quota\n\n这是一张 New-API 兑换码，请到 New-API 平台自行兑换。\n%s",
-			created, nlAmount, quota, evidence,
+			"New-API 兑换码：%s\n本次支付：%d NL\n兑换额度：%d quota\n\n这是一张 New-API 兑换码，请到 New-API 平台自行兑换。\n%s",
+			created, paidNL, quota, evidence,
 		),
 		Note:      "New-API 兑换码已创建；此为兑换码交付，不是自动充值到账。",
 		Reference: "new-api:" + created,
@@ -276,24 +272,6 @@ func (p *NewAPIRedemption) post(ctx context.Context, baseURL, token, adminID str
 		return resp.StatusCode, nil, errors.New("New-API 响应过大，已停止读取")
 	}
 	return resp.StatusCode, raw, nil
-}
-
-func newAPIKey() (string, error) {
-	out := make([]byte, newAPIKeyLength)
-	for i := range out {
-		value, err := rand.Int(rand.Reader, bigInt(len(newAPIKeyAlphabet)))
-		if err != nil {
-			return "", err
-		}
-		out[i] = newAPIKeyAlphabet[value.Int64()]
-	}
-	return string(out), nil
-}
-
-// bigInt is a tiny local alias so key generation has no dependency on
-// math/big beyond this adapter.
-func bigInt(max int) *big.Int {
-	return big.NewInt(int64(max))
 }
 
 func normalizeBaseURL(raw string) (string, error) {
@@ -358,48 +336,69 @@ func positiveInt(raw, label string) (string, error) {
 	return value, nil
 }
 
-func positiveQuota(raw, label string) (int64, error) {
+// positiveRate parses the configured NL→USD rate. It is a decimal, so the value
+// keeps the operator's precision instead of being truncated to an integer.
+func positiveRate(raw, label string) (*big.Rat, error) {
 	value := strings.TrimSpace(raw)
-	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || parsed <= 0 || strconv.FormatInt(parsed, 10) != value {
-		return 0, fmt.Errorf("%s 必须是正整数", label)
+	if value == "" {
+		return nil, fmt.Errorf("%s 不能为空", label)
 	}
-	if parsed > newAPIMaxQuota {
-		return 0, fmt.Errorf("%s 超过允许上限", label)
+	rate, ok := new(big.Rat).SetString(value)
+	if !ok || rate.Sign() <= 0 {
+		return nil, fmt.Errorf("%s 必须是大于 0 的数字", label)
 	}
-	return parsed, nil
+	return rate, nil
 }
 
-// purchaseTopupAmount reads the order's recorded top-up amount. Orders written
-// before the amount column existed (or delivered through an older path) fall
-// back to the purchase form so no in-flight order becomes undeliverable.
-func purchaseTopupAmount(request contract.DeliveryRequest) (int64, error) {
+// paidNLAmount reads the NL amount the server recorded for the order. It never
+// trusts a client-supplied figure: the amount comes from the order row, which
+// was written from the verified payment. Orders from before the column existed
+// fall back to the stored purchase form so they stay deliverable.
+func paidNLAmount(request contract.DeliveryRequest) (int64, error) {
+	if request.PaidNLAmount > 0 {
+		return int64(request.PaidNLAmount), nil
+	}
 	if request.TopupAmount > 0 {
 		return int64(request.TopupAmount), nil
 	}
 	raw := strings.TrimSpace(request.FormValues["nl_amount"])
 	if raw == "" {
-		return 0, errors.New("订单缺少本次充值额度")
+		return 0, errors.New("订单缺少已支付的 NL 金额")
 	}
 	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || value <= 0 {
-		return 0, errors.New("本次充值额度必须是正整数")
+		return 0, errors.New("订单的 NL 金额必须是正整数")
 	}
 	return value, nil
 }
 
-func quotaForOrder(nlAmount, quantity int64, quotaPerNL int64) (int64, error) {
-	if nlAmount <= 0 {
-		return 0, errors.New("本次充值额度必须大于 0")
+// quotaForPaidNL computes the upstream quota with exact rational arithmetic:
+//
+//	quota = paid NL × NL→USD rate × 500000
+//
+// A non-integral result is rejected rather than silently rounded, so a bad rate
+// surfaces as a traceable error instead of an off-by-a-fraction redemption.
+func quotaForPaidNL(paidNL int64, rate *big.Rat) (int64, error) {
+	if paidNL <= 0 {
+		return 0, errors.New("已支付的 NL 金额必须大于 0")
 	}
-	if quantity <= 0 {
-		return 0, errors.New("订单数量必须大于 0")
+	if rate == nil || rate.Sign() <= 0 {
+		return 0, errors.New("NL 与美元兑换比例必须是大于 0 的数字")
 	}
-	quota := nlAmount * quotaPerNL
-	if quota <= 0 || quota > newAPIMaxQuota {
-		return 0, errors.New("计算得到的 quota 超出允许范围")
+	exact := new(big.Rat).Mul(new(big.Rat).SetInt64(paidNL), rate)
+	exact.Mul(exact, new(big.Rat).SetInt64(newAPIQuotaPerUSD))
+	if !exact.IsInt() {
+		return 0, errors.New("按当前汇率换算出的 quota 不是整数，请调整 NL 与美元兑换比例")
 	}
-	return quota, nil
+	quota := exact.Num()
+	if !quota.IsInt64() {
+		return 0, errors.New("换算得到的 quota 超出允许范围")
+	}
+	value := quota.Int64()
+	if value <= 0 || value > newAPIMaxQuota {
+		return 0, errors.New("换算得到的 quota 超出允许范围")
+	}
+	return value, nil
 }
 
 func requiredSecret(config map[string]string, key string) (string, error) {
@@ -425,7 +424,14 @@ func decodePluginConfig(raw string) (map[string]string, error) {
 	return out, nil
 }
 
-func extractRedemptionResult(body []byte, status int, field string) (string, string, error) {
+// extractRedemptionResult validates the upstream answer and returns the created
+// code. The documented success shape is
+//
+//	{ "success": true, "message": "", "data": ["<code>", ...] }
+//
+// and HTTP 200 alone is never treated as success: success must be true and the
+// data array must carry a well-formed code.
+func extractRedemptionResult(body []byte, status int) (string, string, error) {
 	if status < 200 || status >= 300 {
 		return "", "", fmt.Errorf("%w: New-API 返回 HTTP %d", errNewAPIDefiniteFailure, status)
 	}
@@ -436,72 +442,45 @@ func extractRedemptionResult(body []byte, status int, field string) (string, str
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", "New-API 返回了非 JSON 响应。", errors.New("New-API 响应不是 JSON")
 	}
-
-	// New-API's documented admin response envelope is
-	//   { "success": boolean, "message": string, "data": ... }
-	// and the documented Redemption object carries key/quota/status.
-	// The create endpoint's example is not published, so accept both the
-	// envelope and a bare Redemption object, but never treat a missing key as
-	// success.
-	if success, ok := payload["success"].(bool); ok {
-		if !success {
-			message := textValue(payload["message"])
-			if message == "" {
-				message = "New-API 报告创建失败。"
-			}
-			return "", message, fmt.Errorf("%w: %s", errNewAPIDefiniteFailure, message)
-		}
-		if key, ok := redemptionKeyInData(payload["data"], field); ok {
-			return key, "New-API 返回 success=true 且包含兑换码 key。", nil
-		}
-		return "", "New-API 报告 success=true，但没有返回兑换码 key。", errors.New("New-API 响应缺少兑换码")
+	success, ok := payload["success"].(bool)
+	if !ok {
+		return "", "New-API 响应缺少 success 字段。", errors.New("New-API 响应格式未知")
 	}
-
-	// Some self-hosted builds return the Redemption object directly.
-	if key := textValue(payload["key"]); key != "" {
-		return key, "New-API 直接返回了兑换码对象。", nil
+	if !success {
+		message := textValue(payload["message"])
+		if message == "" {
+			message = "New-API 报告创建失败。"
+		}
+		return "", message, fmt.Errorf("%w: %s", errNewAPIDefiniteFailure, message)
 	}
-	return "", "New-API 响应既没有 ApiResponse.success，也没有 Redemption.key。", errors.New("New-API 响应格式未知")
+	codes, err := redemptionCodes(payload["data"])
+	if err != nil {
+		return "", "New-API 报告成功但没有返回可用的兑换码。", err
+	}
+	return codes[0], "New-API 返回 success=true，并已从 data 数组提取兑换码。", nil
 }
 
-func redemptionKeyInData(data any, field string) (string, bool) {
-	path := strings.TrimSpace(field)
-	if path == "" {
-		path = "key"
+// redemptionCodes reads the code array the upstream returns under "data" and
+// rejects anything that is not a clean, well-formed code. A missing array, an
+// empty array or a malformed entry is a failure, never a successful delivery.
+func redemptionCodes(data any) ([]string, error) {
+	items, ok := data.([]any)
+	if !ok || len(items) == 0 {
+		return nil, errors.New("New-API 响应缺少兑换码数组")
 	}
-	path = strings.TrimPrefix(path, "data.")
-	// The envelope's data may be the redemption key itself rather than a
-	// Redemption object, e.g. {"success":true,"data":"abc123xyz7890"}.
-	if path == "key" {
-		if text, ok := data.(string); ok {
-			if key := strings.TrimSpace(text); key != "" {
-				return key, true
-			}
-		}
-	}
-	current := data
-	for _, part := range strings.Split(path, ".") {
-		object, ok := current.(map[string]any)
+	codes := make([]string, 0, len(items))
+	for _, item := range items {
+		code, ok := item.(string)
 		if !ok {
-			return "", false
+			return nil, errors.New("New-API 兑换码不是字符串")
 		}
-		next, ok := object[part]
-		if !ok {
-			return "", false
+		code = strings.TrimSpace(code)
+		if !redemptionCodePattern.MatchString(code) {
+			return nil, errors.New("New-API 兑换码格式不合法")
 		}
-		current = next
+		codes = append(codes, code)
 	}
-	if key := textValue(current); key != "" {
-		return key, true
-	}
-	// Redemption data may be nested under an object with a "key" member even
-	// when the configured path points at the object itself.
-	if object, ok := current.(map[string]any); ok {
-		if key := textValue(object["key"]); key != "" {
-			return key, true
-		}
-	}
-	return "", false
+	return codes, nil
 }
 
 func textValue(value any) string {
@@ -511,9 +490,9 @@ func textValue(value any) string {
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
-func uncertainDeliveryContent(request contract.DeliveryRequest, key string, quota int64, status int) string {
+func uncertainDeliveryContent(request contract.DeliveryRequest, name string, quota int64, status int) string {
 	return fmt.Sprintf(
-		"订单 %s\nNew-API 请求已发出（HTTP %d），但响应格式尚未确认。\n本次请求的兑换码键值：%s\n请求额度：%d quota\n\n为避免重复创建，系统未自动重试。请联系管理员核对 New-API 兑换码后再处理。",
-		request.OrderNo, status, key, quota,
+		"订单 %s\nNew-API 请求已发出（HTTP %d），但响应无法确认兑换码是否创建。\n兑换码名称：%s\n请求额度：%d quota\n\n为避免重复创建，系统未自动重试。请联系管理员核对 New-API 兑换码后再处理。",
+		request.OrderNo, status, name, quota,
 	)
 }

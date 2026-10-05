@@ -220,9 +220,6 @@ type Fulfillability struct {
 	MappingValue string               `json:"mapping_value,omitempty"`
 	Options      []string             `json:"options,omitempty"`
 	FormSchema   []contract.FormField `json:"form_schema,omitempty"`
-	// QuotaPerNL is public pricing metadata for the New-API channel. It is not a
-	// credential and lets the buyer preview how many quota their NL amount buys.
-	QuotaPerNL string `json:"quota_per_nl,omitempty"`
 	// DeliveryNote is a safe, non-secret explanation of what will be delivered.
 	DeliveryNote string `json:"delivery_note,omitempty"`
 }
@@ -256,12 +253,6 @@ func (s *Service) DescribeProduct(ctx context.Context, productID uint) (*Fulfill
 	}
 	if plugin.Key == "new-api-redemption-v1" {
 		describe.DeliveryNote = "付款后创建 New-API 兑换码交给买家；买家需自行到 New-API 平台兑换，系统不会自动充值到账户。"
-		if s.runtime != nil {
-			settings, _, err := s.runtime.NewAPIConfig(ctx)
-			if err == nil {
-				describe.QuotaPerNL = strings.TrimSpace(settings["quota_per_nl"])
-			}
-		}
 	}
 	// New-API needs no mapping choice: the provider contributes its own amount
 	// field and the buyer enters the value. Requiring a non-empty binding value
@@ -354,7 +345,7 @@ func (s *Service) requireNewAPIReady(ctx context.Context) error {
 		{"base_url", settings["base_url"], "API 基础地址"},
 		{"admin_access_token", secrets["admin_access_token"], "管理员 AccessToken"},
 		{"admin_user_id", settings["admin_user_id"], "管理员用户 ID"},
-		{"quota_per_nl", settings["quota_per_nl"], "每 NL 兑换 quota"},
+		{"nl_usd_rate", settings["nl_usd_rate"], "NL 与美元兑换比例"},
 	}
 	missing := make([]string, 0, len(required))
 	for _, item := range required {

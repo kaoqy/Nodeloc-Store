@@ -52,17 +52,20 @@ func (b *DeliveryBridge) Fulfill(ctx context.Context, order *models.Order) (*pay
 		return nil, nil
 	}
 	result, err := b.service.Deliver(ctx, application.OrderInfo{
-		ID:          order.ID,
-		OrderNo:     order.OrderNo,
-		UserID:      order.UserID,
-		ProductID:   order.ProductID,
-		Quantity:    order.Quantity,
-		TopupAmount: order.TopupAmount,
-		UnitPrice:   order.UnitPrice,
-		TotalPrice:  order.TotalAmount,
-		Contact:     deref(order.CustomerContact),
-		Note:        deref(order.CustomerNote),
-		FormValues:  decodeFormValues(order.FormValues),
+		ID:        order.ID,
+		OrderNo:   order.OrderNo,
+		UserID:    order.UserID,
+		ProductID: order.ProductID,
+		Quantity:  order.Quantity,
+		// TotalAmount is the amount the server recorded as paid (post-discount),
+		// which is the figure the redemption name and quota must derive from.
+		PaidNLAmount: order.TotalAmount,
+		TopupAmount:  order.TopupAmount,
+		UnitPrice:    order.UnitPrice,
+		TotalPrice:   order.TotalAmount,
+		Contact:      deref(order.CustomerContact),
+		Note:         deref(order.CustomerNote),
+		FormValues:   decodeFormValues(order.FormValues),
 	})
 	if err != nil {
 		return nil, err

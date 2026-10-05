@@ -104,8 +104,7 @@ const settings = reactive<RuntimeSettings>({
     base_url: '',
     admin_access_token: '',
     admin_user_id: '',
-    quota_per_nl: '',
-    success_field: '',
+    nl_usd_rate: '',
   },
   features: { enabled_registration: true, enabled_checkin: true, enabled_coupons: true, stock_alert_threshold: 5 },
   theme: { theme_primary: '#f2704a', default_locale: 'zh-CN' },
@@ -841,17 +840,19 @@ onBeforeUnmount(() => {
               <input id="new-api-user" v-model="settings.new_api.admin_user_id" class="input mono" inputmode="numeric" placeholder="例如 1" />
               <p class="hint mt-1">对应 New-Api-User 请求头，必须是正整数。</p>
             </div>
-            <div>
-              <label class="label" for="new-api-ratio">每单位充值额度兑换 quota</label>
-              <input id="new-api-ratio" v-model="settings.new_api.quota_per_nl" class="input nums" inputmode="numeric" placeholder="例如 100000" />
-              <p class="hint mt-1">quota = 管理员为商品设置的“本次充值额度” × 这个比例；后端按订单保存的额度重新计算，不使用前端 quota。</p>
-            </div>
-            <div>
-              <label class="label" for="new-api-field">成功响应兑换码字段</label>
-              <input id="new-api-field" v-model="settings.new_api.success_field" class="input mono" placeholder="例如 data.key" />
+            <div class="sm:col-span-2">
+              <label class="label" for="new-api-rate">NL 与美元兑换比例</label>
+              <input
+                id="new-api-rate"
+                v-model="settings.new_api.nl_usd_rate"
+                class="input nums"
+                inputmode="decimal"
+                placeholder="例如 1（表示 1 NL = 1 美元）"
+              />
               <p class="hint mt-1">
-                默认按官方 ApiResponse 的 data.key 提取兑换码。只有在自建版本改过响应结构时才需要覆盖；
-                无法确认时会进入待人工确认，不会自动重复创建兑换码。
+                填写“1 NL 等于多少美元”，必须为正数。系统按
+                <span class="mono">订单实付 NL × 该比例 × 500000</span>
+                计算上游 quota（上游以 500000 quota = 1 美元），全程由服务端计算。
               </p>
             </div>
           </div>
@@ -860,8 +861,8 @@ onBeforeUnmount(() => {
             渠道已启用但缺少：{{ serverNewAPIMissing.join('、') }}。
           </p>
           <p class="alert alert-warning mt-4" role="status">
-            适配器按官方 ApiResponse（success + data.key）解析；success=false 或 HTTP 错误会直接判为失败，
-            无法识别的响应则标记为待人工确认，不会伪造成功，也不会自动重复创建兑换码。
+            上游响应按 success + data 数组解析：success=true 且 data 内是合法兑换码才会记为已发码；
+            success=false、缺少 data 或码格式不合法都会作为失败处理，不会伪造空兑换码。
           </p>
         </div>
 

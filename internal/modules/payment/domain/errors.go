@@ -5,8 +5,12 @@ import "errors"
 // Sentinels shared by the payment module's layers. Infrastructure returns them
 // and application/transport classify them without importing concrete stores.
 var (
-	ErrOrderNotFound         = errors.New("order not found")
-	ErrPaymentOrderNotFound  = errors.New("payment order not found")
+	ErrOrderNotFound        = errors.New("order not found")
+	ErrPaymentOrderNotFound = errors.New("payment order not found")
+	// ErrDeliveryInProgress means another delivery attempt already owns this
+	// order. It is deliberately distinct from a hard failure: the in-flight
+	// attempt will finish and write the result, so the caller must not retry.
+	ErrDeliveryInProgress    = errors.New("delivery already in progress")
 	ErrInsufficientStock     = errors.New("insufficient card stock")
 	ErrProductNotPurchasable = errors.New("product is not purchasable")
 	ErrNotPayable            = errors.New("order is not paid")

@@ -307,8 +307,7 @@ func (n newAPIRuntimeConfig) NewAPIConfig(ctx context.Context) (map[string]strin
 	return map[string]string{
 			"base_url":      cfg.BaseURL,
 			"admin_user_id": cfg.AdminUserID,
-			"quota_per_nl":  cfg.QuotaPerNL,
-			"success_field": cfg.SuccessField,
+			"nl_usd_rate":   cfg.NLToUSD,
 		}, map[string]string{
 			"admin_access_token": cfg.AdminAccessToken,
 		}, nil

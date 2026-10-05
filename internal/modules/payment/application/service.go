@@ -1092,6 +1092,12 @@ func (s *Service) deliverOrder(ctx context.Context, order *models.Order) (plugin
 		// this state, so the retry sweep asks the same plugin again instead of
 		// falling into the card queue and handing the buyer a second item.
 		if err := s.orders.MarkOrderPluginDelivering(ctx, order.OrderNo); err != nil {
+			if errors.Is(err, domain.ErrDeliveryInProgress) {
+				// Another attempt already owns this order and will write the
+				// result. Return without calling upstream so two concurrent
+				// triggers cannot mint two redemption codes.
+				return false, nil
+			}
 			return false, err
 		}
 		order.FulfillmentStatus = "plugin_pending"

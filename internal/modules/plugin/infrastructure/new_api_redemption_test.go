@@ -3,6 +3,7 @@ package infrastructure
 import (
 	"context"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,28 +12,6 @@ import (
 
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/plugin/contract"
 )
-
-func TestNewAPIKeyIsThirteenLowercaseAlphanumeric(t *testing.T) {
-	seen := map[string]bool{}
-	for i := 0; i < 128; i++ {
-		key, err := newAPIKey()
-		if err != nil {
-			t.Fatalf("newAPIKey: %v", err)
-		}
-		if len(key) != newAPIKeyLength {
-			t.Fatalf("key %q has length %d", key, len(key))
-		}
-		for _, r := range key {
-			if !strings.ContainsRune(newAPIKeyAlphabet, r) {
-				t.Fatalf("key %q contains invalid rune %q", key, r)
-			}
-		}
-		if seen[key] {
-			t.Fatalf("duplicate key %q", key)
-		}
-		seen[key] = true
-	}
-}
 
 // TestNewAPIChannelExposesOnlyTheAmountField pins the field contract: the
 // New-API channel asks the buyer for exactly one thing, the top-up amount, and
@@ -55,7 +34,10 @@ func TestNewAPIChannelExposesOnlyTheAmountField(t *testing.T) {
 	}
 }
 
-func TestNewAPIRequestCarriesOnlyKeyAndQuota(t *testing.T) {
+// TestNewAPIRequestCarriesNameQuotaAndCount pins the upstream contract: the
+// request body is exactly name/quota/count, with the name and quota derived from
+// the server-confirmed paid NL, and count fixed at 1.
+func TestNewAPIRequestCarriesNameQuotaAndCount(t *testing.T) {
 	var gotBody string
 	var gotAuth string
 	var gotUser string
@@ -68,20 +50,21 @@ func TestNewAPIRequestCarriesOnlyKeyAndQuota(t *testing.T) {
 		raw, _ := io.ReadAll(r.Body)
 		gotBody = string(raw)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"id":1,"name":"","key":"abc123xyz7890","status":1,"quota":100000}}`))
+		_, _ = w.Write([]byte(`{"data":["32875e383dda48bdb6b272313094dfd6"],"message":"","success":true}`))
 	}))
 	defer server.Close()
 
 	transport := &rewriteTransport{target: server.URL}
 	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
+	// 18 NL paid, 1 NL = 1 USD, 500000 quota/USD ⇒ quota 9000000, name "18NL".
 	result, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
-		OrderNo:    "NL1",
-		TotalPrice: 100,
-		Quantity:   1,
+		OrderNo:      "NL1",
+		Quantity:     1,
+		PaidNLAmount: 18,
 		FormValues: map[string]string{
-			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"1000","success_field":"data.key"}`,
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","nl_usd_rate":"1"}`,
 			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
-			"nl_amount":        "100",
+			"nl_amount":        "999",
 		},
 	})
 	if err != nil {
@@ -96,104 +79,180 @@ func TestNewAPIRequestCarriesOnlyKeyAndQuota(t *testing.T) {
 	if gotUser != "7" {
 		t.Fatalf("New-Api-User = %q", gotUser)
 	}
-	if strings.Contains(gotBody, "order") || strings.Contains(gotBody, "user") || strings.Contains(gotBody, "NL") {
-		t.Fatalf("request body leaked extra fields: %s", gotBody)
-	}
-	if !strings.HasPrefix(gotBody, `{"key":"`) || !strings.Contains(gotBody, `"quota":100000`) {
+	if gotBody != `{"name":"18NL","quota":9000000,"count":1}` {
 		t.Fatalf("request body = %s", gotBody)
 	}
-	if !strings.Contains(result.Content, "abc123xyz7890") {
+	if strings.Contains(gotBody, "nl_amount") || strings.Contains(gotBody, "999") ||
+		strings.Contains(gotBody, "order") || strings.Contains(gotBody, "user") {
+		t.Fatalf("request body leaked extra fields: %s", gotBody)
+	}
+	if !strings.Contains(result.Content, "32875e383dda48bdb6b272313094dfd6") {
 		t.Fatalf("delivery content = %q", result.Content)
 	}
+	if !strings.Contains(result.Content, "18 NL") {
+		t.Fatalf("delivery content did not name the paid amount: %q", result.Content)
+	}
 }
 
-func TestNewAPIUncertainResponseDoesNotClaimSuccess(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"message":"unknown shape"}`))
-	}))
-	defer server.Close()
+// quota must come from paid NL and the configured rate, with exact decimal math.
+func TestNewAPIQuotaUsesRateWithoutFloatDrift(t *testing.T) {
+	cases := []struct {
+		name   string
+		paidNL int64
+		rate   string
+		want   int64
+	}{
+		{"one to one", 18, "1", 9000000},
+		{"half dollar per NL", 18, "0.5", 4500000},
+		{"two dollars per NL", 3, "2", 3000000},
+		{"tenth", 10, "0.1", 500000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rate, err := positiveRate(tc.rate, "rate")
+			if err != nil {
+				t.Fatalf("positiveRate(%q): %v", tc.rate, err)
+			}
+			got, err := quotaForPaidNL(tc.paidNL, rate)
+			if err != nil {
+				t.Fatalf("quotaForPaidNL: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("quota = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
 
-	transport := &rewriteTransport{target: server.URL}
-	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
-	result, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
-		OrderNo:    "NL2",
-		TotalPrice: 10,
-		Quantity:   1,
-		FormValues: map[string]string{
-			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
-			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
-			"nl_amount":        "10",
-		},
-	})
+func TestNewAPIQuotaRejectsBadInput(t *testing.T) {
+	one, _ := positiveRate("1", "rate")
+	if _, err := quotaForPaidNL(0, one); err == nil {
+		t.Fatal("zero paid NL was accepted")
+	}
+	if _, err := positiveRate("0", "rate"); err == nil {
+		t.Fatal("zero rate was accepted")
+	}
+	if _, err := positiveRate("-1", "rate"); err == nil {
+		t.Fatal("negative rate was accepted")
+	}
+	if _, err := positiveRate("abc", "rate"); err == nil {
+		t.Fatal("non-numeric rate was accepted")
+	}
+	// 1 NL = 0.000001 USD ⇒ 1 × 0.000001 × 500000 = 0.5 quota, not an integer.
+	oddRate, err := positiveRate("0.000001", "rate")
 	if err != nil {
-		t.Fatalf("Deliver returned hard error for uncertain result: %v", err)
+		t.Fatalf("positiveRate: %v", err)
 	}
-	if !result.Uncertain {
-		t.Fatalf("unknown response was treated as success: %+v", result)
+	if _, err := quotaForPaidNL(1, oddRate); err == nil {
+		t.Fatal("non-integral quota was accepted")
 	}
-	if strings.Contains(result.Content, "已到账") || strings.Contains(result.Note, "已交付") {
-		t.Fatalf("uncertain result claimed success: %+v", result)
+	// Enormous rate overflows the allowed range.
+	huge := new(big.Rat).SetInt64(1 << 40)
+	if _, err := quotaForPaidNL(1<<40, huge); err == nil {
+		t.Fatal("overflowing quota was accepted")
 	}
 }
 
-func TestNewAPIDataStringEnvelopeIsSuccess(t *testing.T) {
+func TestNewAPIDataArrayIsSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"success":true,"message":"","data":"abc123xyz7890"}`))
+		_, _ = w.Write([]byte(`{"data":["abc123xyz7890"],"message":"","success":true}`))
 	}))
 	defer server.Close()
 
 	transport := &rewriteTransport{target: server.URL}
 	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
 	result, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
-		OrderNo:    "NL3",
-		TotalPrice: 10,
-		Quantity:   1,
+		OrderNo:      "NL3",
+		Quantity:     1,
+		PaidNLAmount: 10,
 		FormValues: map[string]string{
-			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","nl_usd_rate":"1"}`,
 			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
-			"nl_amount":        "10",
 		},
 	})
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	if result.Uncertain {
-		t.Fatalf("data string envelope marked uncertain: %+v", result)
+		t.Fatalf("data array response marked uncertain: %+v", result)
 	}
 	if !strings.Contains(result.Content, "abc123xyz7890") {
 		t.Fatalf("delivery content = %q", result.Content)
 	}
 }
 
-func TestNewAPIBareRedemptionObjectIsSuccess(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":1,"name":"","key":"abc123xyz7890","status":1,"quota":100000}`))
-	}))
-	defer server.Close()
-
-	transport := &rewriteTransport{target: server.URL}
-	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
-	result, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
-		OrderNo:    "NL5",
-		TotalPrice: 10,
-		Quantity:   1,
-		FormValues: map[string]string{
-			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
-			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
-			"nl_amount":        "10",
-		},
+// A parseable rejection (success=false) is a hard failure. A well-formed HTTP
+// 200 that claims success but carries no usable code is parked as uncertain:
+// the request may have been processed, so it must never be reported as
+// delivered and must never be silently retried.
+func TestNewAPIFailureResponsesNeverClaimSuccess(t *testing.T) {
+	t.Run("success false is a hard failure", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":false,"message":"quota invalid","data":[]}`))
+		}))
+		defer server.Close()
+		transport := &rewriteTransport{target: server.URL}
+		provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
+		result, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
+			OrderNo:      "NL4",
+			Quantity:     1,
+			PaidNLAmount: 10,
+			FormValues: map[string]string{
+				"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","nl_usd_rate":"1"}`,
+				"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
+			},
+		})
+		if err == nil {
+			t.Fatal("success=false was accepted")
+		}
+		if result.Uncertain {
+			t.Fatal("success=false must be a hard failure, not uncertain")
+		}
+		if !strings.Contains(err.Error(), "quota invalid") {
+			t.Fatalf("provider message lost: %v", err)
+		}
 	})
-	if err != nil {
-		t.Fatalf("Deliver: %v", err)
-	}
-	if result.Uncertain {
-		t.Fatalf("bare redemption object marked uncertain: %+v", result)
-	}
-	if !strings.Contains(result.Content, "abc123xyz7890") {
-		t.Fatalf("delivery content = %q", result.Content)
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"missing success", `{"data":["abc123xyz7890"],"message":""}`},
+		{"data null", `{"success":true,"message":"","data":null}`},
+		{"data empty", `{"success":true,"message":"","data":[]}`},
+		{"data not strings", `{"success":true,"message":"","data":[123]}`},
+		{"data garbage code", `{"success":true,"message":"","data":["<html>oops</html>"]}`},
+	} {
+		t.Run(tc.name+" is parked as uncertain, not delivered", func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			transport := &rewriteTransport{target: server.URL}
+			provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
+			result, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
+				OrderNo:      "NL4",
+				Quantity:     1,
+				PaidNLAmount: 10,
+				FormValues: map[string]string{
+					"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","nl_usd_rate":"1"}`,
+					"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
+				},
+			})
+			if err != nil {
+				t.Fatalf("ambiguous body caused a hard error instead of review: %v", err)
+			}
+			if !result.Uncertain {
+				t.Fatalf("body %s was accepted as delivered: %+v", tc.body, result)
+			}
+			if strings.Contains(result.Content, "兑换码：") {
+				t.Fatalf("ambiguous body produced delivery content: %q", result.Content)
+			}
+		})
 	}
 }
 
@@ -208,13 +267,12 @@ func TestNewAPIHTTPErrorIsHardFailure(t *testing.T) {
 	transport := &rewriteTransport{target: server.URL}
 	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
 	result, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
-		OrderNo:    "NL6",
-		TotalPrice: 10,
-		Quantity:   1,
+		OrderNo:      "NL6",
+		Quantity:     1,
+		PaidNLAmount: 10,
 		FormValues: map[string]string{
-			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","nl_usd_rate":"1"}`,
 			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
-			"nl_amount":        "10",
 		},
 	})
 	if err == nil {
@@ -228,66 +286,31 @@ func TestNewAPIHTTPErrorIsHardFailure(t *testing.T) {
 	}
 }
 
-func TestNewAPIFailedEnvelopeIsAHardFailure(t *testing.T) {
+// A config that cannot be priced must fail before any outbound request.
+func TestNewAPIMissingRateDoesNotCallUpstream(t *testing.T) {
+	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"success":false,"message":"quota invalid","data":null}`))
+		called = true
+		_, _ = w.Write([]byte(`{"success":true,"data":["abc123xyz7890"]}`))
 	}))
 	defer server.Close()
 
 	transport := &rewriteTransport{target: server.URL}
 	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
 	_, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
-		OrderNo:    "NL4",
-		TotalPrice: 10,
-		Quantity:   1,
+		OrderNo:      "NL8",
+		Quantity:     1,
+		PaidNLAmount: 10,
 		FormValues: map[string]string{
-			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7"}`,
 			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
-			"nl_amount":        "10",
 		},
 	})
 	if err == nil {
-		t.Fatal("success=false was accepted as created")
+		t.Fatal("a missing rate was accepted")
 	}
-	if !strings.Contains(err.Error(), "quota invalid") {
-		t.Fatalf("provider message lost: %v", err)
-	}
-}
-
-// TestNewAPIUsesRecordedTopupAmountNotTheForm proves the server recomputes quota
-// from the order's stored amount: the form carries a different value, and the
-// recorded amount must win.
-func TestNewAPIUsesRecordedTopupAmountNotTheForm(t *testing.T) {
-	var gotBody string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		gotBody = string(raw)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"success":true,"data":{"key":"abc123xyz7890"}}`))
-	}))
-	defer server.Close()
-
-	transport := &rewriteTransport{target: server.URL}
-	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
-	_, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
-		OrderNo:     "NL7",
-		Quantity:    1,
-		TopupAmount: 25,
-		FormValues: map[string]string{
-			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
-			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
-			"nl_amount":        "999",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Deliver: %v", err)
-	}
-	if !strings.Contains(gotBody, `"quota":2500`) {
-		t.Fatalf("quota was not derived from the recorded amount: %s", gotBody)
-	}
-	if strings.Contains(gotBody, "nl_amount") || strings.Contains(gotBody, "999") {
-		t.Fatalf("buyer form leaked into the New-API request: %s", gotBody)
+	if called {
+		t.Fatal("upstream was called despite an invalid rate")
 	}
 }
 
@@ -317,23 +340,5 @@ func TestNewAPIRejectsUnsafeBaseURL(t *testing.T) {
 		if _, err := normalizeBaseURL(raw); err == nil {
 			t.Errorf("unsafe base URL %q was accepted", raw)
 		}
-	}
-}
-
-func TestNewAPIQuotaBounds(t *testing.T) {
-	if _, err := quotaForOrder(0, 1, 100); err == nil {
-		t.Fatal("zero order amount was accepted")
-	}
-	if _, err := positiveQuota("0", "quota"); err == nil {
-		t.Fatal("zero quota was accepted")
-	}
-	if _, err := positiveQuota("-1", "quota"); err == nil {
-		t.Fatal("negative quota was accepted")
-	}
-	if _, err := positiveQuota("1.5", "quota"); err == nil {
-		t.Fatal("fractional quota was accepted")
-	}
-	if _, err := quotaForOrder(1_000_000_000, 1, newAPIMaxQuota); err == nil {
-		t.Fatal("overflowing quota was accepted")
 	}
 }

@@ -414,8 +414,7 @@ export interface RuntimeSettings {
     base_url: string
     admin_access_token: string
     admin_user_id: string
-    quota_per_nl: string
-    success_field: string
+    nl_usd_rate: string
   }
   features: {
     enabled_registration: boolean

@@ -19,17 +19,19 @@ var ErrNoDeliverer = errors.New("这个商品绑定的插件不在当前版本�
 // struct rather than the money module's models.Order so the modules stay on
 // their own sides of the boundary.
 type OrderInfo struct {
-	ID          uint
-	OrderNo     string
-	UserID      uint
-	ProductID   uint
-	Quantity    int
-	TopupAmount int
-	UnitPrice   int
-	TotalPrice  int
-	Contact     string
-	Note        string
-	FormValues  map[string]string
+	ID        uint
+	OrderNo   string
+	UserID    uint
+	ProductID uint
+	Quantity  int
+	// PaidNLAmount is the server-confirmed amount the buyer actually paid, in NL.
+	PaidNLAmount int
+	TopupAmount  int
+	UnitPrice    int
+	TotalPrice   int
+	Contact      string
+	Note         string
+	FormValues   map[string]string
 }
 
 // Owns reports whether an enabled plugin is bound to this order's product.
@@ -117,19 +119,20 @@ func (s *Service) Deliver(ctx context.Context, info OrderInfo) (*contract.Delive
 	}
 
 	result, err := provider.Deliver(ctx, contract.DeliveryRequest{
-		OrderID:     info.ID,
-		OrderNo:     info.OrderNo,
-		UserID:      info.UserID,
-		Username:    username,
-		ProductID:   info.ProductID,
-		Product:     product,
-		Quantity:    info.Quantity,
-		TopupAmount: info.TopupAmount,
-		UnitPrice:   info.UnitPrice,
-		TotalPrice:  info.TotalPrice,
-		Contact:     info.Contact,
-		Note:        info.Note,
-		FormValues:  formValues,
+		OrderID:      info.ID,
+		OrderNo:      info.OrderNo,
+		UserID:       info.UserID,
+		Username:     username,
+		ProductID:    info.ProductID,
+		Product:      product,
+		Quantity:     info.Quantity,
+		PaidNLAmount: info.PaidNLAmount,
+		TopupAmount:  info.TopupAmount,
+		UnitPrice:    info.UnitPrice,
+		TotalPrice:   info.TotalPrice,
+		Contact:      info.Contact,
+		Note:         info.Note,
+		FormValues:   formValues,
 	})
 	if err != nil {
 		return nil, err

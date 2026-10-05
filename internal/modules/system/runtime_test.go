@@ -42,14 +42,29 @@ func TestNewAPIConfigRequiresCompleteFieldsWhenEnabled(t *testing.T) {
 	runtime := Default()
 	runtime.NewAPI.Enabled = boolPointer(true)
 	if missing := runtime.NewAPI.MissingFields(); len(missing) != 4 {
-		t.Fatalf("missing fields = %v, want base_url, token, admin id and quota", missing)
+		t.Fatalf("missing fields = %v, want base_url, token, admin id and rate", missing)
 	}
 	runtime.NewAPI.BaseURL = "https://new-api.example.com"
 	runtime.NewAPI.AdminAccessToken = "secret"
 	runtime.NewAPI.AdminUserID = "7"
-	runtime.NewAPI.QuotaPerNL = "100000"
+	runtime.NewAPI.NLToUSD = "1"
 	if missing := runtime.NewAPI.MissingFields(); len(missing) != 0 {
 		t.Fatalf("complete config still reports missing %v", missing)
+	}
+}
+
+func TestNewAPIRateValidation(t *testing.T) {
+	for _, valid := range []string{"1", "0.5", "1.25", "10"} {
+		cfg := NewAPIConfig{NLToUSD: valid}
+		if !cfg.ValidRate() {
+			t.Errorf("rate %q should be valid", valid)
+		}
+	}
+	for _, invalid := range []string{"", "0", "-1", "abc", "1e", " "} {
+		cfg := NewAPIConfig{NLToUSD: invalid}
+		if cfg.ValidRate() {
+			t.Errorf("rate %q should be invalid", invalid)
+		}
 	}
 }
 

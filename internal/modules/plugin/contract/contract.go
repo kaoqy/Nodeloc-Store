@@ -55,21 +55,24 @@ type Resolved struct {
 
 // DeliveryRequest is one order handed to a plugin to fulfil.
 type DeliveryRequest struct {
-	OrderID    uint
-	OrderNo    string
-	UserID     uint
-	Username   string
-	ProductID  uint
-	Product    string
-	Quantity   int
+	OrderID   uint
+	OrderNo   string
+	UserID    uint
+	Username  string
+	ProductID uint
+	Product   string
+	Quantity  int
+	// PaidNLAmount is the NL amount the server recorded as actually paid for
+	// this order. It is the only amount a provider may base a redemption on.
+	PaidNLAmount int
 	// TopupAmount is the New-API top-up amount recorded on the order. Providers
 	// that sell by amount read this instead of re-parsing the purchase form, so
 	// quota is always computed from the order the shop actually stored.
 	TopupAmount int
-	UnitPrice  int
-	TotalPrice int
-	Contact    string
-	Note       string
+	UnitPrice   int
+	TotalPrice  int
+	Contact     string
+	Note        string
 	// FormValues is the buyer's purchase form answers, already validated against
 	// the product schema and keyed by field key.
 	FormValues map[string]string

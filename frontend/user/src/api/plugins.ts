@@ -17,7 +17,6 @@ export interface ProductPluginDescriptor {
   mapping_value?: string
   options?: string[]
   form_schema?: PluginFormField[]
-  quota_per_nl?: string
   delivery_note?: string
 }
 
