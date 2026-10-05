@@ -23,6 +23,18 @@ func NewDeliveryBridge(service *application.Service) *DeliveryBridge {
 	return &DeliveryBridge{service: service}
 }
 
+// SyncProductChannel is the catalogue's hook into this module: it keeps the
+// plugin binding that routes delivery in step with the product's chosen channel.
+func (b *DeliveryBridge) SyncProductChannel(ctx context.Context, productID uint, channel string) error {
+	return b.service.SyncProductChannel(ctx, productID, channel)
+}
+
+// CheckProductChannel lets the catalogue refuse a channel that cannot deliver
+// yet (for example New-API without complete credentials) before saving.
+func (b *DeliveryBridge) CheckProductChannel(ctx context.Context, channel string) error {
+	return b.service.CheckProductChannel(ctx, channel)
+}
+
 // Owns is what tells payment to route an order through its plugin instead of the
 // shop's own card/manual queue.
 func (b *DeliveryBridge) Owns(ctx context.Context, order *models.Order) (bool, error) {
@@ -40,16 +52,17 @@ func (b *DeliveryBridge) Fulfill(ctx context.Context, order *models.Order) (*pay
 		return nil, nil
 	}
 	result, err := b.service.Deliver(ctx, application.OrderInfo{
-		ID:         order.ID,
-		OrderNo:    order.OrderNo,
-		UserID:     order.UserID,
-		ProductID:  order.ProductID,
-		Quantity:   order.Quantity,
-		UnitPrice:  order.UnitPrice,
-		TotalPrice: order.TotalAmount,
-		Contact:    deref(order.CustomerContact),
-		Note:       deref(order.CustomerNote),
-		FormValues: decodeFormValues(order.FormValues),
+		ID:          order.ID,
+		OrderNo:     order.OrderNo,
+		UserID:      order.UserID,
+		ProductID:   order.ProductID,
+		Quantity:    order.Quantity,
+		TopupAmount: order.TopupAmount,
+		UnitPrice:   order.UnitPrice,
+		TotalPrice:  order.TotalAmount,
+		Contact:     deref(order.CustomerContact),
+		Note:        deref(order.CustomerNote),
+		FormValues:  decodeFormValues(order.FormValues),
 	})
 	if err != nil {
 		return nil, err

@@ -5,8 +5,6 @@ import WorkbenchHeader from '../components/WorkbenchHeader.vue'
 import {
   createProduct,
   getProduct,
-  getProductNewAPIDelivery,
-  setProductNewAPIDelivery,
   updateProduct,
 } from '../api/products'
 import { listCategories } from '../api/categories'
@@ -25,9 +23,6 @@ const saving = ref(false)
 const error = ref('')
 const notice = ref('')
 const categories = ref<Category[]>([])
-const newAPIEnabled = ref(false)
-const newAPILoading = ref(false)
-const newAPISaving = ref(false)
 
 const form = reactive({
   name: '',
@@ -37,6 +32,9 @@ const form = reactive({
   image_path: '',
   delivery_instructions: '',
   product_type: 'card',
+  delivery_channel: 'card',
+  min_topup_amount: 0,
+  max_topup_amount: 0,
   price: 0,
   original_price: null as number | null,
   stock_count: 0,
@@ -51,7 +49,19 @@ const form = reactive({
 })
 
 const isCard = computed(() => form.product_type === 'card')
+const isNewAPI = computed(() => form.delivery_channel === 'new_api')
+const isManual = computed(() => !isCard.value && !isNewAPI.value)
 const invalid = computed(() => !form.name.trim() || !form.slug.trim() || Number(form.price) < 0)
+const topupError = computed(() => {
+  if (!isNewAPI.value) return ''
+  const min = Number(form.min_topup_amount)
+  const max = Number(form.max_topup_amount)
+  if (!Number.isInteger(min) || min <= 0) return '请填写单次最少充值额度，且为正整数。'
+  if (!Number.isInteger(max) || max <= 0) return '请填写单次最多充值额度，且为正整数。'
+  if (min > max) return '单次最少充值额度不能大于最多充值额度。'
+  return ''
+})
+const formInvalid = computed(() => invalid.value || Boolean(topupError.value))
 const invalidPriceHint = computed(() =>
   form.original_price !== null &&
   form.original_price !== undefined &&
@@ -70,6 +80,9 @@ function payload(): Partial<Product> {
     description: form.description,
     image_path: form.image_path.trim(),
     product_type: form.product_type,
+    delivery_channel: form.delivery_channel,
+    min_topup_amount: isNewAPI.value ? Number(form.min_topup_amount) || 0 : 0,
+    max_topup_amount: isNewAPI.value ? Number(form.max_topup_amount) || 0 : 0,
     delivery_instructions: form.delivery_instructions,
     require_contact: form.require_contact,
     price: Number(form.price) || 0,
@@ -92,6 +105,25 @@ function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^\w一-龥]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+function defaultChannel(productType: string): string {
+  return productType === 'manual' ? 'manual' : 'card'
+}
+
+/**
+ * Picking a channel keeps the two representations consistent: the channel is
+ * saved, and product_type mirrors it for the existing stock/card logic. Values
+ * that do not apply to the new channel are kept in the form so switching back
+ * and forth does not erase what the operator already typed.
+ */
+function chooseChannel(channel: string) {
+  form.delivery_channel = channel
+  if (channel === 'new_api') {
+    form.product_type = 'manual'
+  } else {
+    form.product_type = channel
+  }
 }
 
 async function load() {
@@ -119,6 +151,9 @@ async function load() {
         image_path: product.image_path || '',
         delivery_instructions: product.delivery_instructions || '',
         product_type: product.product_type,
+        delivery_channel: product.delivery_channel || defaultChannel(product.product_type),
+        min_topup_amount: product.min_topup_amount ?? 0,
+        max_topup_amount: product.max_topup_amount ?? 0,
         price: product.price,
         original_price: product.original_price ?? null,
         stock_count: product.stock_count,
@@ -131,16 +166,6 @@ async function load() {
         category_id: product.category_id ?? null,
         form_schema: formFields,
       })
-      if (product.id) {
-        newAPILoading.value = true
-        try {
-          newAPIEnabled.value = await getProductNewAPIDelivery(product.id)
-        } catch {
-          newAPIEnabled.value = false
-        } finally {
-          newAPILoading.value = false
-        }
-      }
     }
   } catch (err) {
     error.value = errorMessage(err, '加载商品失败')
@@ -149,23 +174,11 @@ async function load() {
   }
 }
 
-async function toggleNewAPIDelivery() {
-  if (!isEdit.value || newAPISaving.value) return
-  const next = !newAPIEnabled.value
-  newAPISaving.value = true
-  error.value = ''
-  try {
-    newAPIEnabled.value = await setProductNewAPIDelivery(productId.value, next)
-    notice.value = next ? '已启用 New-API 兑换码发货。' : '已关闭 New-API 兑换码发货。'
-  } catch (err) {
-    error.value = errorMessage(err, '更新 New-API 发货渠道失败')
-  } finally {
-    newAPISaving.value = false
-  }
-}
-
 async function save() {
-  if (invalid.value) return
+  if (formInvalid.value) {
+    if (topupError.value) error.value = topupError.value
+    return
+  }
   if (invalidPriceHint.value) {
     error.value = invalidPriceHint.value
     return
@@ -201,14 +214,14 @@ onMounted(load)
   <section v-else class="workbench-page">
     <WorkbenchHeader
       :title="isEdit ? '编辑商品' : '新建商品'"
-      description="按基本信息、价格库存、购买表单与发布设置维护商品。"
+      description="按基本信息、发货渠道、价格与购买设置维护商品。"
       eyebrow="商品管理"
       back-to="/products"
       back-label="返回商品列表"
     >
       <template #actions>
         <button class="btn btn-secondary btn-sm" @click="router.push('/products')">取消</button>
-        <button class="btn btn-primary btn-sm" :disabled="saving || invalid" @click="save">
+        <button class="btn btn-primary btn-sm" :disabled="saving || formInvalid" @click="save">
           {{ saving ? '保存中…' : '保存商品' }}
         </button>
       </template>
@@ -239,13 +252,6 @@ onMounted(load)
               <p class="hint mt-1.5">买家端地址：/products/{{ form.slug || 'slug' }}</p>
             </div>
             <div>
-              <label class="label" for="p-type">交付方式</label>
-              <select id="p-type" v-model="form.product_type" class="input">
-                <option value="card">卡密自动发货</option>
-                <option value="manual">商家人工发货</option>
-              </select>
-            </div>
-            <div>
               <label class="label" for="p-category">分类</label>
               <select id="p-category" v-model="form.category_id" class="input">
                 <option :value="null">未分类</option>
@@ -264,17 +270,82 @@ onMounted(load)
         </div>
 
         <div class="card">
-          <h3 class="mb-4 text-sm font-semibold">价格与库存</h3>
+          <div class="mb-4">
+            <h3 class="text-sm font-semibold">发货渠道</h3>
+            <p class="hint mt-1">决定买家付款后商品如何交付。选择 New-API 时为整件商品创建兑换码，不占用卡密库存。</p>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-3">
+            <button
+              v-for="option in [
+                { value: 'card', title: '卡密自动发货', desc: '导入卡密库存，付款后自动发放一条。' },
+                { value: 'manual', title: '商家人工发货', desc: '付款后进入人工待发货队列。' },
+                { value: 'new_api', title: 'New-API 兑换码', desc: '付款后按充值额度创建兑换码并交付。' },
+              ]"
+              :key="option.value"
+              type="button"
+              class="channel-card text-left"
+              :class="{ 'channel-card-active': form.delivery_channel === option.value }"
+              :aria-pressed="form.delivery_channel === option.value"
+              @click="chooseChannel(option.value)"
+            >
+              <span class="flex items-center justify-between gap-2">
+                <span class="text-sm font-semibold">{{ option.title }}</span>
+                <span
+                  class="size-3.5 shrink-0 rounded-full border"
+                  :class="form.delivery_channel === option.value ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-[var(--stroke-hi)]'"
+                  aria-hidden="true"
+                />
+              </span>
+              <span class="hint mt-1.5 block leading-relaxed">{{ option.desc }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="mb-4 text-sm font-semibold">{{ isNewAPI ? '价格与充值额度' : '价格与库存' }}</h3>
           <div class="grid gap-4 sm:grid-cols-2">
             <div>
-              <label class="label" for="p-price">售价（NL）*</label>
+              <label class="label" for="p-price">{{ isNewAPI ? '商品单价（NL，可选）' : '售价（NL）*' }}</label>
               <input id="p-price" v-model.number="form.price" type="number" min="0" step="1" class="input nums" />
+              <p v-if="isNewAPI" class="hint mt-1.5">
+                金额按现有规则「商品单价 × 数量」由服务端计算，充值额度只用于换算 quota，两者单位不同。
+                系统目前没有「充值额度 × 汇率 = 金额」的计价规则；未填写单价时商品可以保存，但买家无法下单。
+              </p>
             </div>
             <div>
               <label class="label" for="p-original">划线原价（可选，NL）</label>
               <input id="p-original" v-model.number="form.original_price" type="number" min="0" step="1" class="input nums" />
             </div>
-            <div v-if="isEdit">
+            <template v-if="isNewAPI">
+              <div>
+                <label class="label" for="p-min-topup">单次最少充值额度 *</label>
+                <input
+                  id="p-min-topup"
+                  v-model.number="form.min_topup_amount"
+                  type="number"
+                  min="1"
+                  step="1"
+                  class="input nums"
+                  :aria-invalid="Boolean(topupError)"
+                />
+                <p class="hint mt-1.5">买家每次至少可充值的额度（正整数）。</p>
+              </div>
+              <div>
+                <label class="label" for="p-max-topup">单次最多充值额度 *</label>
+                <input
+                  id="p-max-topup"
+                  v-model.number="form.max_topup_amount"
+                  type="number"
+                  min="1"
+                  step="1"
+                  class="input nums"
+                  :aria-invalid="Boolean(topupError)"
+                />
+                <p class="hint mt-1.5">买家每次最多可充值的额度（正整数）。</p>
+              </div>
+              <p v-if="topupError" class="alert alert-danger sm:col-span-2" role="alert">{{ topupError }}</p>
+            </template>
+            <div v-else-if="isEdit">
               <span class="label">当前库存</span>
               <p class="nums mt-1.5 text-lg font-semibold">
                 {{ isCard ? form.stock_count : '—' }}
@@ -287,7 +358,7 @@ onMounted(load)
               <span class="label">初始库存</span>
               <p class="hint mt-2.5">新建后为 0，导入卡密后自动计算。</p>
             </div>
-            <label class="flex items-center gap-2.5 self-end pb-1 text-sm">
+            <label v-if="!isNewAPI" class="flex items-center gap-2.5 self-end pb-1 text-sm">
               <input v-model="form.stock_visible" type="checkbox" class="accent-[var(--accent)]" />
               在商品页显示库存
             </label>
@@ -316,13 +387,13 @@ onMounted(load)
           <p v-else class="hint mt-4">尚未添加字段；商品购买无需额外表单。</p>
         </div>
 
-        <div v-if="!isCard" class="card">
+        <div v-if="isManual" class="card">
           <h3 class="mb-1 text-sm font-semibold">交付说明</h3>
           <p class="hint mb-4">人工交付商品会提示买家等待商家处理，可在此写明流程或时效。</p>
           <textarea v-model="form.delivery_instructions" class="input h-28 resize-none" />
         </div>
 
-        <div v-else-if="isEdit" class="card">
+        <div v-else-if="isCard && isEdit" class="card">
           <div class="flex items-center justify-between">
             <div>
               <h3 class="text-sm font-semibold">卡密库存</h3>
@@ -364,34 +435,16 @@ onMounted(load)
           </div>
         </div>
 
-        <div class="card">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <h3 class="text-sm font-semibold">New-API 兑换码发货</h3>
-              <p class="hint mt-1 leading-relaxed">
-                付款成功后创建 New-API 兑换码并交付给买家。买家需自行到 New-API 平台兑换，
-                系统不会自动充值到买家账户。
-              </p>
-              <p class="hint mt-1 leading-relaxed">
-                商品售价和购买数量决定用户实付金额；购买表单里的 NL 数量只用于计算兑换 quota，
-                两者不会混为同一个单位。
-              </p>
-            </div>
-            <button
-              class="switch shrink-0"
-              :class="{ 'switch-on': newAPIEnabled }"
-              type="button"
-              role="switch"
-              :aria-checked="newAPIEnabled"
-              :disabled="!isEdit || newAPILoading || newAPISaving"
-              aria-label="启用 New-API 兑换码发货"
-              @click="toggleNewAPIDelivery"
-            />
-          </div>
-          <p v-if="!isEdit" class="hint mt-3">先保存商品，之后即可切换到 New-API 发货渠道。</p>
-          <p v-else class="hint mt-3">
-            当前状态：{{ newAPIEnabled ? '已启用' : '未启用' }}。
-            需要先在「系统设置 → New-API 发货」配置 API 地址、管理员凭据和 quota 比例。
+        <div v-if="isNewAPI" class="card">
+          <h3 class="text-sm font-semibold">New-API 发货预览</h3>
+          <ol class="mt-3 space-y-2 text-sm leading-relaxed text-[var(--text-dim)]">
+            <li>1. 买家进入商品页，填写本次充值额度。</li>
+            <li>2. 额度需在 {{ form.min_topup_amount || '?' }} – {{ form.max_topup_amount || '?' }} 之间，系统按服务端配置换算 quota。</li>
+            <li>3. 支付成功后，系统向 New-API 创建兑换码并交付给买家。</li>
+            <li>4. 买家需到 New-API 平台自行兑换，系统不会自动充值到账户。</li>
+          </ol>
+          <p class="hint mt-3">
+            需要先在「系统设置 → New-API 发货」配置 API 地址、管理员凭据和 quota 比例，否则保存渠道时会被拒绝。
           </p>
         </div>
 

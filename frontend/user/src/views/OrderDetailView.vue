@@ -490,6 +490,10 @@ async function refreshDelivery() {
             <dt class="text-[var(--text-quiet)]">交付状态</dt>
             <dd class="mt-0.5">{{ fulfillmentStatus(order.fulfillment_status, order.status).label }}</dd>
           </div>
+          <div v-if="order.topup_amount">
+            <dt class="text-[var(--text-quiet)]">本次充值额度</dt>
+            <dd class="nums mt-0.5 font-semibold">{{ order.topup_amount }}</dd>
+          </div>
           <div v-if="order.customer_contact">
             <dt class="text-[var(--text-quiet)]">联系方式</dt>
             <dd class="mono mt-0.5 break-all">{{ order.customer_contact }}</dd>

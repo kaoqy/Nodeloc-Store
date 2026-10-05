@@ -50,7 +50,8 @@ let requestId = 0
 
 const cardStock = computed(() => {
   const item = product.value
-  if (!item || item.product_type !== 'card' || !item.auto_deliver) return null
+  if (!item || item.delivery_channel === 'new_api') return null
+  if (item.product_type !== 'card' || !item.auto_deliver) return null
   return item.stock_count
 })
 
@@ -60,9 +61,14 @@ const limit = computed(() => {
 })
 
 const soldOut = computed(() => limit.value === 0)
+// A New-API product with no price has no defined amount to charge, so the shop
+// has not finished setting it up. The checkout refuses it server-side; the page
+// says so instead of showing 0 NL.
+const pricingUnavailable = computed(() => isNewAPIDelivery.value && unitPrice.value <= 0)
 const buyLabel = computed(() => {
   if (!site.paymentsEnabled) return '本店暂停收款'
   if (soldOut.value) return '暂时缺货'
+  if (pricingUnavailable.value) return '暂未开放购买'
   if (submittingPhase.value === 'order') return '正在创建订单…'
   if (submittingPhase.value === 'payment') return '正在打开支付…'
   if (submitting.value) return '处理中…'
@@ -87,10 +93,16 @@ const gross = computed(() => unitPrice.value * quantity.value)
 const payable = computed(() => (quote.value?.accepted ? quote.value.payable : gross.value))
 const discount = computed(() => (quote.value?.accepted ? quote.value.discount : 0))
 const pluginFormFields = computed(() => pluginDescriptor.value?.form_schema ?? [])
-const isNewAPIDelivery = computed(() => pluginDescriptor.value?.plugin_key === 'new-api-redemption-v1')
+const isNewAPIDelivery = computed(
+  () =>
+    product.value?.delivery_channel === 'new_api' ||
+    pluginDescriptor.value?.plugin_key === 'new-api-redemption-v1',
+)
+const topupMin = computed(() => Number(product.value?.min_topup_amount || 0))
+const topupMax = computed(() => Number(product.value?.max_topup_amount || 0))
 const nlAmount = computed(() => {
   const parsed = Number(formValues.value.nl_amount || 0)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+  return Number.isFinite(parsed) && Number.isInteger(parsed) && parsed > 0 ? parsed : 0
 })
 const newAPIQuotaPreview = computed(() => {
   if (!isNewAPIDelivery.value) return ''
@@ -98,6 +110,10 @@ const newAPIQuotaPreview = computed(() => {
   if (nlAmount.value <= 0 || !Number.isFinite(ratio) || ratio <= 0) return ''
   const quota = nlAmount.value * ratio
   return Number.isSafeInteger(quota) ? String(quota) : ''
+})
+const topupRangeLabel = computed(() => {
+  if (!isNewAPIDelivery.value || topupMin.value <= 0 || topupMax.value <= 0) return ''
+  return `${topupMin.value} – ${topupMax.value}`
 })
 
 /**
@@ -160,6 +176,12 @@ function validatePurchaseForm(): boolean {
       const parsed = Number(value)
       if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isInteger(parsed)) {
         errors[field.key] = `${field.label}必须是正整数`
+      } else if (field.key === 'nl_amount' && isNewAPIDelivery.value) {
+        if (topupMin.value > 0 && parsed < topupMin.value) {
+          errors[field.key] = `本次充值额度不能低于 ${topupMin.value}`
+        } else if (topupMax.value > 0 && parsed > topupMax.value) {
+          errors[field.key] = `本次充值额度不能高于 ${topupMax.value}`
+        }
       }
     }
   }
@@ -289,6 +311,10 @@ async function purchase() {
   const item = product.value
   if (!item || submitting.value) return
   if (!site.paymentsEnabled) return
+  if (pricingUnavailable.value) {
+    error.value = '这个商品还没有设置可购买的单价，暂时无法下单。'
+    return
+  }
   if (unpaidOrderNo.value) {
     // 刚才那一单还挂在这里。主按钮再点一次不该再开一张新单——买家会以为试第二次
     // 是无害的，而两家店里会同时躺着两笔待付款，其中一笔可能被付掉两次。
@@ -488,13 +514,13 @@ watch(
                 <p class="eyebrow">{{ product.category?.name || '数字商品' }}</p>
                 <h1 class="mt-2 break-words text-2xl font-bold sm:text-3xl">{{ product.name }}</h1>
               </div>
-              <span class="product-delivery-badge" :class="product.product_type === 'card' ? 'is-auto' : 'is-manual'">
-                {{ product.product_type === 'card' ? '自动交付' : '人工交付' }}
+              <span class="product-delivery-badge" :class="isNewAPIDelivery ? 'is-auto' : product.product_type === 'card' ? 'is-auto' : 'is-manual'">
+                {{ isNewAPIDelivery ? '兑换码交付' : product.product_type === 'card' ? '自动交付' : '人工交付' }}
               </span>
             </div>
             <div class="product-showcase-badges">
-              <span class="badge" :class="product.product_type === 'card' ? 'badge-teal' : 'badge-accent'">
-                {{ product.product_type === 'card' ? '付款后自动交付' : '商家人工交付' }}
+              <span class="badge" :class="product.product_type === 'card' || isNewAPIDelivery ? 'badge-teal' : 'badge-accent'">
+                {{ isNewAPIDelivery ? '付款后创建 New-API 兑换码' : product.product_type === 'card' ? '付款后自动交付' : '商家人工交付' }}
               </span>
               <span v-if="product.is_featured" class="badge badge-accent">店长推荐</span>
             </div>
@@ -581,6 +607,9 @@ watch(
               付款成功后，系统会创建一张 New-API 兑换码交付给你。你需要到 New-API 平台自行兑换；
               这里不会自动充值到你的 New-API 账户。
             </p>
+            <p v-if="topupRangeLabel" class="hint mt-2">
+              本商品单次充值额度：<span class="nums font-semibold">{{ topupRangeLabel }}</span>。
+            </p>
           </div>
 
           <div v-if="product.form_schema?.length" class="space-y-4">
@@ -630,6 +659,10 @@ watch(
                 class="input"
                 :class="{ 'input-error': fieldErrors[field.key] }"
                 :type="field.type === 'number' ? 'number' : 'text'"
+                :min="field.key === 'nl_amount' ? topupMin || undefined : undefined"
+                :max="field.key === 'nl_amount' ? topupMax || undefined : undefined"
+                :step="field.type === 'number' ? 1 : undefined"
+                inputmode="numeric"
                 :required="field.required"
                 :maxlength="field.max_length || 255"
                 :placeholder="field.placeholder"
@@ -638,6 +671,12 @@ watch(
                 @input="clearFieldError(field.key)"
               />
               <p v-if="field.help" class="hint mt-1.5">{{ field.help }}</p>
+              <p
+                v-if="field.key === 'nl_amount' && topupRangeLabel"
+                class="hint mt-1.5"
+              >
+                允许范围 <span class="nums">{{ topupRangeLabel }}</span>，单位与页面标注的充值额度一致。
+              </p>
               <p v-if="fieldErrors[field.key]" :id="`plugin-${field.key}-error`" class="field-error" role="alert">
                 {{ fieldErrors[field.key] }}
               </p>
@@ -646,11 +685,15 @@ watch(
 
           <div v-if="isNewAPIDelivery" class="new-api-quota-preview">
             <div class="flex items-center justify-between gap-3">
+              <span class="quiet text-xs">本次充值额度</span>
+              <span class="nums font-semibold">{{ nlAmount > 0 ? nlAmount : '—' }}</span>
+            </div>
+            <div class="mt-1.5 flex items-center justify-between gap-3">
               <span class="quiet text-xs">预计兑换 quota</span>
-              <span class="nums font-semibold">{{ newAPIQuotaPreview || '填写 NL 数量后显示' }}</span>
+              <span class="nums font-semibold">{{ newAPIQuotaPreview || '填写充值额度后显示' }}</span>
             </div>
             <p class="hint mt-1.5">
-              最终 quota 由服务端按订单实付金额和后台配置重新计算；此处只用于填写确认。
+              quota 由服务端按订单保存的充值额度和后台换算比例重新计算；此处只用于填写确认。
             </p>
           </div>
 

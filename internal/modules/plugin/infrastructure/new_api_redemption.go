@@ -117,11 +117,11 @@ func (p *NewAPIRedemption) Manifest() contract.Manifest {
 			},
 			{
 				Key:         "quota_per_nl",
-				Label:       "每 NL 兑换 quota",
+				Label:       "每单位充值额度兑换 quota",
 				Type:        "number",
 				Required:    true,
 				Placeholder: "例如 100000",
-				Help:        "quota = 订单实付 NL 金额 × quota_per_nl。只能为正整数，后端会重新计算，不采用前端 quota。",
+				Help:        "quota = 本次充值额度 × 这个比例。只能为正整数，后端按订单保存的额度重新计算，不采用前端 quota。",
 			},
 			{
 				Key:         "success_field",
@@ -132,23 +132,17 @@ func (p *NewAPIRedemption) Manifest() contract.Manifest {
 				Help:        "New-API 官方 ApiResponse 为 { success, message, data }，兑换码在 Redemption.key。默认按 data.key 提取；仅在自建版本改过响应结构时才需要覆盖。",
 			},
 		},
-		// These fields describe the buyer's purchase form. They are delivered to
-		// the order for display and support, but never sent in New-API's JSON.
+		// The buyer's only New-API-specific input is the top-up amount itself.
+		// It is stored on the order and used by the server to compute quota; it is
+		// never sent in New-API's JSON, which only carries key and quota.
 		FormSchema: []contract.FormField{
 			{
-				Key:         "nl_account",
-				Label:       "New-API 账号或用户名",
-				Type:        "text",
-				Required:    true,
-				Placeholder: "用于交付记录，不会自动充值",
-				MaxLength:   120,
-			},
-			{
 				Key:         "nl_amount",
-				Label:       "购买 NL 数量",
+				Label:       "本次充值额度",
 				Type:        "number",
 				Required:    true,
 				Placeholder: "例如 100",
+				Help:        "必须在该商品的单次最少与最多充值额度之间。",
 				MaxLength:   18,
 			},
 		},
@@ -166,7 +160,7 @@ func (p *NewAPIRedemption) Validate(config map[string]string, secrets map[string
 	if _, err := positiveInt(config["admin_user_id"], "管理员用户 ID"); err != nil {
 		return err
 	}
-	if _, err := positiveQuota(config["quota_per_nl"], "每 NL 兑换 quota"); err != nil {
+	if _, err := positiveQuota(config["quota_per_nl"], "每单位充值额度兑换 quota"); err != nil {
 		return err
 	}
 	return nil
@@ -205,12 +199,12 @@ func (p *NewAPIRedemption) Deliver(ctx context.Context, request contract.Deliver
 	if err != nil {
 		return contract.DeliveryResult{}, err
 	}
-	perNL, err := positiveQuota(config["quota_per_nl"], "每 NL 兑换 quota")
+	perNL, err := positiveQuota(config["quota_per_nl"], "每单位充值额度兑换 quota")
 	if err != nil {
 		return contract.DeliveryResult{}, err
 	}
 
-	nlAmount, err := purchaseNLAmount(request.FormValues)
+	nlAmount, err := purchaseTopupAmount(request)
 	if err != nil {
 		return contract.DeliveryResult{}, err
 	}
@@ -250,8 +244,8 @@ func (p *NewAPIRedemption) Deliver(ctx context.Context, request contract.Deliver
 	}
 	return contract.DeliveryResult{
 		Content: fmt.Sprintf(
-			"New-API 兑换码：%s\n兑换额度：%d quota\n\n这是一张 New-API 兑换码，请到 New-API 平台自行兑换。\n%s",
-			created, quota, evidence,
+			"New-API 兑换码：%s\n本次充值额度：%d\n兑换额度：%d quota\n\n这是一张 New-API 兑换码，请到 New-API 平台自行兑换。\n%s",
+			created, nlAmount, quota, evidence,
 		),
 		Note:      "New-API 兑换码已创建；此为兑换码交付，不是自动充值到账。",
 		Reference: "new-api:" + created,
@@ -376,21 +370,27 @@ func positiveQuota(raw, label string) (int64, error) {
 	return parsed, nil
 }
 
-func purchaseNLAmount(formValues map[string]string) (int64, error) {
-	raw := strings.TrimSpace(formValues["nl_amount"])
+// purchaseTopupAmount reads the order's recorded top-up amount. Orders written
+// before the amount column existed (or delivered through an older path) fall
+// back to the purchase form so no in-flight order becomes undeliverable.
+func purchaseTopupAmount(request contract.DeliveryRequest) (int64, error) {
+	if request.TopupAmount > 0 {
+		return int64(request.TopupAmount), nil
+	}
+	raw := strings.TrimSpace(request.FormValues["nl_amount"])
 	if raw == "" {
-		return 0, errors.New("购买表单缺少 NL 数量")
+		return 0, errors.New("订单缺少本次充值额度")
 	}
 	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || value <= 0 {
-		return 0, errors.New("NL 数量必须是正整数")
+		return 0, errors.New("本次充值额度必须是正整数")
 	}
 	return value, nil
 }
 
 func quotaForOrder(nlAmount, quantity int64, quotaPerNL int64) (int64, error) {
 	if nlAmount <= 0 {
-		return 0, errors.New("NL 数量必须大于 0")
+		return 0, errors.New("本次充值额度必须大于 0")
 	}
 	if quantity <= 0 {
 		return 0, errors.New("订单数量必须大于 0")

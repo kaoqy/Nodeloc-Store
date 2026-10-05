@@ -36,11 +36,6 @@ func (h *Handler) RegisterRoutes(engine gin.IRouter, jwtConfig *config.JWTConfig
 	admin := engine.Group("/api/v1/admin", middleware.JWTMiddleware(jwtConfig))
 	guard := middleware.RequirePermission(accounts, "products", "manage")
 	admin.GET("/products/:id/new-api-delivery", guard, h.GetNewAPIProduct)
-	admin.PUT("/products/:id/new-api-delivery", guard, h.SetNewAPIProduct)
-}
-
-type newAPIProductRequest struct {
-	Enabled bool `json:"enabled"`
 }
 
 func (h *Handler) GetNewAPIProduct(c *gin.Context) {
@@ -51,20 +46,6 @@ func (h *Handler) GetNewAPIProduct(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"enabled": enabled}})
-}
-
-func (h *Handler) SetNewAPIProduct(c *gin.Context) {
-	productID := uint(atoiDefault(c.Param("id"), 0))
-	var request newAPIProductRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "code": "invalid_input"})
-		return
-	}
-	if err := h.service.SetNewAPIProduct(c.Request.Context(), productID, request.Enabled); err != nil {
-		writeError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": gin.H{"enabled": request.Enabled}})
 }
 
 // DescribeProduct answers the storefront's 「这个商品需要插件做什么」 question.

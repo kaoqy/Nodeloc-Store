@@ -62,6 +62,10 @@ type DeliveryRequest struct {
 	ProductID  uint
 	Product    string
 	Quantity   int
+	// TopupAmount is the New-API top-up amount recorded on the order. Providers
+	// that sell by amount read this instead of re-parsing the purchase form, so
+	// quota is always computed from the order the shop actually stored.
+	TopupAmount int
 	UnitPrice  int
 	TotalPrice int
 	Contact    string

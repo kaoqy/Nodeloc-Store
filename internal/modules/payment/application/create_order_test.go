@@ -16,8 +16,8 @@ import (
 // regression back to slug-only lookup fails here rather than in production.
 type orderProductRepo struct {
 	contract.OrderRepo
-	byID   map[uint]*models.Product
-	bySlug map[string]*models.Product
+	byID    map[uint]*models.Product
+	bySlug  map[string]*models.Product
 	created []*models.Order
 }
 
@@ -54,28 +54,28 @@ func (orderUserDirectory) FindByID(context.Context, uint) (*contract.UserInfo, e
 
 func checkoutService() (*Service, *orderProductRepo) {
 	productA := &models.Product{
-		Base:         models.Base{ID: 11},
-		Slug:         "item-a",
-		Name:         "商品 A",
-		Price:        100,
-		ProductType:  "manual",
-		IsPublished:  true,
+		Base:        models.Base{ID: 11},
+		Slug:        "item-a",
+		Name:        "商品 A",
+		Price:       100,
+		ProductType: "manual",
+		IsPublished: true,
 	}
 	productB := &models.Product{
-		Base:         models.Base{ID: 22},
-		Slug:         "item-b",
-		Name:         "商品 B",
-		Price:        200,
-		ProductType:  "manual",
-		IsPublished:  true,
+		Base:        models.Base{ID: 22},
+		Slug:        "item-b",
+		Name:        "商品 B",
+		Price:       200,
+		ProductType: "manual",
+		IsPublished: true,
 	}
 	repo := &orderProductRepo{
 		byID:   map[uint]*models.Product{11: productA, 22: productB},
 		bySlug: map[string]*models.Product{"item-a": productA, "item-b": productB},
 	}
 	return &Service{
-		orders:  repo,
-		users:   orderUserDirectory{},
+		orders:   repo,
+		users:    orderUserDirectory{},
 		features: config.FeaturesConfig{},
 	}, repo
 }
@@ -140,5 +140,98 @@ func TestCreateOrderDoesNotLetSlugOverrideAnExplicitID(t *testing.T) {
 	}
 	if len(repo.created) != 0 {
 		t.Fatalf("a mismatched request created %d orders, want none", len(repo.created))
+	}
+}
+
+// newAPICheckoutService wires one New-API product with a 10–100 top-up window.
+func newAPICheckoutService() (*Service, *orderProductRepo) {
+	product := &models.Product{
+		Base:            models.Base{ID: 33},
+		Slug:            "topup",
+		Name:            "New-API 充值",
+		Price:           5,
+		ProductType:     "manual",
+		DeliveryChannel: "new_api",
+		MinTopupAmount:  10,
+		MaxTopupAmount:  100,
+		// In production this field is contributed by the New-API plugin's form
+		// schema; the checkout validates product-and-plugin fields together, so
+		// mirroring it here exercises the same bounds gate.
+		FormSchema:  `[{"key":"nl_amount","label":"本次充值额度","type":"number","required":true}]`,
+		IsPublished: true,
+	}
+	repo := &orderProductRepo{
+		byID:   map[uint]*models.Product{33: product},
+		bySlug: map[string]*models.Product{"topup": product},
+	}
+	return &Service{
+		orders:   repo,
+		users:    orderUserDirectory{},
+		features: config.FeaturesConfig{},
+	}, repo
+}
+
+func TestNewAPIOrderStoresTopupAmountAndProductID(t *testing.T) {
+	service, repo := newAPICheckoutService()
+	order, err := service.CreateOrder(context.Background(), CreateOrderInput{
+		UserID:    7,
+		ProductID: 33,
+		Slug:      "topup",
+		Quantity:  1,
+		FormValues: map[string]string{
+			"nl_amount": "50",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create New-API order: %v", err)
+	}
+	if order.ProductID != 33 {
+		t.Fatalf("order product = %d, want 33", order.ProductID)
+	}
+	if order.TopupAmount != 50 {
+		t.Fatalf("order topup = %d, want 50", order.TopupAmount)
+	}
+	if len(repo.created) != 1 || repo.created[0].TopupAmount != 50 {
+		t.Fatalf("persisted orders = %+v, want topup 50", repo.created)
+	}
+}
+
+func TestNewAPIOrderRejectsTopupOutsideBounds(t *testing.T) {
+	for _, amount := range []string{"9", "101", "0", "-5", "abc", "3.5", ""} {
+		service, repo := newAPICheckoutService()
+		_, err := service.CreateOrder(context.Background(), CreateOrderInput{
+			UserID:    7,
+			ProductID: 33,
+			Quantity:  1,
+			FormValues: map[string]string{
+				"nl_amount": amount,
+			},
+		})
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("topup %q returned %v, want ErrInvalidInput", amount, err)
+		}
+		if len(repo.created) != 0 {
+			t.Fatalf("topup %q created %d orders, want none", amount, len(repo.created))
+		}
+	}
+}
+
+func TestNewAPIOrderDoesNotRequireCardStock(t *testing.T) {
+	service, _ := newAPICheckoutService()
+	// CountAvailableCards in this fake returns 999; a New-API product must not
+	// consult it at all, so a zero-stock product still orders successfully.
+	order, err := service.CreateOrder(context.Background(), CreateOrderInput{
+		UserID:    7,
+		ProductID: 33,
+		Quantity:  1,
+		FormValues: map[string]string{
+			"nl_amount": "10",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New-API order was gated on card stock: %v", err)
+	}
+	if order.TopupAmount != 10 {
+		t.Fatalf("order topup = %d, want 10", order.TopupAmount)
 	}
 }

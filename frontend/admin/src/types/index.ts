@@ -82,6 +82,9 @@ export interface Product {
   is_published: boolean
   is_archived?: boolean
   product_type: string
+  delivery_channel?: string
+  min_topup_amount?: number
+  max_topup_amount?: number
   delivery_instructions?: string | null
   image_path?: string | null
   require_contact?: boolean
@@ -116,6 +119,8 @@ export interface Order {
   product?: Product
   product_id?: number
   quantity: number
+  /** New-API 商品本次充值的额度；非 New-API 商品为 0。 */
+  topup_amount?: number
   unit_price?: number
   total_amount: number
   discount_amount?: number

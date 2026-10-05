@@ -53,6 +53,34 @@ var (
 // the card inventory in one request.
 const maxOrderQuantity = 20
 
+// newAPIDeliveryChannel mirrors the catalogue's channel value. It is duplicated
+// here as a plain constant so the money module does not import catalogue
+// internals; the value is part of the product contract.
+const newAPIDeliveryChannel = "new_api"
+
+// isNewAPIProduct reports whether a product is sold through the product-level
+// New-API redemption channel. Legacy rows predate delivery_channel, so an empty
+// value is read as "not New-API" and keeps the shop's own fulfilment.
+func isNewAPIProduct(product *models.Product) bool {
+	return product != nil && strings.EqualFold(strings.TrimSpace(product.DeliveryChannel), newAPIDeliveryChannel)
+}
+
+// topupAmountFromForm reads the buyer's New-API top-up amount as a positive
+// integer. The purchase form already validated it as a required number; this is
+// the money-side parse, so an unreadable value stops the order instead of
+// silently becoming zero.
+func topupAmountFromForm(formValues map[string]string) (int, error) {
+	raw := strings.TrimSpace(formValues["nl_amount"])
+	if raw == "" {
+		return 0, fmt.Errorf("%w: 请填写本次充值额度", ErrInvalidInput)
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%w: 本次充值额度必须是正整数", ErrInvalidInput)
+	}
+	return value, nil
+}
+
 type Service struct {
 	orders      contract.OrderRepo
 	gateway     contract.PaymentGateway
@@ -241,7 +269,30 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 	if product.RequireContact && contact == "" {
 		return nil, fmt.Errorf("%w: this product requires contact information", ErrInvalidInput)
 	}
-	if product.ProductType == "card" && product.AutoDeliver {
+	// New-API products deliver a freshly created redemption code after payment;
+	// they never draw on card stock, so they skip the card-count gate entirely.
+	newAPI := isNewAPIProduct(product)
+	topupAmount := 0
+	if newAPI {
+		var answers map[string]string
+		if formValuesJSON != "" {
+			_ = json.Unmarshal([]byte(formValuesJSON), &answers)
+		}
+		topupAmount, err = topupAmountFromForm(answers)
+		if err != nil {
+			return nil, err
+		}
+		if product.MinTopupAmount <= 0 || product.MaxTopupAmount <= 0 ||
+			product.MinTopupAmount > product.MaxTopupAmount {
+			return nil, fmt.Errorf("%w: 该商品的充值额度范围配置无效，请联系店家处理", ErrInvalidInput)
+		}
+		if topupAmount < product.MinTopupAmount || topupAmount > product.MaxTopupAmount {
+			return nil, fmt.Errorf(
+				"%w: 本次充值额度需在 %d 到 %d 之间",
+				ErrInvalidInput, product.MinTopupAmount, product.MaxTopupAmount,
+			)
+		}
+	} else if product.ProductType == "card" && product.AutoDeliver {
 		available, err := s.orders.CountAvailableCards(ctx, product.ID)
 		if err != nil {
 			return nil, fmt.Errorf("count available cards: %w", err)
@@ -304,6 +355,7 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 		UserID:            input.UserID,
 		ProductID:         product.ID,
 		Quantity:          quantity,
+		TopupAmount:       topupAmount,
 		UnitPrice:         product.Price,
 		DiscountAmount:    product.Price*quantity - total,
 		CouponID:          couponID,

@@ -234,6 +234,42 @@ func TestNewAPIFailedEnvelopeIsAHardFailure(t *testing.T) {
 	}
 }
 
+// TestNewAPIUsesRecordedTopupAmountNotTheForm proves the server recomputes quota
+// from the order's stored amount: the form carries a different value, and the
+// recorded amount must win.
+func TestNewAPIUsesRecordedTopupAmountNotTheForm(t *testing.T) {
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"key":"abc123xyz7890"}}`))
+	}))
+	defer server.Close()
+
+	transport := &rewriteTransport{target: server.URL}
+	provider := NewNewAPIRedemption(nil).withClient(&http.Client{Transport: transport})
+	_, err := provider.Deliver(context.Background(), contract.DeliveryRequest{
+		OrderNo:     "NL7",
+		Quantity:    1,
+		TopupAmount: 25,
+		FormValues: map[string]string{
+			"__plugin_config":  `{"base_url":"https://new-api.example.com","admin_user_id":"7","quota_per_nl":"100"}`,
+			"__plugin_secrets": `{"admin_access_token":"secret-token"}`,
+			"nl_amount":        "999",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if !strings.Contains(gotBody, `"quota":2500`) {
+		t.Fatalf("quota was not derived from the recorded amount: %s", gotBody)
+	}
+	if strings.Contains(gotBody, "nl_amount") || strings.Contains(gotBody, "999") {
+		t.Fatalf("buyer form leaked into the New-API request: %s", gotBody)
+	}
+}
+
 type rewriteTransport struct {
 	target string
 }

@@ -229,6 +229,25 @@ html[data-theme='light'] {
     border-radius: var(--radius-md);
     padding: var(--space-4);
   }
+  /* A selectable delivery-channel tile. It is a real button, so keyboard focus
+     and Enter/Space work; the selected state is more than colour (ring plus the
+     pressed attribute) so it does not rely on hue alone. */
+  .channel-card {
+    display: block;
+    width: 100%;
+    background: var(--surface-sunken);
+    border: 1px solid var(--stroke);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  }
+  .channel-card:hover { border-color: var(--stroke-hi); }
+  .channel-card-active {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
   .panel {
     background: var(--surface);
     border: 1px solid var(--stroke);

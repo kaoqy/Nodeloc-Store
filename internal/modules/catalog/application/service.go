@@ -36,6 +36,43 @@ type Service struct {
 	// modules, and a catalogue without it still stocks shelves — those orders go
 	// out on the next background sweep instead of on the spot.
 	wake deliveryWake
+	// channelSync keeps a product's external delivery channel in step with the
+	// plugin runtime. Nil in isolated tests; the container wires it so choosing
+	// New-API on a product also creates the binding delivery routing needs.
+	channelSync deliveryChannelSync
+}
+
+// deliveryChannelSync mirrors a product's delivery channel into the plugin
+// runtime. It is declared here (rather than importing the plugin module) because
+// the architecture keeps modules on their own contract packages.
+type deliveryChannelSync interface {
+	// CheckProductChannel refuses a channel that cannot currently deliver (for
+	// example New-API before its credentials are configured), before the product
+	// row is written.
+	CheckProductChannel(ctx context.Context, channel string) error
+	SyncProductChannel(ctx context.Context, productID uint, channel string) error
+}
+
+// SetDeliveryChannelSync attaches the plugin runtime's channel synchroniser.
+func (s *Service) SetDeliveryChannelSync(sync deliveryChannelSync) { s.channelSync = sync }
+
+// checkChannel refuses a delivery channel the shop cannot currently honour, so
+// the product is not saved as New-API while the channel has no credentials.
+func (s *Service) checkChannel(ctx context.Context, product *domain.Product) error {
+	if s.channelSync == nil || product == nil {
+		return nil
+	}
+	return s.channelSync.CheckProductChannel(ctx, product.DeliveryChannel)
+}
+
+// syncChannel reports the product's channel to the plugin runtime after the row
+// exists. Its error is returned: a product saved as New-API with no binding
+// would silently fall back to manual delivery, so the operator must see it.
+func (s *Service) syncChannel(ctx context.Context, product *domain.Product) error {
+	if s.channelSync == nil || product == nil || product.ID == 0 {
+		return nil
+	}
+	return s.channelSync.SyncProductChannel(ctx, product.ID, product.DeliveryChannel)
 }
 
 // deliveryWake is the payment module's answer to "keys just landed on this
@@ -188,8 +225,14 @@ func (s *Service) CreateProduct(ctx context.Context, product *domain.Product) er
 	if err := normalizeProduct(product); err != nil {
 		return err
 	}
+	if err := s.checkChannel(ctx, product); err != nil {
+		return err
+	}
 	product.StockCount = 0
-	return s.products.Create(ctx, product)
+	if err := s.products.Create(ctx, product); err != nil {
+		return err
+	}
+	return s.syncChannel(ctx, product)
 }
 
 // UpdateProduct applies a patch: fields left zero are treated as "unchanged"
@@ -237,6 +280,15 @@ func (s *Service) UpdateProductPatch(ctx context.Context, id uint, input *domain
 		}
 		if changed["product_type"] {
 			product.ProductType = input.ProductType
+		}
+		if changed["delivery_channel"] {
+			product.DeliveryChannel = input.DeliveryChannel
+		}
+		if changed["min_topup_amount"] {
+			product.MinTopupAmount = input.MinTopupAmount
+		}
+		if changed["max_topup_amount"] {
+			product.MaxTopupAmount = input.MaxTopupAmount
 		}
 		if changed["delivery_instructions"] {
 			product.DeliveryInstructions = input.DeliveryInstructions
@@ -288,7 +340,18 @@ func (s *Service) UpdateProductPatch(ctx context.Context, id uint, input *domain
 	if product.ProductType == domain.ProductTypeManual {
 		product.StockCount = 0
 	}
+	// Only a form edit (changed == nil) or an explicit channel change re-checks
+	// preconditions. A list-page toggle such as 下架 must not be blocked because
+	// the New-API credentials were removed after the product was created.
+	if changed == nil || changed["delivery_channel"] {
+		if err := s.checkChannel(ctx, product); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.products.Update(ctx, product); err != nil {
+		return nil, err
+	}
+	if err := s.syncChannel(ctx, product); err != nil {
 		return nil, err
 	}
 	return product, nil
@@ -1036,11 +1099,52 @@ func normalizeProduct(product *domain.Product) error {
 	product.Name = strings.TrimSpace(product.Name)
 	product.Slug = strings.TrimSpace(product.Slug)
 	product.ProductType = strings.ToLower(strings.TrimSpace(product.ProductType))
+	product.DeliveryChannel = strings.ToLower(strings.TrimSpace(product.DeliveryChannel))
 	if product.Name == "" || product.Slug == "" {
 		return fmt.Errorf("%w: 商品名称和 slug 都要填写。", domain.ErrInvalidInput)
 	}
 	if product.Price < 0 {
 		return fmt.Errorf("%w: 商品价格不能是负数。", domain.ErrInvalidInput)
+	}
+	// A legacy row (or an older client) has no delivery_channel; derive it from
+	// product_type so existing products keep the delivery they already had. An
+	// empty product_type keeps its historical default of card.
+	if product.DeliveryChannel == "" {
+		if product.ProductType == "" {
+			product.ProductType = domain.ProductTypeCard
+		}
+		product.DeliveryChannel = product.ProductType
+	}
+	if product.DeliveryChannel != domain.DeliveryChannelNewAPI {
+		// Card and manual products do not use New-API's amount bounds; clear any
+		// leftover so switching a product back does not leave stale values that
+		// a later switch could silently revive.
+		product.MinTopupAmount = 0
+		product.MaxTopupAmount = 0
+	}
+	switch product.DeliveryChannel {
+	case domain.DeliveryChannelNewAPI:
+		// New-API products always deliver after payment, so they must never run
+		// through the card stock path. ProductType stays "manual" so the card
+		// queue, low-stock list and stock counting do not claim them.
+		product.ProductType = domain.ProductTypeManual
+		product.AutoDeliver = false
+		product.StockVisible = false
+		product.StockCount = 0
+		if product.MinTopupAmount <= 0 {
+			return fmt.Errorf("%w: New-API 商品必须填写单次最少充值额度，且为正整数。", domain.ErrInvalidInput)
+		}
+		if product.MaxTopupAmount <= 0 {
+			return fmt.Errorf("%w: New-API 商品必须填写单次最多充值额度，且为正整数。", domain.ErrInvalidInput)
+		}
+		if product.MinTopupAmount > product.MaxTopupAmount {
+			return fmt.Errorf("%w: New-API 商品单次最少充值额度不能大于最多充值额度。", domain.ErrInvalidInput)
+		}
+		return nil
+	case domain.DeliveryChannelCard, domain.DeliveryChannelManual:
+		// fallthrough to the existing product_type checks below
+	default:
+		return ErrInvalidProductType
 	}
 	if product.ProductType == "" {
 		product.ProductType = domain.ProductTypeCard

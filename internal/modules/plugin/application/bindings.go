@@ -214,11 +214,11 @@ func isJSONObject(raw string) bool {
 // mapping exists at all. It is deliberately read-only and safe to answer before
 // login.
 type Fulfillability struct {
-	PluginKey    string   `json:"plugin_key"`
-	PluginName   string   `json:"plugin_name"`
-	RequiresForm bool     `json:"requires_form"`
-	MappingValue string   `json:"mapping_value,omitempty"`
-	Options      []string `json:"options,omitempty"`
+	PluginKey    string               `json:"plugin_key"`
+	PluginName   string               `json:"plugin_name"`
+	RequiresForm bool                 `json:"requires_form"`
+	MappingValue string               `json:"mapping_value,omitempty"`
+	Options      []string             `json:"options,omitempty"`
 	FormSchema   []contract.FormField `json:"form_schema,omitempty"`
 	// QuotaPerNL is public pricing metadata for the New-API channel. It is not a
 	// credential and lets the buyer preview how many quota their NL amount buys.
@@ -263,6 +263,13 @@ func (s *Service) DescribeProduct(ctx context.Context, productID uint) (*Fulfill
 			}
 		}
 	}
+	// New-API needs no mapping choice: the provider contributes its own amount
+	// field and the buyer enters the value. Requiring a non-empty binding value
+	// here would hide the form for exactly the channel that needs it.
+	if plugin.Key == "new-api-redemption-v1" {
+		describe.RequiresForm = true
+		return describe, nil
+	}
 	for _, binding := range enabled {
 		if binding.Value != "" {
 			describe.RequiresForm = true
@@ -272,14 +279,26 @@ func (s *Service) DescribeProduct(ctx context.Context, productID uint) (*Fulfill
 	return describe, nil
 }
 
-// SetNewAPIProduct enables or disables the New-API redemption channel for one
-// product without restoring the retired plugin-management surface. The provider
-// needs one enabled binding to be recognised by the payment delivery router; its
-// value is deliberately empty because New-API creates a random code at payment
-// time rather than mapping the order to a pre-existing item.
-func (s *Service) SetNewAPIProduct(ctx context.Context, productID uint, enabled bool) error {
+// SyncProductChannel mirrors a product's delivery channel into the plugin
+// runtime. New-API needs one enabled binding for the payment router to recognise
+// the product; the binding's value is deliberately empty because New-API creates
+// a random code at payment time rather than mapping the order to a stored item.
+// Choosing any other channel removes that binding, so a product switched back to
+// card or manual delivery no longer routes through New-API.
+func (s *Service) SyncProductChannel(ctx context.Context, productID uint, channel string) error {
 	if productID == 0 {
 		return fmt.Errorf("%w: 请选择商品", domain.ErrInvalidInput)
+	}
+	enabled := strings.EqualFold(strings.TrimSpace(channel), "new_api")
+	existing, err := s.repo.ResolveBinding(ctx, productID, "")
+	switch {
+	case err == nil && existing != nil:
+		existing.IsEnabled = enabled
+		return s.repo.UpdateBinding(ctx, existing)
+	case !errors.Is(err, domain.ErrBindingNotFound):
+		return err
+	case !enabled:
+		return nil
 	}
 	plugins, err := s.repo.ListPlugins(ctx)
 	if err != nil {
@@ -295,30 +314,28 @@ func (s *Service) SetNewAPIProduct(ctx context.Context, productID uint, enabled 
 	if target == nil {
 		return fmt.Errorf("%w: New-API 发货渠道不在当前版本里", domain.ErrInvalidInput)
 	}
-	if enabled {
-		if err := s.requireNewAPIReady(ctx); err != nil {
-			return err
-		}
-	}
-	existing, err := s.repo.ResolveBinding(ctx, productID, "")
-	if err == nil && existing != nil {
-		existing.IsEnabled = enabled
-		return s.repo.UpdateBinding(ctx, existing)
-	}
-	if !errors.Is(err, domain.ErrBindingNotFound) {
+	if err := s.requireNewAPIReady(ctx); err != nil {
 		return err
-	}
-	if !enabled {
-		return nil
 	}
 	return s.repo.CreateBinding(ctx, &domain.PluginBinding{
 		PluginID:   target.ID,
-		ProductID: productID,
+		ProductID:  productID,
 		Value:      "",
 		RemoteName: "New-API 兑换码",
 		RemoteRef:  "new-api-redemption-v1",
 		IsEnabled:  true,
 	})
+}
+
+// CheckProductChannel refuses a channel the shop cannot currently deliver.
+// Today only New-API has a precondition — complete runtime credentials — but the
+// check lives here so the catalogue does not have to know which channels have
+// requirements.
+func (s *Service) CheckProductChannel(ctx context.Context, channel string) error {
+	if !strings.EqualFold(strings.TrimSpace(channel), "new_api") {
+		return nil
+	}
+	return s.requireNewAPIReady(ctx)
 }
 
 func (s *Service) requireNewAPIReady(ctx context.Context) error {

@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -212,7 +213,13 @@ func ValidateProductFormValues(fields []ProductFormField, values map[string]stri
 		field.Key = strings.TrimSpace(field.Key)
 		field.Label = strings.TrimSpace(field.Label)
 		field.Type = strings.TrimSpace(field.Type)
-		if field.Key == "" || field.Label == "" || (field.Type != "text" && field.Type != "select") || allowed[field.Key].Key != "" {
+		// Number fields are contributed by delivery plugins (for example the
+		// New-API top-up amount). They share the same schema, so the validator
+		// has to know the type or every order for such a product is refused with
+		// 「购买表单字段配置无效」.
+		if field.Key == "" || field.Label == "" ||
+			(field.Type != "text" && field.Type != "select" && field.Type != "number") ||
+			allowed[field.Key].Key != "" {
 			return "", fmt.Errorf("商品购买表单字段配置无效")
 		}
 		if field.MaxLength <= 0 || field.MaxLength > 1000 {
@@ -248,6 +255,11 @@ func ValidateProductFormValues(fields []ProductFormField, values map[string]stri
 				return "", fmt.Errorf("%s选项无效", field.Label)
 			}
 		}
+		if field.Type == "number" && value != "" {
+			if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+				return "", fmt.Errorf("%s必须是整数", field.Label)
+			}
+		}
 		if value == "" {
 			delete(values, key)
 		} else {
@@ -263,12 +275,24 @@ func ValidateProductFormValues(fields []ProductFormField, values map[string]stri
 
 type Product struct {
 	Base
-	Slug                 string  `gorm:"size:120;uniqueIndex;not null" json:"slug"`
-	Name                 string  `gorm:"size:120;not null" json:"name"`
-	Summary              *string `gorm:"size:255" json:"summary,omitempty"`
-	Description          *string `gorm:"type:text" json:"description,omitempty"`
-	ImagePath            *string `gorm:"size:255" json:"image_path,omitempty"`
-	ProductType          string  `gorm:"size:32;default:'card';not null;index" json:"product_type"`
+	Slug        string  `gorm:"size:120;uniqueIndex;not null" json:"slug"`
+	Name        string  `gorm:"size:120;not null" json:"name"`
+	Summary     *string `gorm:"size:255" json:"summary,omitempty"`
+	Description *string `gorm:"type:text" json:"description,omitempty"`
+	ImagePath   *string `gorm:"size:255" json:"image_path,omitempty"`
+	ProductType string  `gorm:"size:32;default:'card';not null;index" json:"product_type"`
+	// DeliveryChannel is the product's delivery channel: card (卡密自动发货),
+	// manual (商家人工发货) or new_api (New-API 兑换码发货). It is the product-
+	// level source of truth for New-API; an empty value on legacy rows falls
+	// back to ProductType so old data keeps its meaning.
+	DeliveryChannel string `gorm:"size:32;default:'';not null;index" json:"delivery_channel"`
+	// MinTopupAmount/MaxTopupAmount bound the buyer-entered top-up amount for
+	// New-API redemption products. They are ignored by card and manual
+	// products, whose price and stock are what they are. The values are kept on
+	// the product (rather than a per-item card) because New-API is a product
+	// delivery channel, not a stock of pre-created codes.
+	MinTopupAmount       int     `gorm:"default:0;not null" json:"min_topup_amount"`
+	MaxTopupAmount       int     `gorm:"default:0;not null" json:"max_topup_amount"`
 	DeliveryInstructions *string `gorm:"type:text" json:"delivery_instructions,omitempty"`
 	RequireContact       bool    `gorm:"default:false;not null" json:"require_contact"`
 	Price                int     `gorm:"not null" json:"price"`
@@ -318,7 +342,12 @@ type Order struct {
 	UserID    uint   `gorm:"not null;index" json:"user_id"`
 	ProductID uint   `gorm:"not null;index" json:"product_id"`
 	Quantity  int    `gorm:"default:1;not null" json:"quantity"`
-	UnitPrice int    `gorm:"not null" json:"unit_price"`
+	// TopupAmount is the buyer-entered New-API top-up amount. It is stored so the
+	// order (and the back office) can show exactly what was purchased and so
+	// delivery recomputes quota from the recorded amount instead of trusting any
+	// front-end conversion.
+	TopupAmount int `gorm:"default:0;not null" json:"topup_amount"`
+	UnitPrice   int `gorm:"not null" json:"unit_price"`
 	// DiscountAmount is the coupon's cut, taken off before the order goes to
 	// NodeLoc: TotalAmount is what the buyer actually pays, so 查单 amounts keep
 	// matching without anyone recomputing the coupon later. It is counted in the

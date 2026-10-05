@@ -13,6 +13,13 @@ const (
 	ProductTypeCard   = "card"
 	ProductTypeManual = "manual"
 
+	// DeliveryChannel names the product's delivery channel. Card and manual are
+	// the shop's own fulfilment; NewAPI is the product-level New-API redemption
+	// channel, which creates a code after payment instead of drawing on stock.
+	DeliveryChannelCard   = "card"
+	DeliveryChannelManual = "manual"
+	DeliveryChannelNewAPI = "new_api"
+
 	CardStatusAvailable = "available"
 	CardStatusSold      = "sold"
 	CardStatusDisabled  = "disabled"

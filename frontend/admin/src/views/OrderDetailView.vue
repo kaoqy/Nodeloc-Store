@@ -314,6 +314,10 @@ onMounted(load)
               <dt class="quiet">备注</dt>
               <dd class="min-w-0 break-words text-right">{{ order.customer_note || '—' }}</dd>
             </div>
+            <div v-if="order.topup_amount" class="flex justify-between gap-3 border-t border-[var(--stroke)] pt-2">
+              <dt class="quiet">本次充值额度</dt>
+              <dd class="nums font-semibold">{{ order.topup_amount }}</dd>
+            </div>
             <div v-if="formValueEntries.length" class="border-t border-[var(--stroke)] pt-2">
               <dt class="quiet">购买信息</dt>
               <dd class="mt-1 text-right"><div v-for="([key, value]) in formValueEntries" :key="key" class="break-words">{{ key }}：{{ value }}</div></dd>

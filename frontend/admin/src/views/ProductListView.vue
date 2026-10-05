@@ -147,6 +147,7 @@ onMounted(load)
         <option value="all">全部类型</option>
         <option value="card">卡密自动发货</option>
         <option value="manual">人工交付</option>
+        <option value="new_api">New-API 兑换码</option>
       </select>
       <select v-model="statusFilter" class="input !w-auto" aria-label="商品状态" @change="apply">
         <option value="all">全部状态</option>
@@ -204,7 +205,11 @@ onMounted(load)
             </span>
           </div>
         </td>
-        <td class="hide-on-mobile">{{ product.product_type === 'card' ? '卡密' : '人工交付' }}</td>
+        <td class="hide-on-mobile">
+          <span v-if="product.delivery_channel === 'new_api'" class="badge-accent">New-API 兑换码</span>
+          <span v-else-if="product.product_type === 'card'">卡密</span>
+          <span v-else>人工交付</span>
+        </td>
         <td class="nums">{{ money(product.price) }}</td>
         <td class="nums hide-on-mobile">
           {{ product.product_type === 'card' ? product.stock_count : '—' }}
@@ -220,7 +225,7 @@ onMounted(load)
         <td class="text-right">
           <div class="flex flex-wrap justify-end gap-1.5">
             <RouterLink v-if="canManage" :to="'/products/' + product.id + '/edit'" class="btn btn-quiet btn-sm">编辑</RouterLink>
-            <RouterLink :to="'/cards/' + product.id" class="btn btn-quiet btn-sm">卡密</RouterLink>
+            <RouterLink v-if="product.product_type === 'card'" :to="'/cards/' + product.id" class="btn btn-quiet btn-sm">卡密</RouterLink>
             <button v-if="canManage" class="btn btn-quiet btn-sm" :disabled="busy" @click="toggle(product, 'is_published')">
               {{ product.is_published ? '下架' : '上架' }}
             </button>

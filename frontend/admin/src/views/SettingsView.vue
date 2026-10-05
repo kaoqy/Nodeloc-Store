@@ -842,15 +842,15 @@ onBeforeUnmount(() => {
               <p class="hint mt-1">对应 New-Api-User 请求头，必须是正整数。</p>
             </div>
             <div>
-              <label class="label" for="new-api-ratio">每 NL 兑换 quota</label>
+              <label class="label" for="new-api-ratio">每单位充值额度兑换 quota</label>
               <input id="new-api-ratio" v-model="settings.new_api.quota_per_nl" class="input nums" inputmode="numeric" placeholder="例如 100000" />
-              <p class="hint mt-1">quota = 订单实付 NL × 这个比例；后端重新计算，不使用前端 quota。</p>
+              <p class="hint mt-1">quota = 管理员为商品设置的“本次充值额度” × 这个比例；后端按订单保存的额度重新计算，不使用前端 quota。</p>
             </div>
             <div>
               <label class="label" for="new-api-field">成功响应兑换码字段</label>
               <input id="new-api-field" v-model="settings.new_api.success_field" class="input mono" placeholder="例如 data.key" />
               <p class="hint mt-1">
-                New-API 响应格式必须按你的实际部署确认。填写响应点路径后才会按该字段提取；
+                默认按官方 ApiResponse 的 data.key 提取兑换码。只有在自建版本改过响应结构时才需要覆盖；
                 无法确认时会进入待人工确认，不会自动重复创建兑换码。
               </p>
             </div>
@@ -860,7 +860,8 @@ onBeforeUnmount(() => {
             渠道已启用但缺少：{{ serverNewAPIMissing.join('、') }}。
           </p>
           <p class="alert alert-warning mt-4" role="status">
-            New-API 的响应格式尚未在本仓库确认。适配器只集中解析配置的成功字段或明确成功标记；其他响应会标记为待人工确认，不会伪造成功。
+            适配器按官方 ApiResponse（success + data.key）解析；success=false 或 HTTP 错误会直接判为失败，
+            无法识别的响应则标记为待人工确认，不会伪造成功，也不会自动重复创建兑换码。
           </p>
         </div>
 

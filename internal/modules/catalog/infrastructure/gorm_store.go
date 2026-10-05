@@ -76,7 +76,9 @@ func (r *GormProductRepo) ListQuery(ctx context.Context, query domain.ProductQue
 		}
 		// 后台列表按商品类型筛选；前台不传就不生效。
 		if productType := strings.TrimSpace(query.ProductType); productType != "" && productType != "all" {
-			if productType == "card" || productType == "manual" {
+			if productType == "new_api" {
+				db = db.Where("delivery_channel = ?", domain.DeliveryChannelNewAPI)
+			} else if productType == "card" || productType == "manual" {
 				db = db.Where("product_type = ?", productType)
 			}
 		}

@@ -205,6 +205,9 @@ func New(cfg *config.Config, sys *system.Service) (*Container, error) {
 	// side that the stock a waiting order was short of has arrived, so the buyer
 	// is delivered on the spot instead of on the next background sweep.
 	catalogMod.Service.SetDeliveryWake(paymentMod.Service)
+	// 商品的发货渠道决定交付走向：选择 New-API 时同步建立插件绑定，切回卡密/人工
+	// 时撤销绑定，支付模块据此选择交付链路。
+	catalogMod.Service.SetDeliveryChannelSync(plugin.NewDeliveryBridge(pluginMod.Service))
 
 	if sys != nil {
 		sys.Attach(db,
@@ -302,13 +305,13 @@ func (n newAPIRuntimeConfig) NewAPIConfig(ctx context.Context) (map[string]strin
 	}
 	cfg := runtime.NewAPI
 	return map[string]string{
-		"base_url":      cfg.BaseURL,
-		"admin_user_id": cfg.AdminUserID,
-		"quota_per_nl":  cfg.QuotaPerNL,
-		"success_field": cfg.SuccessField,
-	}, map[string]string{
-		"admin_access_token": cfg.AdminAccessToken,
-	}, nil
+			"base_url":      cfg.BaseURL,
+			"admin_user_id": cfg.AdminUserID,
+			"quota_per_nl":  cfg.QuotaPerNL,
+			"success_field": cfg.SuccessField,
+		}, map[string]string{
+			"admin_access_token": cfg.AdminAccessToken,
+		}, nil
 }
 
 func (a activityDefaults) PerUserLimit(ctx context.Context) int {

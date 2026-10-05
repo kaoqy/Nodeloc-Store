@@ -56,6 +56,9 @@ export interface Product {
   description?: string | null
   image_path?: string | null
   product_type: ProductType
+  delivery_channel?: string
+  min_topup_amount?: number
+  max_topup_amount?: number
   require_contact: boolean
   price: number
   original_price?: number | null
@@ -93,6 +96,8 @@ export interface Order {
   user_id: number
   product_id: number
   quantity: number
+  /** New-API 商品本次充值的额度；非 New-API 商品为 0。 */
+  topup_amount?: number
   unit_price: number
   discount_amount?: number
   coupon_code?: string
