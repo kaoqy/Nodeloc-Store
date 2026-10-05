@@ -18,7 +18,7 @@ export interface NavItem {
   icon: string
   /** 需要的 Casbin 权限，格式 resource:action */
   permission: string
-  /** 备选权限：任一命中即可见（例如客服中心同时承载工单与快捷回复） */
+  /** 备选权限：任一命中即可见（例如工单页面同时承载工单与快捷回复） */
   altPermission?: string
   /** 搜索关键词，方便中英文都能搜到 */
   keywords?: string[]

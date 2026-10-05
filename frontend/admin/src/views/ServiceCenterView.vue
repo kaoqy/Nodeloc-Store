@@ -19,7 +19,7 @@ import { errorMessage, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 
 /**
- * 客服中心：左侧队列 + 右侧处理面板。
+ * 工单中心：左侧队列 + 右侧处理面板。
  *
  * 筛选条件全部来自地址栏，因此总览的每一张卡片、搜索框、快速筛选都能
  * 还原出同一个列表——这也是「点进去筛选不生效」这类问题的根治办法：

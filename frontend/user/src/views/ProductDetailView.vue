@@ -765,6 +765,9 @@ watch(
 .purchase-panel {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-hi) 72%, transparent), transparent 180px),
+    color-mix(in srgb, var(--surface) 96%, transparent);
 }
 
 .purchase-head {
@@ -792,8 +795,8 @@ watch(
 .purchase-total {
   border: 1px solid var(--stroke-quiet);
   border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  padding: 12px;
+  background: color-mix(in srgb, var(--surface-sunken) 94%, transparent);
+  padding: 13px;
 }
 
 .purchase-total > div:last-child {
@@ -828,6 +831,10 @@ watch(
 
   .purchase-panel {
     box-shadow: var(--shadow-sm);
+  }
+
+  .purchase-panel .btn-lg {
+    min-height: 48px;
   }
 }
 </style>

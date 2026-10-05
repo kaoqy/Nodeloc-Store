@@ -263,6 +263,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.admin-aside {
+  background: color-mix(in srgb, var(--surface) 97%, transparent);
+  backdrop-filter: blur(12px);
+}
+
 /* ── 侧栏条目 ───────────────────────────────────────────────────── */
 .side-link {
   position: relative;
@@ -275,6 +280,12 @@ onUnmounted(() => {
   font-weight: 500;
   color: var(--text-dim);
   transition: background var(--fast), color var(--fast);
+}
+
+@media (max-width: 1023px) {
+  .admin-aside {
+    box-shadow: var(--shadow-lg);
+  }
 }
 .side-link::before {
   content: '';

@@ -18,7 +18,7 @@ import {
 import { errorMessage } from '../api/client'
 import { when } from '../utils/format'
 
-// 客服中心：把「帮助文档 / 我的工单」收进一个页面，
+// 工单中心：把「帮助文档 / 我的工单」收进一个页面，
 // 买家用一个入口就能找到全部售后路径。
 const route = useRoute()
 
@@ -141,7 +141,7 @@ async function sendReply() {
 async function askHuman() {
   if (!detail.value) return
   try {
-    await transferTicket(detail.value.ticket.id, '用户在客服中心申请转人工')
+    await transferTicket(detail.value.ticket.id, '用户在工单中心申请转人工')
     await openTicket(detail.value.ticket.id)
     await loadTickets()
   } catch (err) {
@@ -211,17 +211,18 @@ onMounted(() => {
 
 <template>
   <div class="mx-auto w-full max-w-6xl px-4 py-9 sm:px-6">
-    <header class="flex flex-wrap items-end justify-between gap-4">
+    <header class="ticket-center-head">
       <div>
-        <p class="eyebrow">客服中心</p>
+        <p class="eyebrow">工单中心</p>
         <h1 class="mt-2 text-2xl font-bold sm:text-3xl">有问题，从这里开始</h1>
         <p class="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--text-dim)]">
           先看下面的常见问题；没解决就提交工单，客服会带着你的描述和订单信息跟进。
         </p>
       </div>
-      <button class="btn btn-primary" @click="startTicket">
-        提交工单
-      </button>
+      <div class="ticket-center-actions">
+        <button class="btn btn-primary" @click="startTicket">提交工单</button>
+        <button class="btn btn-secondary" @click="tab = 'tickets'">查看我的工单</button>
+      </div>
     </header>
 
     <div class="support-actions mt-6 grid gap-3 sm:grid-cols-3">
@@ -243,7 +244,7 @@ onMounted(() => {
       </RouterLink>
     </div>
 
-    <div class="mt-8 flex flex-wrap gap-1.5" role="tablist" aria-label="客服中心板块">
+    <div class="mt-8 flex flex-wrap gap-1.5" role="tablist" aria-label="工单中心板块">
       <button class="chip" :class="tab === 'help' ? 'chip-active' : ''" role="tab" :aria-selected="tab === 'help'" @click="tab = 'help'">
         帮助文档
       </button>
@@ -420,6 +421,46 @@ onMounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.ticket-center-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 62%, transparent), transparent 48%),
+    color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow-sm);
+  padding: 22px;
+  backdrop-filter: blur(8px);
+}
+
+.ticket-center-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+@media (max-width: 640px) {
+  .ticket-center-head {
+    padding: 18px;
+    align-items: stretch;
+  }
+
+  .ticket-center-actions {
+    width: 100%;
+  }
+
+  .ticket-center-actions .btn {
+    flex: 1;
+    min-width: 9rem;
+  }
+}
+</style>
 
 <style scoped>
 .support-action {

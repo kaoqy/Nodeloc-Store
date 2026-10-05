@@ -26,9 +26,9 @@ const router = createRouter({
     { path: '/orders', name: 'orders', component: OrderListView, meta: { requiresAuth: true, title: '我的订单' } },
     { path: '/orders/:orderNo', name: 'order-detail', component: OrderDetailView, meta: { requiresAuth: true } },
     { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true, title: '个人中心' } },
-    // 活动和客服是两个独立页面：活动中心只讲促销，客服中心只处理问题。
+    // 活动和工单是两个独立页面：活动中心只讲促销，工单中心只处理问题。
     { path: '/activities', name: 'activities', component: ActivityCenterView, meta: { title: '活动中心' } },
-    { path: '/support', name: 'support', component: SupportView, meta: { title: '客服中心' } },
+    { path: '/support', name: 'support', component: SupportView, meta: { title: '工单中心' } },
     { path: '/tickets', name: 'tickets', component: SupportView, meta: { requiresAuth: true, title: '我的工单' } },
     // 旧地址保留为跳转，已发出的链接和收藏不会变成 404。
     { path: '/help', redirect: '/support' },

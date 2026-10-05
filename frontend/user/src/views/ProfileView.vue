@@ -678,11 +678,18 @@ onMounted(async () => {
       </button>
     </section>
 
-    <nav class="mt-5 grid gap-3 sm:grid-cols-2">
+    <nav class="profile-actions mt-5 grid gap-3 sm:grid-cols-3">
       <RouterLink to="/orders" class="card-hover flex items-center justify-between gap-3">
         <span>
           <span class="block text-[15px] font-semibold">我的订单</span>
           <span class="hint">支付进度与交付内容</span>
+        </span>
+        <span aria-hidden="true" class="text-[var(--text-quiet)]">→</span>
+      </RouterLink>
+      <RouterLink to="/support" class="card-hover flex items-center justify-between gap-3">
+        <span>
+          <span class="block text-[15px] font-semibold">工单中心</span>
+          <span class="hint">提交问题、查看进度与回复</span>
         </span>
         <span aria-hidden="true" class="text-[var(--text-quiet)]">→</span>
       </RouterLink>
@@ -698,6 +705,21 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.profile-actions > a {
+  min-width: 0;
+}
+
+.profile-actions > a > span:first-child {
+  min-width: 0;
+}
+
+.profile-actions .hint {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .profile-summary {
   overflow: hidden;
 }

@@ -27,6 +27,8 @@ defineProps<{ count?: string }>()
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(8px);
 }
 
 .filter-bar-fields,
@@ -56,6 +58,14 @@ defineProps<{ count?: string }>()
 
   .filter-bar :deep(.input) {
     max-width: 100%;
+  }
+
+  .filter-bar-fields > * {
+    flex: 1 1 10rem;
+  }
+
+  .filter-bar-fields > .btn {
+    flex: 0 0 auto;
   }
 }
 </style>

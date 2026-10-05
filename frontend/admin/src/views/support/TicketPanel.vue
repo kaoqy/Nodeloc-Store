@@ -92,7 +92,7 @@ async function run(name: string, task: () => Promise<unknown>, message: string) 
 function changeStatus(next: string) {
   void run(
     'status',
-    () => setTicketStatus(props.ticketId, next, '客服在客服中心更新状态'),
+    () => setTicketStatus(props.ticketId, next, '客服在工单中心更新状态'),
     '工单状态已更新为「' + (ticketStatusLabels[next] ?? next) + '」',
   )
 }

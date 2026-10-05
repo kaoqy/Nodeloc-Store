@@ -33,5 +33,19 @@ const tone = computed(() => props.tone ?? TONES[props.value] ?? 'badge-neutral')
 </script>
 
 <template>
-  <span :class="tone">{{ label || value }}</span>
+  <span class="badge" :class="tone">
+    <span class="status-dot" aria-hidden="true" />
+    {{ label || value }}
+  </span>
 </template>
+
+<style scoped>
+.status-dot {
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.8;
+}
+</style>

@@ -185,11 +185,12 @@ html[data-theme='light'] {
 @layer components {
   .card {
     position: relative;
-    background: var(--surface);
+    background: color-mix(in srgb, var(--surface) 96%, transparent);
     border: 1px solid var(--stroke);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-sm);
     padding: 20px;
+    backdrop-filter: blur(8px);
   }
   /* The top hairline that makes a panel sit *on* the page rather than in it. */
   .card::before {
@@ -450,7 +451,7 @@ html[data-theme='light'] {
     max-height: min(72vh, 60rem);
     border: 1px solid var(--stroke);
     border-radius: var(--radius-md);
-    background: var(--surface);
+    background: color-mix(in srgb, var(--surface) 97%, transparent);
     box-shadow: var(--shadow-xs);
   }
   .table-container table, .table table { width: 100%; border-collapse: separate; border-spacing: 0; }
@@ -471,7 +472,7 @@ html[data-theme='light'] {
     color: var(--text-quiet);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    background: var(--bg-raise);
+    background: color-mix(in srgb, var(--bg-raise) 94%, var(--surface-hi));
     border-bottom: 1px solid var(--stroke);
     white-space: nowrap;
   }
@@ -507,6 +508,7 @@ html[data-theme='light'] {
     border-radius: var(--radius-sm);
     font-size: 13px;
     border: 1px solid transparent;
+    box-shadow: var(--shadow-xs);
   }
   .alert-danger { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
   .alert-success { background: var(--success-soft); color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
@@ -515,7 +517,7 @@ html[data-theme='light'] {
 
   /* ── Empty / modal surfaces ── */
   .empty-state {
-    padding: 44px 18px;
+    padding: 50px 20px;
     text-align: center;
     color: var(--text-quiet);
   }

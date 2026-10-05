@@ -4,7 +4,7 @@ import { listActivities, claimCoupon, type Activity } from '../api/support'
 import { errorMessage } from '../api/client'
 import { when } from '../utils/format'
 
-// 活动中心是独立的买家页面，只讲促销。它和客服中心没有任何共用页签：
+// 活动中心是独立的买家页面，只讲促销。它和工单中心没有任何共用页签：
 // 买家想找优惠来这里，想找人解决问题去 /support，两边互不干扰。
 const loading = ref(true)
 const error = ref('')

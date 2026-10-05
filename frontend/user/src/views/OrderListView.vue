@@ -147,7 +147,7 @@ onMounted(() => {
   <div class="mx-auto w-full max-w-4xl px-4 py-9 sm:px-6">
     <header class="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <p class="eyebrow">进行中与历史订单</p>
+        <p class="eyebrow">订单中心</p>
         <h1 class="mt-2 text-2xl font-bold sm:text-3xl">我的订单</h1>
       </div>
       <p v-if="!loading && orders.length" class="hint nums whitespace-nowrap">共 {{ total }} 笔</p>

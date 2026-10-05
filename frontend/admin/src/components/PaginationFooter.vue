@@ -15,7 +15,7 @@ const emit = defineEmits<{ change: [page: number] }>()
 
 <template>
   <div class="pagination-footer flex flex-wrap items-center justify-between gap-3">
-    <p class="quiet mono text-xs">{{ summary }}</p>
+    <p v-if="summary" class="quiet mono text-xs">{{ summary }}</p>
     <div class="flex items-center gap-2">
       <button
         class="btn btn-secondary btn-sm"
@@ -37,3 +37,24 @@ const emit = defineEmits<{ change: [page: number] }>()
     </div>
   </div>
 </template>
+
+<style scoped>
+.pagination-footer {
+  border-top: 1px solid var(--stroke-quiet);
+  padding-top: 12px;
+}
+
+@media (max-width: 640px) {
+  .pagination-footer {
+    align-items: stretch;
+  }
+
+  .pagination-footer > div {
+    width: 100%;
+  }
+
+  .pagination-footer .btn {
+    flex: 1;
+  }
+}
+</style>

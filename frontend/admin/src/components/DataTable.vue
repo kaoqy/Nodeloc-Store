@@ -78,8 +78,8 @@ const emit = defineEmits<{ retry: []; clearFilters: []; change: [page: number] }
     </div>
 
     <div v-else-if="!total" class="card py-16 text-center">
-      <p class="text-[var(--text-quiet)]" aria-hidden="true">◍</p>
-      <p class="mt-3 font-semibold">{{ emptyTitle }}</p>
+      <span class="empty-state-glyph" aria-hidden="true">⌕</span>
+      <p class="mt-4 font-semibold">{{ emptyTitle }}</p>
       <p v-if="emptyHint" class="mt-1.5 text-sm text-[var(--text-quiet)]">{{ emptyHint }}</p>
       <button v-if="filtered" class="btn btn-secondary btn-sm mt-6" @click="emit('clearFilters')">
         清除筛选
@@ -137,5 +137,18 @@ const emit = defineEmits<{ retry: []; clearFilters: []; change: [page: number] }
   margin-bottom: 12px;
   color: var(--text-dim);
   font-size: 12.5px;
+}
+
+.empty-state-glyph {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-inline: auto;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-quiet);
+  font-size: 18px;
 }
 </style>

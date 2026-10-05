@@ -17,7 +17,7 @@ withDefaults(
 </script>
 
 <template>
-  <div class="page-head" :class="bordered ? 'border-b border-[var(--stroke)] pb-4' : ''">
+  <div class="page-head" :class="bordered ? 'page-head-bordered' : ''">
     <div class="min-w-0">
       <h2 class="truncate">{{ title }}</h2>
       <p v-if="description" class="page-head-description quiet mt-1 max-w-3xl text-[12.5px] leading-relaxed">{{ description }}</p>
@@ -28,3 +28,14 @@ withDefaults(
     </div>
   </div>
 </template>
+
+<style scoped>
+.page-head-bordered {
+  border-bottom: 1px solid var(--stroke-quiet);
+  padding-bottom: 16px;
+}
+
+.page-head :deep(.page-head-description) {
+  line-height: 1.7;
+}
+</style>
