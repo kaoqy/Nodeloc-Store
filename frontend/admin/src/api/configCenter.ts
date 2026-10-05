@@ -33,6 +33,8 @@ export interface SystemConfig {
   sort_order: number
 }
 
+export type ConfigControl = 'switch' | 'number' | 'text' | 'textarea' | 'select' | 'color' | 'password'
+
 /** Backend values are strings, but older/imported rows may be null or numeric. */
 function configValue(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -107,6 +109,14 @@ export const listSystemConfigs = (group = '') =>
 
 export const saveSystemConfig = (config: Partial<SystemConfig>) =>
   client.put('/admin/config-center/system', config).then((r) => r.data.data)
+
+/** 配置值只有两种形状：后端保存成功后返回整行，或只回写 value。 */
+export function savedConfigValue(raw: unknown, fallback: string): string {
+  if (raw && typeof raw === 'object' && 'value' in raw) {
+    return configValue((raw as { value?: unknown }).value)
+  }
+  return fallback
+}
 
 // ── 总览卡片偏好（本地保存，不依赖后端）────────────────────────────
 

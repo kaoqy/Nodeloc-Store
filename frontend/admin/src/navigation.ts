@@ -44,8 +44,6 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: '经营',
     items: [
-      { path: '/orders', label: '订单管理', hint: '支付、交付与售后', icon: 'orders',
-        permission: 'orders:view', keywords: ['order', '订单', '发货'] },
       { path: '/products', label: '商品管理', hint: '上架、定价与交付方式', icon: 'products',
         permission: 'products:view', keywords: ['product', '商品'] },
       { path: '/cards', label: '卡密管理', hint: '按商品导入与库存', icon: 'cards',
@@ -56,6 +54,8 @@ export const NAV_GROUPS: NavGroup[] = [
         permission: 'coupons:view', keywords: ['coupon', '优惠码'] },
       { path: '/activities', label: '活动管理', hint: '折扣活动与适用范围', icon: 'activities',
         permission: 'activities:view', keywords: ['activity', '活动', '促销'] },
+      { path: '/orders', label: '订单管理', hint: '支付、交付与售后', icon: 'orders',
+        permission: 'orders:view', keywords: ['order', '订单', '发货'] },
     ],
   },
   {

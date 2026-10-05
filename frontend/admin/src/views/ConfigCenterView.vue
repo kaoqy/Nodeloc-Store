@@ -7,6 +7,7 @@ import {
   listSystemConfigs,
   listTemplates,
   saveSystemConfig,
+  savedConfigValue,
   saveTemplate,
   type NotificationLogRow,
   type NotificationTemplate,
@@ -91,6 +92,12 @@ interface FieldMeta {
   offLabel?: string
   /** 这一项在系统里管的是什么，用一句话点明，便于对照排查。 */
   affects?: string
+  /** 控件类型；默认按 value_type 与单位推断。 */
+  control?: 'switch' | 'number' | 'text' | 'textarea' | 'select' | 'color' | 'password'
+  /** 选择型配置的选项；后端仍保存原始字符串，不改变数据结构。 */
+  options?: { value: string; label: string }[]
+  /** 保存前的附加校验，返回非空字符串则阻止保存。 */
+  validate?: (config: SystemConfig) => string
 }
 
 /** 与后端 defaultSystemConfigs 对齐的出厂值，仅用于在卡片上提示「默认是多少」。 */
@@ -272,6 +279,25 @@ function placeholderOf(config: SystemConfig): string {
 
 function affectsOf(config: SystemConfig): string {
   return metaOf(config).affects ?? ''
+}
+
+function controlOf(config: SystemConfig): NonNullable<FieldMeta['control']> {
+  const meta = metaOf(config)
+  if (meta.control) return meta.control
+  if (config.value_type === 'bool') return 'switch'
+  if (config.value_type === 'int') return 'number'
+  return 'text'
+}
+
+function validationMessage(config: SystemConfig): string {
+  const meta = metaOf(config)
+  if (meta.validate) return meta.validate(config)
+  if (config.value_type !== 'int') return ''
+  const value = Number(config.value)
+  if (!Number.isFinite(value) || !Number.isInteger(value)) return '请填写整数'
+  if (meta.range?.min !== undefined && value < meta.range.min) return `不能小于 ${meta.range.min}`
+  if (meta.range?.max !== undefined && value > meta.range.max) return `不能大于 ${meta.range.max}`
+  return ''
 }
 
 /**
@@ -525,14 +551,17 @@ async function removeTemplate(template: NotificationTemplate) {
 }
 
 async function saveConfig(config: SystemConfig): Promise<boolean> {
+  const invalid = validationMessage(config)
+  if (invalid) {
+    error.value = '配置「' + (config.label || config.key) + '」' + invalid + '。'
+    return false
+  }
   busy.value = true
   error.value = ''
   try {
     const saved = await saveSystemConfig(config)
-    if (saved && typeof saved === 'object' && 'value' in saved) {
-      config.value = String((saved as SystemConfig).value ?? '')
-    }
-    notice.value = '配置「' + (config.label || config.key) + '」已保存。'
+    config.value = savedConfigValue(saved, config.value)
+    notice.value = '配置「' + (config.label || config.key) + '」已保存，运行时立即生效。'
     return true
   } catch (err) {
     error.value = '配置「' + (config.label || config.key) + '」保存失败：' + errorMessage(err, '请检查填写内容')
@@ -747,7 +776,9 @@ onMounted(() => {
                     <div class="config-card-body">
                       <div class="config-card-head">
                         <p class="config-card-label">{{ config.label || config.key }}</p>
-                        <span v-if="config.value_type === 'bool'" class="config-kind">开关</span>
+                      <span v-if="config.value_type === 'bool'" class="config-kind">开关</span>
+                        <span v-else-if="controlOf(config) === 'number'" class="config-kind">数值</span>
+                        <span v-else-if="controlOf(config) === 'text'" class="config-kind">文本</span>
                         <span v-else-if="unitOf(config)" class="config-kind">{{ unitOf(config) }}</span>
                         <span v-else class="config-kind">文本</span>
                         <span v-if="defaultNoteOf(config)" class="config-kind config-kind-default">{{ defaultNoteOf(config) }}</span>
@@ -778,21 +809,60 @@ onMounted(() => {
                         />
                         <span class="config-state">{{ isOn(config) ? onLabelOf(config) : offLabelOf(config) }}</span>
                       </template>
-                      <template v-else>
+                      <template v-else-if="controlOf(config) === 'select'">
                         <div class="config-input">
-                          <input
+                          <select
                             v-model="config.value"
                             class="input"
-                            :type="config.value_type === 'int' ? 'number' : 'text'"
+                            :disabled="!canManageSystem"
+                            :aria-label="config.label || config.key"
+                          >
+                            <option v-for="option in metaOf(config).options ?? []" :key="option.value" :value="option.value">
+                              {{ option.label }}
+                            </option>
+                          </select>
+                        </div>
+                        <button v-if="canManageSystem" class="btn btn-secondary btn-sm" :disabled="busy" @click="saveConfig(config)">
+                          保存
+                        </button>
+                      </template>
+                      <template v-else-if="controlOf(config) === 'textarea'">
+                        <div class="config-input">
+                          <textarea
+                            v-model="config.value"
+                            class="input min-h-[84px]"
                             :placeholder="placeholderOf(config)"
                             :disabled="!canManageSystem"
-                            @keyup.enter="saveConfig(config)"
+                            :aria-label="config.label || config.key"
                           />
                         </div>
                         <button v-if="canManageSystem" class="btn btn-secondary btn-sm" :disabled="busy" @click="saveConfig(config)">
                           保存
                         </button>
                       </template>
+                      <template v-else>
+                        <div class="config-input">
+                          <input
+                            v-model="config.value"
+                            class="input"
+                            :class="{ 'input-error': validationMessage(config) }"
+                            :type="controlOf(config) === 'number' ? 'number' : controlOf(config) === 'color' ? 'color' : 'text'"
+                            :placeholder="placeholderOf(config)"
+                            :disabled="!canManageSystem"
+                            :min="metaOf(config).range?.min"
+                            :max="metaOf(config).range?.max"
+                            :aria-invalid="Boolean(validationMessage(config))"
+                            @keyup.enter="saveConfig(config)"
+                          />
+                          <span v-if="unitOf(config)" class="config-unit">{{ unitOf(config) }}</span>
+                        </div>
+                        <button v-if="canManageSystem" class="btn btn-secondary btn-sm" :disabled="busy" @click="saveConfig(config)">
+                          保存
+                        </button>
+                      </template>
+                      <p v-if="validationMessage(config)" class="config-card-hint text-[var(--danger)]" role="alert">
+                        {{ validationMessage(config) }}
+                      </p>
                     </div>
                   </article>
                 </div>
@@ -972,6 +1042,21 @@ onMounted(() => {
   min-width: 140px;
 }
 .config-input .input { padding-right: 12px; }
+.config-unit {
+  position: absolute;
+  right: 12px;
+  color: var(--text-quiet);
+  font-size: 11.5px;
+  pointer-events: none;
+}
+.config-input:has(.config-unit) .input { padding-right: 52px; }
+.input-error {
+  border-color: var(--danger);
+}
+.input-error:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
 @media (max-width: 640px) {
   .config-cards { grid-template-columns: 1fr; }
   .config-card-control .btn { margin-left: auto; }

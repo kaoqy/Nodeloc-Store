@@ -23,6 +23,7 @@ const quantity = ref(1)
 const contact = ref('')
 const note = ref('')
 const formValues = ref<Record<string, string>>({})
+const fieldErrors = ref<Record<string, string>>({})
 const loading = ref(true)
 const submitting = ref(false)
 const submittingPhase = ref<'order' | 'payment' | ''>('')
@@ -101,6 +102,49 @@ const applicablePromos = computed(() => {
 
 function promoWorth(promo: StorefrontCoupon): string {
   return promo.discount_type === 'percent' ? `立减 ${promo.discount_value}%` : `立减 ${money(promo.discount_value)}`
+}
+
+function clearFieldError(key: string) {
+  if (!fieldErrors.value[key]) return
+  const next = { ...fieldErrors.value }
+  delete next[key]
+  fieldErrors.value = next
+}
+
+/**
+ * 购买表单是商品配置驱动的：只有配置里声明的字段才允许提交，必填、选项和
+ * 长度都在这里先拦一次。后端会再按同一份 schema 校验，前端错误只是让买家
+ * 少走一次往返。
+ */
+function validatePurchaseForm(): boolean {
+  const item = product.value
+  if (!item) return false
+  const errors: Record<string, string> = {}
+  for (const field of item.form_schema ?? []) {
+    const value = String(formValues.value[field.key] ?? '').trim()
+    if (field.required && !value) {
+      errors[field.key] = `请填写${field.label}`
+      continue
+    }
+    if (value && field.type === 'select' && !(field.options ?? []).includes(value)) {
+      errors[field.key] = `请选择有效的${field.label}`
+      continue
+    }
+    const maxLength = field.max_length || 255
+    if (value.length > maxLength) {
+      errors[field.key] = `${field.label}最多 ${maxLength} 个字符`
+    }
+  }
+  if (item.require_contact && !contact.value.trim()) {
+    errors.contact = '请填写联系方式'
+  }
+  fieldErrors.value = errors
+  const first = Object.keys(errors)[0]
+  if (first) {
+    const id = first === 'contact' ? 'contact' : `custom-${first}`
+    document.getElementById(id)?.focus()
+  }
+  return Object.keys(errors).length === 0
 }
 
 /** Read the code into the field and price it against this order right away. */
@@ -225,6 +269,10 @@ async function purchase() {
     })
     return
   }
+  if (!validatePurchaseForm()) {
+    error.value = '请先补全购买表单中标出的字段。'
+    return
+  }
   submitting.value = true
   submittingPhase.value = 'order'
   error.value = ''
@@ -253,6 +301,7 @@ async function purchase() {
   let order: Order
   try {
     order = await createOrder({
+      product_id: item.id,
       slug: item.slug,
       quantity: quantity.value,
       contact: contact.value.trim() || undefined,
@@ -302,6 +351,7 @@ async function load(slug: string) {
   contact.value = ''
   note.value = ''
   formValues.value = {}
+  fieldErrors.value = {}
   couponCode.value = typeof route.query.coupon === 'string' ? route.query.coupon.slice(0, 64) : ''
   quote.value = null
   couponError.value = ''
@@ -461,7 +511,7 @@ watch(
 
         <div class="my-5 divider" />
 
-        <form class="space-y-4" @submit.prevent="purchase">
+        <form class="space-y-4" novalidate @submit.prevent="purchase">
           <div class="flex items-center justify-between gap-3">
             <span class="label !mb-0">数量</span>
             <div class="stepper">
@@ -480,11 +530,36 @@ watch(
           <div v-if="product.form_schema?.length" class="space-y-4">
             <div v-for="field in product.form_schema" :key="field.key">
               <label class="label" :for="`custom-${field.key}`">{{ field.label }} <span v-if="field.required" class="accent-text">*</span></label>
-              <select v-if="field.type === 'select'" :id="`custom-${field.key}`" v-model="formValues[field.key]" class="input" :required="field.required">
+              <select
+                v-if="field.type === 'select'"
+                :id="`custom-${field.key}`"
+                v-model="formValues[field.key]"
+                class="input"
+                :class="{ 'input-error': fieldErrors[field.key] }"
+                :required="field.required"
+                :aria-invalid="Boolean(fieldErrors[field.key])"
+                :aria-describedby="fieldErrors[field.key] ? `custom-${field.key}-error` : undefined"
+                @change="clearFieldError(field.key)"
+              >
                 <option value="">请选择</option>
                 <option v-for="option in field.options" :key="option" :value="option">{{ option }}</option>
               </select>
-              <input v-else :id="`custom-${field.key}`" v-model="formValues[field.key]" class="input" :required="field.required" :maxlength="field.max_length || 255" :placeholder="field.placeholder" />
+              <input
+                v-else
+                :id="`custom-${field.key}`"
+                v-model="formValues[field.key]"
+                class="input"
+                :class="{ 'input-error': fieldErrors[field.key] }"
+                :required="field.required"
+                :maxlength="field.max_length || 255"
+                :placeholder="field.placeholder"
+                :aria-invalid="Boolean(fieldErrors[field.key])"
+                :aria-describedby="fieldErrors[field.key] ? `custom-${field.key}-error` : undefined"
+                @input="clearFieldError(field.key)"
+              />
+              <p v-if="fieldErrors[field.key]" :id="`custom-${field.key}-error`" class="field-error" role="alert">
+                {{ fieldErrors[field.key] }}
+              </p>
             </div>
           </div>
 
@@ -494,10 +569,15 @@ watch(
               id="contact"
               v-model="contact"
               class="input"
+              :class="{ 'input-error': fieldErrors.contact }"
               required
               maxlength="255"
               placeholder="商家交付时需要用到的账号或邮箱"
+              :aria-invalid="Boolean(fieldErrors.contact)"
+              :aria-describedby="fieldErrors.contact ? 'contact-error' : undefined"
+              @input="clearFieldError('contact')"
             />
+            <p v-if="fieldErrors.contact" id="contact-error" class="field-error" role="alert">{{ fieldErrors.contact }}</p>
             <p class="hint mt-1.5">仅商家可见，用于向你交付商品。</p>
           </div>
 
@@ -565,6 +645,10 @@ watch(
           <!-- 折扣明细：活动、优惠码逐项列出，最后一项才是真正要付的钱。
                买家在点下支付之前就应该能自己算出这个数。 -->
           <div class="purchase-total space-y-1.5 text-sm">
+            <div class="flex items-baseline justify-between gap-3 text-[var(--text-dim)]">
+              <span class="min-w-0 truncate">商品</span>
+              <span class="min-w-0 truncate text-right font-semibold">{{ product.name }}</span>
+            </div>
             <div class="flex items-baseline justify-between text-[var(--text-dim)]">
               <span>商品原价 <span class="quiet">× {{ quantity }}</span></span>
               <span class="nums">{{ money(wasPrice > 0 ? wasPrice * quantity : gross) }}</span>
@@ -715,6 +799,22 @@ watch(
 .purchase-total > div:last-child {
   border-top: 1px solid var(--stroke);
   padding-top: 10px;
+}
+
+.input-error {
+  border-color: var(--danger);
+}
+
+.input-error:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+.field-error {
+  margin-top: 5px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 @media (max-width: 640px) {

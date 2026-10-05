@@ -11,6 +11,9 @@ export interface ReconcileResult {
 }
 
 export interface CreateOrderPayload {
+  /** 商品详情页当前展示的真实商品 ID，服务端会据此重新查询并校验。 */
+  product_id: number
+  /** 兼容旧后端的 slug；新链路以 product_id 为准。 */
   slug: string
   quantity: number
   contact?: string

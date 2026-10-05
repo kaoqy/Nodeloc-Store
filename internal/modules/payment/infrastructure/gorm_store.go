@@ -119,8 +119,23 @@ func (s *GormStore) GetLatestTransaction(ctx context.Context, orderNo, transacti
 	return &result, nil
 }
 
-// GetPurchasableProduct loads a product that may be ordered right now.
-func (s *GormStore) GetPurchasableProduct(ctx context.Context, slug string) (*models.Product, error) {
+// GetPurchasableProductByID loads a product that may be ordered right now.
+func (s *GormStore) GetPurchasableProductByID(ctx context.Context, id uint) (*models.Product, error) {
+	if id == 0 {
+		return nil, ErrProductNotPurchasable
+	}
+	var product models.Product
+	err := s.db.WithContext(ctx).
+		Where("id = ? AND is_published = ? AND is_archived = ?", id, true, false).
+		First(&product).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrProductNotPurchasable
+	}
+	return &product, err
+}
+
+// GetPurchasableProductBySlug is the compatibility lookup for older clients.
+func (s *GormStore) GetPurchasableProductBySlug(ctx context.Context, slug string) (*models.Product, error) {
 	var product models.Product
 	err := s.db.WithContext(ctx).
 		Where("slug = ? AND is_published = ? AND is_archived = ?", strings.TrimSpace(slug), true, false).

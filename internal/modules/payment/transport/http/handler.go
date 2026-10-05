@@ -30,7 +30,8 @@ type createPaymentRequest struct {
 }
 
 type createOrderRequest struct {
-	Slug       string            `json:"slug" binding:"required"`
+	ProductID  uint              `json:"product_id"`
+	Slug       string            `json:"slug"`
 	Quantity   int               `json:"quantity"`
 	Contact    string            `json:"contact"`
 	Note       string            `json:"note"`
@@ -111,6 +112,7 @@ func (h *Handler) CreateOrder(c *gin.Context) {
 
 	order, err := h.service.CreateOrder(c.Request.Context(), application.CreateOrderInput{
 		UserID:     userID,
+		ProductID:  request.ProductID,
 		Slug:       strings.TrimSpace(request.Slug),
 		Quantity:   request.Quantity,
 		Contact:    strings.TrimSpace(request.Contact),

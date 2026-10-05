@@ -19,7 +19,11 @@ type OrderRepo interface {
 	CreateTransaction(ctx context.Context, transaction *domain.Transaction) error
 	SaveTransaction(ctx context.Context, transaction *domain.Transaction) error
 	GetLatestTransaction(ctx context.Context, orderNo, transactionType string) (*domain.Transaction, error)
-	GetPurchasableProduct(ctx context.Context, slug string) (*models.Product, error)
+	// Both lookups are explicit because checkout must never reinterpret one
+	// product as another. New storefront clients submit the numeric product ID;
+	// slug remains for compatibility with older links and callers.
+	GetPurchasableProductByID(ctx context.Context, id uint) (*models.Product, error)
+	GetPurchasableProductBySlug(ctx context.Context, slug string) (*models.Product, error)
 	CountAvailableCards(ctx context.Context, productID uint) (int64, error)
 	CreateOrder(ctx context.Context, order *models.Order) error
 	GetOrderByNo(ctx context.Context, orderNo string) (*models.Order, error)

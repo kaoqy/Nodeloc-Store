@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import AdminIcon from '../components/AdminIcon.vue'
 import AppDrawer from '../components/AppDrawer.vue'
 import DataTable, { type Column } from '../components/DataTable.vue'
+import FilterBar from '../components/FilterBar.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { createCategory, deleteCategory, listCategories, updateCategory } from '../api/categories'
@@ -29,6 +30,22 @@ const error = ref('')
 const notice = ref('')
 const rows = ref<Category[]>([])
 const editing = ref<Partial<Category> | null>(null)
+const search = ref('')
+const visibility = ref('all')
+
+const filteredRows = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
+  return rows.value.filter((row) => {
+    if (visibility.value === 'visible' && !row.is_visible) return false
+    if (visibility.value === 'hidden' && row.is_visible) return false
+    if (!keyword) return true
+    return [row.name, row.slug, row.description]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(keyword))
+  })
+})
+
+const narrowed = computed(() => Boolean(search.value.trim() || visibility.value !== 'all'))
 
 async function load() {
   loading.value = true
@@ -44,6 +61,11 @@ async function load() {
 
 function startCreate() {
   editing.value = { name: '', slug: '', description: '', icon: '', sort_order: rows.value.length * 10, is_visible: true }
+}
+
+function clearFilters() {
+  search.value = ''
+  visibility.value = 'all'
 }
 
 async function save() {
@@ -97,17 +119,31 @@ onMounted(load)
 
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 
+    <FilterBar :count="'共 ' + rows.length + ' 个分类'">
+      <input v-model="search" class="input w-56" type="search" placeholder="名称 / Slug / 说明" aria-label="搜索分类" />
+      <select v-model="visibility" class="input !w-auto" aria-label="分类可见性">
+        <option value="all">全部状态</option>
+        <option value="visible">前台可见</option>
+        <option value="hidden">前台隐藏</option>
+      </select>
+      <template #actions>
+        <button v-if="narrowed" class="btn btn-quiet btn-sm" @click="clearFilters">清除筛选</button>
+      </template>
+    </FilterBar>
+
     <DataTable
       :columns="COLUMNS"
       :loading="loading"
       :error="error"
-      :total="rows.length"
-      :summary="'共 ' + rows.length + ' 个分类'"
-      empty-title="还没有分类"
-      empty-hint="创建分类后，商品可以归入其中并在前台按分类筛选。"
+      :filtered="narrowed"
+      :total="filteredRows.length"
+      :summary="'共 ' + filteredRows.length + ' 个分类'"
+      :empty-title="narrowed ? '没有匹配的分类' : '还没有分类'"
+      :empty-hint="narrowed ? '换个关键词或状态再试，或清除筛选查看全部。' : '创建分类后，商品可以归入其中并在前台按分类筛选。'"
       @retry="load"
+      @clear-filters="clearFilters"
     >
-      <tr v-for="row in rows" :key="row.id">
+      <tr v-for="row in filteredRows" :key="row.id">
         <td>
           <span class="font-semibold">
             <span v-if="row.icon" class="mr-1.5">{{ row.icon }}</span>{{ row.name }}

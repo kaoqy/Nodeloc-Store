@@ -191,11 +191,7 @@ onMounted(async () => {
 <template>
   <div class="home-page">
     <div class="mx-auto w-full max-w-6xl px-4 sm:px-6">
-      <p
-        v-if="announcement"
-        class="rise-in mt-5 flex items-start gap-3 rounded-[var(--radius-sm)] border border-[var(--accent-line)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-dim)]"
-        role="status"
-      >
+      <p v-if="announcement" class="announcement-bar rise-in" role="status">
         <span class="accent-text mt-px shrink-0" aria-hidden="true">公告</span>
         <span class="min-w-0 flex-1 break-words whitespace-pre-line">{{ announcement }}</span>
         <button class="hint shrink-0 transition-colors hover:text-[var(--text)]" aria-label="关闭公告" @click="hideAnnouncement">
@@ -205,7 +201,7 @@ onMounted(async () => {
     </div>
 
     <section class="home-hero">
-      <div class="mx-auto grid w-full max-w-6xl gap-8 px-4 py-9 sm:px-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)] lg:items-end lg:py-12">
+      <div class="home-hero-inner">
         <div class="rise-in max-w-2xl">
           <p class="eyebrow">数字商品商店</p>
           <h1 class="home-title mt-2 text-3xl font-bold sm:text-4xl">
@@ -214,27 +210,31 @@ onMounted(async () => {
           <p class="mt-3 text-sm leading-relaxed text-[var(--text-dim)] sm:text-[15px]">
             使用 NodeLoc 账号登录即可购买。卡密在付款确认后自动发放，人工交付商品会进入发货队列，进度同步到订单详情。
           </p>
-          <div class="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[var(--text-quiet)]">
-            <span>NodeLoc 授权登录</span>
-            <span>支付结果服务端核实</span>
-            <span>订单与交付记录可查</span>
+          <div class="hero-actions">
+            <a href="#catalog" class="btn btn-primary">浏览商品</a>
+            <RouterLink to="/orders" class="btn btn-secondary">我的订单</RouterLink>
           </div>
+          <ul class="hero-points">
+            <li>NodeLoc 授权登录</li>
+            <li>支付结果服务端核实</li>
+            <li>订单与交付记录可查</li>
+          </ul>
         </div>
 
         <dl class="home-metrics rise-in">
-          <div>
+          <div class="home-metric">
             <dt>在售商品</dt>
             <dd>{{ stats ? stats.products : '—' }}</dd>
           </div>
-          <div>
+          <div class="home-metric">
             <dt>现货可购</dt>
             <dd>{{ stats ? stats.stock : '—' }}</dd>
           </div>
-          <div>
+          <div class="home-metric">
             <dt>累计成交</dt>
             <dd>{{ stats ? stats.sales : '—' }}</dd>
           </div>
-          <div>
+          <div class="home-metric">
             <dt>商品分类</dt>
             <dd>{{ stats ? stats.categories : '—' }}</dd>
           </div>
@@ -246,10 +246,13 @@ onMounted(async () => {
       <PromoStrip />
 
       <section id="catalog" class="catalog-layout">
-        <aside class="catalog-aside">
-          <div>
-            <p class="eyebrow">商品分类</p>
-            <h2 class="mt-1.5 text-lg font-bold">按分类浏览</h2>
+        <aside class="catalog-aside card">
+          <div class="catalog-aside-head">
+            <div>
+              <p class="eyebrow">筛选与分类</p>
+              <h2 class="mt-1.5 text-lg font-bold">按分类浏览</h2>
+            </div>
+            <button v-if="narrowed || sortBy !== 'default'" class="hint" type="button" @click="resetFilters">重置</button>
           </div>
           <div class="catalog-categories">
             <button class="catalog-category" :class="{ 'catalog-category-active': activeCategory === '' }" @click="activeCategory = ''">
@@ -267,7 +270,7 @@ onMounted(async () => {
               <span class="nums">{{ item.product_count ?? 0 }}</span>
             </button>
           </div>
-          <div class="mt-1 grid grid-cols-2 gap-2 lg:grid-cols-1">
+          <div class="catalog-quick-grid">
             <button class="catalog-quick" :class="{ 'catalog-quick-active': featuredOnly }" @click="featuredOnly = !featuredOnly">
               店长推荐
             </button>
@@ -284,11 +287,12 @@ onMounted(async () => {
               <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-quiet)]">⌕</span>
             </div>
             <div class="flex items-center gap-2">
-              <label class="hint whitespace-nowrap" for="sort">排序</label>
-              <select id="sort" v-model="sortBy" class="input !w-auto !py-2 text-[13px]">
+              <label class="hint hidden whitespace-nowrap sm:inline" for="sort">排序</label>
+              <select id="sort" v-model="sortBy" class="input !w-auto !py-2 text-[13px]" aria-label="排序">
                 <option v-for="item in SORTS" :key="item.key" :value="item.key">{{ item.label }}</option>
               </select>
             </div>
+            <button v-if="narrowed || sortBy !== 'default'" class="btn btn-quiet btn-sm" type="button" @click="resetFilters">清除筛选</button>
           </div>
 
           <div class="catalog-heading">
@@ -362,16 +366,79 @@ onMounted(async () => {
 .home-hero {
   margin-top: 18px;
   border-block: 1px solid var(--stroke);
-  background: var(--surface-sunken);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 72%, transparent), transparent 42%),
+    linear-gradient(180deg, var(--surface-hi), var(--surface-sunken));
+}
+
+.home-hero-inner {
+  display: grid;
+  width: 100%;
+  max-width: 72rem;
+  margin-inline: auto;
+  gap: 28px;
+  padding: 36px 16px;
+}
+
+.announcement-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 18px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--glass));
+  padding: 12px 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+  box-shadow: var(--shadow-xs);
+  backdrop-filter: blur(8px);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.hero-points {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 18px;
+  color: var(--text-quiet);
+  font-size: 12px;
+}
+
+.hero-points li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.hero-points li::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .home-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  border-top: 1px solid var(--stroke);
+  overflow: hidden;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
 }
 
-.home-metrics > div {
+.home-metrics .home-metric {
   min-width: 0;
   padding: 13px 16px;
   border-right: 1px solid var(--stroke-quiet);
@@ -400,6 +467,14 @@ onMounted(async () => {
 
 .catalog-aside {
   min-width: 0;
+  padding: 16px;
+}
+
+.catalog-aside-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .catalog-categories {
@@ -434,11 +509,26 @@ onMounted(async () => {
 .catalog-category {
   flex: 0 0 auto;
   padding: 8px 12px;
+  transition: border-color var(--fast), background var(--fast), color var(--fast), transform 180ms var(--spring);
 }
 
 .catalog-quick {
   justify-content: center;
   padding: 8px 12px;
+}
+
+.catalog-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+@media (hover: hover) {
+  .catalog-category:hover,
+  .catalog-quick:hover {
+    transform: translateY(-1px);
+  }
 }
 
 .catalog-category:hover,
@@ -459,8 +549,12 @@ onMounted(async () => {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  border-bottom: 1px solid var(--stroke);
-  padding-bottom: 14px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  box-shadow: var(--shadow-xs);
+  padding: 12px;
+  backdrop-filter: blur(8px);
 }
 
 .catalog-heading {
@@ -479,6 +573,13 @@ onMounted(async () => {
 }
 
 @media (min-width: 1024px) {
+  .home-hero-inner {
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+    align-items: end;
+    gap: 42px;
+    padding-block: 48px;
+  }
+
   .catalog-layout {
     grid-template-columns: 214px minmax(0, 1fr);
     gap: 34px;
@@ -499,6 +600,31 @@ onMounted(async () => {
   .catalog-category {
     width: 100%;
     padding-inline: 11px;
+  }
+
+  .catalog-quick-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 640px) {
+  .home-hero-inner {
+    padding-inline: 24px;
+  }
+}
+
+@media (max-width: 639px) {
+  .home-title {
+    font-size: clamp(2rem, 9.5vw, 2.55rem);
+  }
+
+  .hero-actions .btn {
+    flex: 1;
+    min-width: 9rem;
+  }
+
+  .catalog-topbar select {
+    max-width: 100%;
   }
 }
 </style>

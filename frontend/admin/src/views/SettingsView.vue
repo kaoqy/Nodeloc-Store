@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { getOAuthAttempts, getRuntimeSettings, saveRuntimeSettings, testMail, testOAuth, testPayment, type OAuthAttempt } from '../api/system'
 import type { FooterLink, RuntimeSettings } from '../types'
@@ -416,6 +417,13 @@ function guardUnload(event: BeforeUnloadEvent) {
   event.preventDefault()
   event.returnValue = ''
 }
+
+// beforeunload only covers a tab close or hard reload. The settings screen is a
+// long form, so switching to another admin page must offer the same protection.
+onBeforeRouteLeave(() => {
+  if (!dirty.value || saving.value) return true
+  return window.confirm('有未保存的系统设置，确定离开并放弃这些更改吗？')
+})
 
 onMounted(() => {
   window.addEventListener('beforeunload', guardUnload)

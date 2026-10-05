@@ -80,11 +80,15 @@ type CreatePaymentInput struct {
 }
 
 type CreateOrderInput struct {
-	UserID   uint
-	Slug     string
-	Quantity int
-	Contact  string
-	Note     string
+	UserID uint
+	// ProductID is the authoritative product selected on the detail page.
+	// Slug is accepted only for old clients; when both are present they must
+	// identify the same row, so a stale form cannot silently order another item.
+	ProductID uint
+	Slug      string
+	Quantity  int
+	Contact   string
+	Note      string
 	// CouponCode is what the buyer typed in the 优惠码 field, if anything.
 	CouponCode string
 	FormValues map[string]string
@@ -160,7 +164,7 @@ func NewService(orders contract.OrderRepo, gateway contract.PaymentGateway, fulf
 
 func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*models.Order, error) {
 	slug := strings.TrimSpace(input.Slug)
-	if input.UserID == 0 || slug == "" {
+	if input.UserID == 0 || (input.ProductID == 0 && slug == "") {
 		return nil, ErrInvalidInput
 	}
 	quantity := input.Quantity
@@ -184,9 +188,17 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 		return nil, ErrForbidden
 	}
 
-	product, err := s.orders.GetPurchasableProduct(ctx, slug)
+	var product *models.Product
+	if input.ProductID != 0 {
+		product, err = s.orders.GetPurchasableProductByID(ctx, input.ProductID)
+	} else {
+		product, err = s.orders.GetPurchasableProductBySlug(ctx, slug)
+	}
 	if err != nil {
 		return nil, err
+	}
+	if input.ProductID != 0 && slug != "" && product.Slug != slug {
+		return nil, fmt.Errorf("%w: 商品标识与商品 ID 不一致，请刷新商品页后重试", ErrInvalidInput)
 	}
 	if product.Price <= 0 {
 		return nil, domain.ErrProductNotPurchasable
