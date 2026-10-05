@@ -383,10 +383,10 @@ onMounted(async () => {
 
 <template>
   <div class="profile-page page-shell">
-    <header class="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <header class="profile-page-head">
       <div>
         <p class="eyebrow">账号、积分与通知</p>
-        <h1 class="mt-2 text-2xl font-bold sm:text-3xl">个人中心</h1>
+        <h1 class="page-title mt-2">个人中心</h1>
       </div>
       <p class="hint max-w-md">资料、订单、积分和站内通知都在这里集中管理。</p>
     </header>
@@ -705,6 +705,16 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.profile-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--stroke-quiet);
+  padding-bottom: var(--space-5);
+}
+
 .profile-actions > a {
   min-width: 0;
 }

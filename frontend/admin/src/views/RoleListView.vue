@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import AdminIcon from '../components/AdminIcon.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import { listPermissions, listRoles, saveRolePermissions } from '../api/permissions'
 import { errorMessage } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
@@ -146,8 +146,13 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <PageHeader title="权限与管理员" description="每个角色能看到与能操作的范围。改动立即对持有该角色的账号生效。" bordered>
-      <template #actions>
+    <header class="page-head page-head-bordered">
+      <div>
+        <p class="eyebrow">安全与权限</p>
+        <h1>权限与管理员</h1>
+        <p class="page-head-description">每个角色能看到与能操作的范围。改动立即对持有该角色的账号生效。</p>
+      </div>
+      <div class="page-actions">
         <button v-if="canManage && !isSuper" class="btn btn-quiet btn-sm" :disabled="!dirty || busy" @click="reset">
           取消修改
         </button>
@@ -160,8 +165,8 @@ onMounted(load)
           <span v-if="busy" class="spinner !size-3.5" />
           {{ busy ? '保存中…' : '保存权限' }}
         </button>
-      </template>
-    </PageHeader>
+      </div>
+    </header>
 
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>

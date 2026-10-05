@@ -665,18 +665,21 @@ onMounted(() => {
 
 <template>
   <section class="space-y-4">
-    <div>
-      <h1 class="text-lg font-bold">业务配置</h1>
-      <p class="quiet mt-1 text-xs">
-        日常运营要调的规则都在这里。站点、登录、支付与邮件在「系统配置」。
-      </p>
-    </div>
+    <header class="config-page-head">
+      <div>
+        <p class="eyebrow">运行时规则</p>
+        <h1 class="page-title mt-1">业务配置</h1>
+        <p class="quiet mt-2 text-sm">
+          日常运营要调的规则都在这里。站点、登录、支付与邮件在「系统配置」。
+        </p>
+      </div>
+    </header>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 
-    <div class="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
-      <nav class="card !p-2.5" aria-label="配置分组">
+    <div class="config-layout">
+      <nav class="config-nav-panel" aria-label="配置分组">
         <ul class="space-y-0.5">
           <li v-for="item in visibleTabs" :key="item.key">
             <button
@@ -694,7 +697,7 @@ onMounted(() => {
         </ul>
       </nav>
 
-      <div class="min-w-0 space-y-4">
+      <div class="config-content min-w-0 space-y-4">
         <div v-if="loading" class="card space-y-3">
           <div v-for="i in 5" :key="i" class="skeleton h-10 w-full" />
         </div>
@@ -985,6 +988,24 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.config-page-head {
+  border-bottom: 1px solid var(--stroke-quiet);
+  padding-bottom: var(--space-5);
+}
+
+.config-layout {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.config-nav-panel {
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  box-shadow: var(--shadow-xs);
+  padding: var(--space-2);
+}
+
 .config-nav-item {
   position: relative;
   display: flex;
@@ -1184,5 +1205,12 @@ onMounted(() => {
 @media (max-width: 640px) {
   .config-cards { grid-template-columns: 1fr; }
   .config-card-control .btn { margin-left: auto; }
+}
+
+@media (min-width: 1024px) {
+  .config-layout {
+    grid-template-columns: 248px minmax(0, 1fr);
+    align-items: start;
+  }
 }
 </style>

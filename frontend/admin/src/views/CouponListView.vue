@@ -4,7 +4,7 @@ import AdminIcon from '../components/AdminIcon.vue'
 import AppDrawer from '../components/AppDrawer.vue'
 import DataTable, { type Column } from '../components/DataTable.vue'
 import FilterBar from '../components/FilterBar.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { createCoupon, deleteCoupon, listCoupons, updateCoupon } from '../api/coupons'
 import { listCategories } from '../api/categories'
@@ -143,14 +143,23 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <PageHeader title="优惠券" description="优惠码的折扣方式、使用范围、限用次数与前台展示开关。" bordered>
+    <ManagementPage
+      title="优惠券"
+      description="优惠码的折扣方式、使用范围、限用次数与前台展示开关。"
+      eyebrow="营销"
+      :metrics="[
+        { label: '优惠码总数', value: coupons.length, hint: '当前全部优惠码' },
+        { label: '启用中', value: coupons.filter((item) => item.is_active).length, hint: '可被使用的优惠码', tone: 'success' },
+        { label: '前台展示', value: coupons.filter((item) => item.advertised).length, hint: '买家可见的促销', tone: 'accent' },
+      ]"
+    >
       <template #actions>
         <button v-if="canManage" class="btn btn-primary btn-sm" @click="startCreate">
           <AdminIcon name="plus" :size="14" />
           新建优惠码
         </button>
       </template>
-    </PageHeader>
+    </ManagementPage>
 
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 

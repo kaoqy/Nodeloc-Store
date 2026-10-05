@@ -453,7 +453,7 @@ watch(
                 {{ product.product_type === 'card' ? '自动交付' : '人工交付' }}
               </span>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
+            <div class="product-showcase-badges">
               <span class="badge" :class="product.product_type === 'card' ? 'badge-teal' : 'badge-accent'">
                 {{ product.product_type === 'card' ? '付款后自动交付' : '商家人工交付' }}
               </span>
@@ -466,15 +466,20 @@ watch(
               <span v-if="cardStock !== null && !soldOut" class="nums">现货 {{ cardStock }} 件</span>
               <span v-if="soldOut" class="text-[var(--warning)]">暂时缺货</span>
             </div>
-            <p v-if="product.delivery_instructions" class="card-quiet mt-5 break-words whitespace-pre-line text-sm leading-relaxed text-[var(--text-dim)]">
+            <div v-if="product.delivery_instructions" class="product-delivery-note mt-5">
+              <p class="eyebrow">交付说明</p>
+              <p class="mt-2 break-words whitespace-pre-line text-sm leading-relaxed text-[var(--text-dim)]">
               {{ product.delivery_instructions }}
-            </p>
+              </p>
+            </div>
 
-            <div v-if="product.description" class="my-6 divider" />
-
-            <p v-if="product.description" class="break-words whitespace-pre-line text-[15px] leading-7 text-[var(--text-dim)]">
-              {{ product.description }}
-            </p>
+            <section v-if="product.description" class="product-description">
+              <div class="my-6 divider" />
+              <p class="eyebrow">商品详情</p>
+              <p class="mt-3 break-words whitespace-pre-line text-[15px] leading-7 text-[var(--text-dim)]">
+                {{ product.description }}
+              </p>
+            </section>
           </div>
         </div>
 
@@ -497,6 +502,10 @@ watch(
           </div>
           <span class="badge badge-neutral">安全支付</span>
         </div>
+        <div class="purchase-product">
+          <p class="quiet text-xs">当前商品</p>
+          <p class="mt-1 truncate font-semibold">{{ product.name }}</p>
+        </div>
         <div class="detail-price">
           <span class="detail-price-label">{{ activitySaving > 0 ? '活动价' : '现价' }}</span>
           <div class="detail-price-row">
@@ -511,7 +520,7 @@ watch(
 
         <div class="my-5 divider" />
 
-        <form class="space-y-4" novalidate @submit.prevent="purchase">
+        <form class="space-y-5" novalidate @submit.prevent="purchase">
           <div class="flex items-center justify-between gap-3">
             <span class="label !mb-0">数量</span>
             <div class="stepper">
@@ -762,6 +771,24 @@ watch(
   font-size: 12.5px;
 }
 
+.product-showcase-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.product-delivery-note {
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface-sunken) 92%, transparent);
+  padding: 14px 16px;
+}
+
+.product-description {
+  min-width: 0;
+}
+
 .purchase-panel {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
@@ -778,6 +805,14 @@ watch(
   border-bottom: 1px solid var(--stroke-quiet);
   padding-bottom: 14px;
   margin-bottom: 18px;
+}
+
+.purchase-product {
+  min-width: 0;
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-sunken) 94%, transparent);
+  padding: 11px 13px;
 }
 
 .purchase-promos {
@@ -835,6 +870,11 @@ watch(
 
   .purchase-panel .btn-lg {
     min-height: 48px;
+  }
+
+  .product-detail-page {
+    display: flex;
+    flex-direction: column;
   }
 }
 </style>

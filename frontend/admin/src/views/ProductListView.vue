@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import AdminIcon from '../components/AdminIcon.vue'
 import DataTable, { type Column } from '../components/DataTable.vue'
 import FilterBar from '../components/FilterBar.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { deleteProduct, listAdminProducts, updateProduct } from '../api/products'
 import { money, when, errorMessage } from '../utils/format'
@@ -121,14 +121,23 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <PageHeader title="商品管理" description="上架、定价、库存可见性与推荐位都在这里维护。" bordered>
+    <ManagementPage
+      title="商品管理"
+      description="上架、定价、库存可见性与推荐位都在这里维护。"
+      eyebrow="商品目录"
+      :metrics="[
+        { label: '商品总数', value: total, hint: '当前筛选结果' },
+        { label: '已上架', value: products.filter((item) => item.is_published).length, hint: '本页在售商品', tone: 'success' },
+        { label: '低库存', value: products.filter((item) => item.product_type === 'card' && item.stock_count <= 3).length, hint: '本页库存告急', tone: 'warning' },
+      ]"
+    >
       <template #actions>
         <RouterLink v-if="canManage" to="/products/new" class="btn btn-primary btn-sm">
           <AdminIcon name="plus" :size="14" />
           新建商品
         </RouterLink>
       </template>
-    </PageHeader>
+    </ManagementPage>
 
     <p v-if="!canManage" class="alert" role="status">当前角色只能查看商品，编辑需要「商品管理」权限。</p>
 

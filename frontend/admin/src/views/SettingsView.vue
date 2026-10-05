@@ -472,7 +472,7 @@ onBeforeUnmount(() => {
   </section>
 
   <section v-else class="space-y-6">
-    <div class="flex flex-wrap items-end justify-between gap-4">
+    <div class="settings-page-head">
       <div>
         <p class="eyebrow">运行时配置</p>
         <h2 class="mt-1 text-xl font-bold">系统设置</h2>
@@ -480,7 +480,7 @@ onBeforeUnmount(() => {
           {{ activeTabHint }}
         </p>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="settings-page-actions">
         <span v-if="!canManage" class="badge badge-neutral">只读</span>
         <span v-else-if="dirty" class="badge badge-warning">有未保存的更改</span>
         <button class="btn btn-primary" :disabled="saving || !dirty || !canManage" @click="save">
@@ -517,8 +517,8 @@ onBeforeUnmount(() => {
 
     <!-- 设置分组：左侧是分区导航，右侧只显示当前分区。
          所有分区仍在同一份表单里，保存一次会整体生效。 -->
-    <div class="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
-      <nav class="card hidden !p-2.5 lg:block" aria-label="设置分组">
+    <div class="settings-layout">
+      <nav class="settings-nav-panel hidden lg:block" aria-label="设置分组">
         <ul class="space-y-0.5">
           <li v-for="item in SETTINGS_TABS" :key="item.key">
             <button
@@ -534,7 +534,7 @@ onBeforeUnmount(() => {
         </ul>
       </nav>
 
-      <div class="min-w-0 space-y-5">
+      <div class="settings-content min-w-0 space-y-5">
         <!-- 移动端：分区变成一排横向 chips，避免长页面来回滚动。 -->
         <div class="flex flex-wrap gap-1.5 lg:hidden">
           <button
@@ -1059,6 +1059,36 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.settings-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--stroke-quiet);
+  padding-bottom: var(--space-5);
+}
+
+.settings-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.settings-layout {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.settings-nav-panel {
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  box-shadow: var(--shadow-xs);
+  padding: var(--space-2);
+}
+
 /* 设置分组导航：和配置中心使用同一套视觉语言，后台看起来是一个系统。 */
 .settings-nav-item {
   position: relative;
@@ -1092,6 +1122,23 @@ onBeforeUnmount(() => {
 }
 .smtp-note-title { font-size: 12.5px; font-weight: 650; color: var(--text-dim); }
 .smtp-note-list { margin-top: 8px; display: flex; flex-direction: column; gap: 7px; }
+
+@media (min-width: 1024px) {
+  .settings-layout {
+    grid-template-columns: 232px minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+@media (max-width: 640px) {
+  .settings-page-actions {
+    width: 100%;
+  }
+
+  .settings-page-actions > * {
+    flex: 1;
+  }
+}
 .smtp-note-list li {
   position: relative;
   padding-left: 15px;

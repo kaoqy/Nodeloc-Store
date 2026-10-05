@@ -4,7 +4,7 @@ import AdminIcon from '../components/AdminIcon.vue'
 import AppDrawer from '../components/AppDrawer.vue'
 import DataTable, { type Column } from '../components/DataTable.vue'
 import FilterBar from '../components/FilterBar.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { adjustPoints, grantTransfer, listUsers, toggleActive } from '../api/users'
 import { errorMessage, money, roleMeta, when } from '../utils/format'
@@ -173,7 +173,16 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <PageHeader title="用户管理" description="账号状态、积分调整与直接转账都在这里。转账会把 NL 从商店的 NodeLoc 账户打给买家。" bordered />
+    <ManagementPage
+      title="用户管理"
+      description="账号状态、积分调整与直接转账都在这里。转账会把 NL 从商店的 NodeLoc 账户打给买家。"
+      eyebrow="客户与账号"
+      :metrics="[
+        { label: '用户总数', value: total, hint: '当前筛选结果' },
+        { label: '正常账号', value: users.filter((item) => item.is_active).length, hint: '本页可正常访问', tone: 'success' },
+        { label: '已绑定 NodeLoc', value: users.filter((item) => item.oauth_uid).length, hint: '本页已绑定账号', tone: 'accent' },
+      ]"
+    />
 
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 

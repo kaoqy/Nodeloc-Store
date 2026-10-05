@@ -279,7 +279,7 @@ onMounted(async () => {
           </div>
         </aside>
 
-        <div class="min-w-0">
+        <div class="catalog-content min-w-0">
           <div class="catalog-topbar">
             <div class="relative min-w-0 flex-1">
               <input v-model="keyword" type="search" class="input !pl-9" placeholder="搜索商品…" aria-label="搜索商品" />
@@ -292,6 +292,25 @@ onMounted(async () => {
               </select>
             </div>
             <button v-if="narrowed || sortBy !== 'default'" class="btn btn-quiet btn-sm" type="button" @click="resetFilters">清除筛选</button>
+          </div>
+
+          <div class="catalog-active-filters">
+            <span v-if="activeCategory !== ''" class="chip chip-active">
+              {{ categories.find((item) => item.id === activeCategory)?.name || '当前分类' }}
+              <button type="button" aria-label="清除分类筛选" @click="activeCategory = ''">×</button>
+            </span>
+            <span v-if="featuredOnly" class="chip chip-active">
+              店长推荐
+              <button type="button" aria-label="清除推荐筛选" @click="featuredOnly = false">×</button>
+            </span>
+            <span v-if="inStockOnly" class="chip chip-active">
+              仅看现货
+              <button type="button" aria-label="清除现货筛选" @click="inStockOnly = false">×</button>
+            </span>
+            <span v-if="keyword.trim()" class="chip chip-active">
+              “{{ keyword.trim() }}”
+              <button type="button" aria-label="清除关键词" @click="keyword = ''">×</button>
+            </span>
           </div>
 
           <div class="catalog-heading">
@@ -563,6 +582,41 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 10px;
   margin: 22px 0 16px;
+}
+
+.catalog-active-filters {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.catalog-active-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.catalog-active-filters .chip {
+  flex: 0 0 auto;
+  gap: 4px;
+  padding-block: 4px;
+  font-size: 12px;
+}
+
+.catalog-active-filters button {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: currentColor;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.catalog-active-filters button:hover {
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
 @media (min-width: 640px) {

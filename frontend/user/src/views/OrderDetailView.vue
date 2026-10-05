@@ -274,9 +274,9 @@ async function refreshDelivery() {
       <p v-if="notice" class="alert" :class="notice.badge" role="status">{{ notice.label }}</p>
 
       <section class="card order-overview">
-        <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="order-detail-head">
           <div class="min-w-0">
-            <p class="eyebrow">订单详情</p>
+            <p class="eyebrow">订单与交付</p>
             <div class="flex flex-wrap items-center gap-2">
               <h1 class="page-title mono mt-1.5 break-all">{{ order.order_no }}</h1>
               <button
@@ -288,7 +288,12 @@ async function refreshDelivery() {
               </button>
             </div>
           </div>
-          <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
+          <div class="order-detail-badges">
+            <span class="badge" :class="orderStatus(order.status).badge">{{ orderStatus(order.status).label }}</span>
+            <span class="badge" :class="fulfillmentStatus(order.fulfillment_status, order.status).badge">
+              {{ fulfillmentStatus(order.fulfillment_status, order.status).label }}
+            </span>
+          </div>
         </div>
 
         <div class="order-meta-grid">
@@ -501,6 +506,20 @@ async function refreshDelivery() {
 </template>
 
 <style scoped>
+.order-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.order-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .order-overview {
   border-top: 2px solid var(--accent-line);
 }

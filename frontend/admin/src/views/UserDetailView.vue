@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import WorkbenchHeader from '../components/WorkbenchHeader.vue'
 import { adjustPoints, getUser, grantTransfer, listUserTransfers, setRole, toggleActive, toggleAdmin } from '../api/users'
 import { errorMessage, money, roleMeta, transferStatus, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
@@ -180,28 +181,31 @@ onMounted(load)
     <button class="btn btn-secondary btn-sm mt-4" @click="router.push('/users')">返回用户列表</button>
   </section>
 
-  <section v-else class="space-y-5">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <div class="flex flex-wrap items-center gap-3">
-          <RouterLink to="/users" class="quiet text-xs hover:text-[var(--text)]">← 返回用户列表</RouterLink>
-          <RouterLink
-            v-if="canViewLogs"
-            :to="`/logs?actor=${user.id}`"
-            class="quiet text-xs hover:text-[var(--text)]"
-            title="只看这名成员在后台留下的操作记录"
-          >
-            查看其操作记录 →
-          </RouterLink>
-        </div>
-        <div class="mt-1.5 flex flex-wrap items-center gap-2.5">
-          <h2 class="page-title truncate">{{ user.username }}</h2>
+  <section v-else class="workbench-page">
+    <WorkbenchHeader
+      :title="user.username"
+      description="查看账号身份、角色、积分与 NodeLoc 绑定，并执行现有管理操作。"
+      eyebrow="用户详情"
+      back-to="/users"
+      back-label="返回用户列表"
+    >
+      <template #meta>
+        <div class="mt-2 flex flex-wrap items-center gap-2.5">
           <span class="badge" :class="current.badge">{{ current.label }}</span>
           <span class="badge" :class="user.is_active ? 'badge-success' : 'badge-danger'">
             {{ user.is_active ? '正常' : '已禁用' }}
           </span>
         </div>
-      </div>
+        <RouterLink
+          v-if="canViewLogs"
+          :to="`/logs?actor=${user.id}`"
+          class="quiet mt-2 inline-flex text-xs hover:text-[var(--text)]"
+          title="只看这名成员在后台留下的操作记录"
+        >
+          查看其操作记录 →
+        </RouterLink>
+      </template>
+      <template #actions>
       <button
         v-if="canManageUsers"
         class="btn btn-sm"
@@ -211,7 +215,8 @@ onMounted(load)
       >
         {{ user.is_active ? '禁用账号' : '启用账号' }}
       </button>
-    </div>
+      </template>
+    </WorkbenchHeader>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <div v-if="notice" class="alert alert-success" role="status">{{ notice }}</div>

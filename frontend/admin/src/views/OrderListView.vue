@@ -5,7 +5,7 @@ import AdminIcon from '../components/AdminIcon.vue'
 import AppDrawer from '../components/AppDrawer.vue'
 import DataTable, { type Column } from '../components/DataTable.vue'
 import FilterBar from '../components/FilterBar.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { listOrders, reconcileOrder, reconcilePendingOrders, exportOrders, type ReconcileReport } from '../api/orders'
 import { money, when, errorMessage } from '../utils/format'
@@ -206,10 +206,15 @@ onMounted(() => {
 
 <template>
   <section class="space-y-4">
-    <PageHeader
+    <ManagementPage
       title="订单管理"
       description="查看支付与发货状态、重试自动发货、人工补发或退款。批量查单会向 NodeLoc 核对待支付订单。"
-      bordered
+      eyebrow="交易履约"
+      :metrics="[
+        { label: '当前结果', value: total, hint: '当前筛选下的订单总数' },
+        { label: '未发货', value: orders.filter((item) => item.fulfillment_status !== 'delivered' && item.fulfillment_status !== 'completed').length, hint: '本页仍需处理的订单', tone: 'warning' },
+        { label: '待支付', value: orders.filter((item) => item.status === 'pending').length, hint: '本页待支付订单' },
+      ]"
     >
       <template #actions>
         <button class="btn btn-quiet btn-sm" :disabled="reconciling" @click="reconcile">
@@ -221,7 +226,7 @@ onMounted(() => {
           {{ exporting ? '导出中…' : '导出 CSV' }}
         </button>
       </template>
-    </PageHeader>
+    </ManagementPage>
 
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
     <FilterBar :count="total ? '共 ' + total + ' 笔订单' : ''">

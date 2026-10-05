@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import WorkbenchHeader from '../components/WorkbenchHeader.vue'
 import {
   getActivity,
   getActivityStats,
@@ -87,21 +88,21 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 class="page-title">{{ activity?.name || '活动数据' }}</h2>
-        <p class="quiet mt-1 text-xs">
-          {{ activity?.subtitle || '参与情况、优惠金额与操作日志' }}
-        </p>
-      </div>
-      <div class="flex gap-2">
+    <WorkbenchHeader
+      :title="activity?.name || '活动数据'"
+      :description="activity?.subtitle || '参与情况、优惠金额与操作日志'"
+      eyebrow="活动详情"
+      back-to="/activities"
+      back-label="返回活动列表"
+    >
+      <template #actions>
         <RouterLink to="/activities" class="btn btn-secondary btn-sm">返回列表</RouterLink>
         <RouterLink v-if="canManage" :to="'/activities/' + id + '/edit'" class="btn btn-secondary btn-sm">编辑活动</RouterLink>
         <button v-if="canManage" class="btn btn-primary btn-sm" :disabled="busy" @click="toggle">
           {{ activity?.status === 'running' ? '暂停活动' : '恢复上线' }}
         </button>
-      </div>
-    </div>
+      </template>
+    </WorkbenchHeader>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>

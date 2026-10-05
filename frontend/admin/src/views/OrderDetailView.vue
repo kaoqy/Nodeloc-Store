@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import WorkbenchHeader from '../components/WorkbenchHeader.vue'
 import { cancelOrder, deliverOrder, fulfillOrder, getOrder, reconcileOrder, refundOrder } from '../api/orders'
 import { errorMessage, fulfillmentStatus, money, orderStatus, providerStatus, reconcileMessage, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
@@ -166,16 +167,20 @@ onMounted(load)
   </section>
 
   <section v-else class="space-y-5">
-    <div class="flex flex-wrap items-start justify-between gap-4">
-      <div class="min-w-0">
-        <RouterLink to="/orders" class="quiet text-xs hover:text-[var(--text)]">← 返回订单列表</RouterLink>
-        <div class="mt-1.5 flex flex-wrap items-center gap-2.5">
-          <h2 class="page-title mono truncate">{{ order.order_no }}</h2>
+    <WorkbenchHeader
+      :title="order.order_no"
+      description="查看支付、交付与售后状态，所有金额和交易信息均以服务端记录为准。"
+      eyebrow="订单详情"
+      back-to="/orders"
+      back-label="返回订单列表"
+    >
+      <template #meta>
+        <div class="mt-2 flex flex-wrap items-center gap-2.5">
           <span class="badge" :class="status.badge">{{ status.label }}</span>
           <span class="badge" :class="fulfilment.badge">{{ fulfilment.label }}</span>
         </div>
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
+      </template>
+      <template #actions>
         <p v-if="!canManage" class="quiet max-w-56 text-right text-xs">
           当前账号只有查看订单的权限，需要处理本单请向店家申请「订单管理」。
         </p>
@@ -214,8 +219,8 @@ onMounted(load)
         >
           退款
         </button>
-      </div>
-    </div>
+      </template>
+    </WorkbenchHeader>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <div v-if="notice" class="alert alert-success" role="status">{{ notice }}</div>

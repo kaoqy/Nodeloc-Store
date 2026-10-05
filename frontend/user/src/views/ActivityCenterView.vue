@@ -64,10 +64,10 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
+  <div class="page-shell">
     <header>
       <p class="eyebrow">活动中心</p>
-      <h1 class="mt-2 text-2xl font-bold sm:text-3xl">正在进行的优惠</h1>
+      <h1 class="page-title mt-2">正在进行的优惠</h1>
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--text-dim)]">
         活动折扣在结算时由服务端按规则计算，优惠码在商品详情页或结算页填写。
         同一个订单默认取优惠力度最大的一项。
@@ -92,8 +92,8 @@ onMounted(load)
       <RouterLink to="/" class="btn btn-secondary btn-sm mt-6">去逛商品</RouterLink>
     </div>
 
-    <div v-else class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-      <article v-for="activity in activities" :key="activity.id" class="card space-y-3">
+    <div v-else class="activity-grid mt-8">
+      <article v-for="activity in activities" :key="activity.id" class="activity-card">
         <img
           v-if="activity.cover_image"
           :src="activity.cover_image"
@@ -124,3 +124,34 @@ onMounted(load)
     </div>
   </div>
 </template>
+
+<style scoped>
+.activity-grid {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.activity-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow: hidden;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: var(--shadow-xs);
+  padding: var(--space-4);
+  transition: border-color var(--fast), box-shadow var(--fast), transform 200ms var(--spring);
+}
+
+.activity-card:hover {
+  border-color: var(--stroke-hi);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.activity-card .btn {
+  margin-top: auto;
+}
+</style>

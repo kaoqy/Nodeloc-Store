@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AdminIcon from '../components/AdminIcon.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import PaginationFooter from '../components/PaginationFooter.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import TicketPanel from './support/TicketPanel.vue'
@@ -184,10 +184,15 @@ onMounted(() => {
 
 <template>
   <section class="space-y-4">
-    <PageHeader
+    <ManagementPage
       title="工单列表"
       description="买家提交的工单在这里处理：查看内容、回复、分派与流转，完整沟通记录一并保留。"
-      bordered
+      eyebrow="客服与工单"
+      :metrics="[
+        { label: '当前结果', value: total, hint: '当前筛选下的工单' },
+        { label: '待人工处理', value: stats?.pending_human ?? 0, hint: '需要人工跟进', tone: 'warning' },
+        { label: '解决率', value: stats ? Math.round(stats.resolve_rate * 100) + '%' : '—', hint: '当前工单解决情况', tone: 'success' },
+      ]"
     >
       <template #actions>
         <button class="btn btn-quiet btn-sm" :disabled="loading" @click="load">
@@ -195,32 +200,11 @@ onMounted(() => {
           {{ loading ? '刷新中…' : '刷新' }}
         </button>
       </template>
-    </PageHeader>
+    </ManagementPage>
 
     <p v-if="!canView" class="alert alert-warning" role="alert">当前账号没有工单查看权限。</p>
 
     <template v-else>
-      <!-- 统计卡：数字与该筛选下的列表条数一致 -->
-      <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <RouterLink to="/service?attention=pending_human" class="todo-card">
-          <span class="min-w-0 flex-1">
-            <span class="quiet block text-xs">待人工处理</span>
-            <span class="nums accent-text mt-1 block text-xl font-bold">{{ stats?.pending_human ?? 0 }}</span>
-          </span>
-          <AdminIcon name="chevronRight" :size="15" class="text-[var(--text-quiet)]" />
-        </RouterLink>
-        <div class="card-quiet">
-          <p class="quiet text-xs">解决率</p>
-          <p class="nums mt-1 text-xl font-bold">{{ stats ? Math.round(stats.resolve_rate * 100) : 0 }}%</p>
-        </div>
-        <div class="card-quiet">
-          <p class="quiet text-xs">满意度</p>
-          <p class="nums mt-1 text-xl font-bold">
-            {{ stats && stats.satisfaction_avg > 0 ? stats.satisfaction_avg.toFixed(1) : '—' }}
-          </p>
-        </div>
-      </div>
-
       <div class="flex flex-wrap items-center gap-2">
         <button
           v-for="item in QUICK"

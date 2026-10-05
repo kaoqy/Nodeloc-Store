@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import WorkbenchHeader from '../components/WorkbenchHeader.vue'
 import { createProduct, getProduct, updateProduct } from '../api/products'
 import { listCategories } from '../api/categories'
 import ImageField from '../components/ImageField.vue'
@@ -162,19 +163,21 @@ onMounted(load)
     </div>
   </section>
 
-  <section v-else class="space-y-5">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <RouterLink to="/products" class="quiet text-xs hover:text-[var(--text)]">← 返回商品列表</RouterLink>
-        <h2 class="page-title mt-1.5">{{ isEdit ? '编辑商品' : '新建商品' }}</h2>
-      </div>
-      <div class="flex items-center gap-2">
+  <section v-else class="workbench-page">
+    <WorkbenchHeader
+      :title="isEdit ? '编辑商品' : '新建商品'"
+      description="按基本信息、价格库存、购买表单与发布设置维护商品。"
+      eyebrow="商品管理"
+      back-to="/products"
+      back-label="返回商品列表"
+    >
+      <template #actions>
         <button class="btn btn-secondary btn-sm" @click="router.push('/products')">取消</button>
         <button class="btn btn-primary btn-sm" :disabled="saving || invalid" @click="save">
           {{ saving ? '保存中…' : '保存商品' }}
         </button>
-      </div>
-    </div>
+      </template>
+    </WorkbenchHeader>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-else-if="invalidPriceHint" class="alert alert-warning" role="status">{{ invalidPriceHint }}</p>

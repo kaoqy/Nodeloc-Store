@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import AdminIcon from '../components/AdminIcon.vue'
 import DataTable, { type Column } from '../components/DataTable.vue'
 import FilterBar from '../components/FilterBar.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import {
   activityStatusOptions,
@@ -149,10 +149,15 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <PageHeader
+    <ManagementPage
       title="活动营销"
       description="限时折扣、满减、领券等活动在这里创建。下单金额一律由服务端按规则计算。"
-      bordered
+      eyebrow="营销"
+      :metrics="[
+        { label: '活动总数', value: overview?.total ?? total, hint: '当前全部活动' },
+        { label: '进行中', value: overview?.running ?? 0, hint: '正在对买家生效', tone: 'success' },
+        { label: '累计优惠', value: money(overview?.discounts ?? 0), hint: '活动参与者优惠总额', tone: 'accent' },
+      ]"
     >
       <template #actions>
         <RouterLink v-if="canManage" to="/activities/new" class="btn btn-primary btn-sm">
@@ -160,26 +165,7 @@ onMounted(load)
           新建活动
         </RouterLink>
       </template>
-    </PageHeader>
-
-    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <div class="card-quiet">
-        <p class="quiet text-xs">活动总数</p>
-        <p class="nums mt-1 text-xl font-bold">{{ overview?.total ?? 0 }}</p>
-      </div>
-      <div class="card-quiet">
-        <p class="quiet text-xs">进行中</p>
-        <p class="nums accent-text mt-1 text-xl font-bold">{{ overview?.running ?? 0 }}</p>
-      </div>
-      <div class="card-quiet">
-        <p class="quiet text-xs">参与人数</p>
-        <p class="nums mt-1 text-xl font-bold">{{ overview?.participants ?? 0 }}</p>
-      </div>
-      <div class="card-quiet">
-        <p class="quiet text-xs">累计优惠</p>
-        <p class="nums mt-1 text-xl font-bold">{{ money(overview?.discounts ?? 0) }}</p>
-      </div>
-    </div>
+    </ManagementPage>
 
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 

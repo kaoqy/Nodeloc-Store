@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AdminIcon from '../components/AdminIcon.vue'
 import DataTable, { type Column } from '../components/DataTable.vue'
 import FilterBar from '../components/FilterBar.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import { exportAuditLogs, listAuditActions, listAuditLogs } from '../api/logs'
 import { errorMessage, when } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
@@ -165,10 +165,15 @@ onMounted(async () => {
 
 <template>
   <section class="space-y-4">
-    <PageHeader
+    <ManagementPage
       title="操作日志"
       description="后台的每一次写操作都记在这里：操作者、对象、变更内容与来源 IP。"
-      bordered
+      eyebrow="安全与审计"
+      :metrics="[
+        { label: '记录总数', value: total, hint: '当前筛选结果' },
+        { label: '本页操作', value: logs.length, hint: '当前页日志条数' },
+       { label: '来源 IP', value: logs.filter((item) => item.ip).length, hint: '本页可追溯到来源' },
+      ]"
     >
       <template #actions>
         <button v-if="auth.allows('logs', 'manage')" class="btn btn-quiet btn-sm" :disabled="busy" @click="download">
@@ -180,7 +185,7 @@ onMounted(async () => {
           {{ loading ? '刷新中…' : '刷新' }}
         </button>
       </template>
-    </PageHeader>
+    </ManagementPage>
 
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 

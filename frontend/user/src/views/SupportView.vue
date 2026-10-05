@@ -255,7 +255,7 @@ onMounted(() => {
 
     <!-- 帮助文档 -->
     <section v-if="tab === 'help'" class="mt-5 grid gap-3">
-      <article v-for="item in helpSections" :key="item.id" class="card overflow-hidden !p-0">
+      <article v-for="item in helpSections" :key="item.id" class="surface-panel overflow-hidden">
         <button
           class="flex min-h-14 w-full items-center justify-between gap-4 px-5 py-4 text-left font-semibold transition-colors hover:bg-[var(--surface-hi)]"
           type="button"
@@ -351,7 +351,12 @@ onMounted(() => {
             </div>
 
             <div class="card space-y-3">
-              <article v-for="message in detail.messages" :key="message.id" class="card-quiet">
+              <article
+                v-for="message in detail.messages"
+                :key="message.id"
+                class="ticket-message"
+                :class="message.sender_type === 'user' ? 'ticket-message-user' : 'ticket-message-support'"
+              >
                 <div class="flex items-center gap-2 text-xs">
                   <span :class="message.sender_type === 'user' ? 'badge-warning' : message.sender_type === 'ai' ? 'badge-info' : 'badge-success'">
                     {{ message.sender_type === 'user' ? '我' : message.sender_type === 'ai' ? '历史记录' : message.sender_type === 'agent' ? '人工客服' : '系统' }}
@@ -423,6 +428,21 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.ticket-message {
+  border: 1px solid var(--stroke-quiet);
+  border-radius: var(--radius-lg);
+  padding: 13px 15px;
+}
+
+.ticket-message-user {
+  background: color-mix(in srgb, var(--accent-soft) 46%, var(--surface));
+  border-color: var(--accent-line);
+}
+
+.ticket-message-support {
+  background: color-mix(in srgb, var(--surface-sunken) 84%, var(--surface));
+}
+
 .ticket-center-head {
   display: flex;
   flex-wrap: wrap;

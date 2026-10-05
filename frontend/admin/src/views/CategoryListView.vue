@@ -4,7 +4,7 @@ import AdminIcon from '../components/AdminIcon.vue'
 import AppDrawer from '../components/AppDrawer.vue'
 import DataTable, { type Column } from '../components/DataTable.vue'
 import FilterBar from '../components/FilterBar.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { createCategory, deleteCategory, listCategories, updateCategory } from '../api/categories'
 import { errorMessage } from '../utils/format'
@@ -108,14 +108,23 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <PageHeader title="分类管理" description="分类决定前台筛选入口与商品归属。" bordered>
+    <ManagementPage
+      title="分类管理"
+      description="分类决定前台筛选入口与商品归属。"
+      eyebrow="商品目录"
+      :metrics="[
+        { label: '分类总数', value: rows.length, hint: '当前全部分类' },
+        { label: '前台可见', value: rows.filter((item) => item.is_visible).length, hint: '买家可浏览的分类', tone: 'success' },
+        { label: '已隐藏', value: rows.filter((item) => !item.is_visible).length, hint: '暂不对买家展示' },
+      ]"
+    >
       <template #actions>
         <button v-if="canManage" class="btn btn-primary btn-sm" @click="startCreate">
           <AdminIcon name="plus" :size="14" />
           新建分类
         </button>
       </template>
-    </PageHeader>
+    </ManagementPage>
 
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 

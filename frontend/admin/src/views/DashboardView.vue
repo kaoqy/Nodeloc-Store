@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AdminIcon from '../components/AdminIcon.vue'
 import AppDrawer from '../components/AppDrawer.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { getStats } from '../api/system'
 import {
@@ -213,10 +213,9 @@ onUnmounted(() => {
 
 <template>
   <section class="space-y-5">
-    <PageHeader
+    <ManagementPage
       title="总览"
       description="先看今天要处理的事，再看生意怎么样。卡片上的每个数字都可以点开对应的列表。"
-      bordered
     >
       <template #actions>
         <div class="flex flex-wrap items-center gap-1.5">
@@ -247,7 +246,7 @@ onUnmounted(() => {
           <span v-if="updatedAt" class="hint mono hidden sm:inline">更新于 {{ updatedAt }}</span>
         </div>
       </template>
-    </PageHeader>
+    </ManagementPage>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
 

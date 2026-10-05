@@ -223,47 +223,47 @@ onMounted(() => {
         <li v-for="order in orders" :key="order.id">
           <RouterLink
             :to="`/orders/${order.order_no}`"
-            class="card order-row flex items-center gap-4 !p-4"
+            class="order-card"
           >
-            <div class="order-thumb">
-              <img
-                v-if="order.product?.image_path"
-                :src="order.product.image_path"
-                :alt="order.product.name"
-                class="size-full object-cover"
-              />
-              <span v-else class="mono text-xs text-[var(--text-quiet)]">
-                {{ (order.product?.name || 'NL').slice(0, 2).toUpperCase() }}
-              </span>
-            </div>
-
-            <div class="order-main min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <h2 class="truncate text-[15px] font-semibold">
-                  {{ order.product?.name || '数字商品' }}
-                </h2>
-                <span v-if="order.quantity > 1" class="badge badge-neutral nums">×{{ order.quantity }}</span>
-              </div>
-              <p class="mono mt-1 truncate text-xs text-[var(--text-quiet)]">{{ order.order_no }}</p>
-              <p class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--text-quiet)]">
-                <span class="nums">{{ when(order.created_at) }}</span>
-                <!-- The right-hand badge already carries the order status, so the
-                     row says only what that badge cannot: how far an unpaid order
-                     actually got, or how delivery is going once it is paid. -->
-                <span v-if="order.status === 'pending'" class="badge" :class="order.transaction_id ? 'badge-warning' : 'badge-neutral'">
-                  {{ order.transaction_id ? '已发起支付 · 待核实' : '尚未付款' }}
-                </span>
-                <span v-else-if="order.fulfillment_status !== 'delivered' && order.fulfillment_status !== 'completed'" class="badge" :class="fulfillmentStatus(order.fulfillment_status, order.status).badge">
-                  {{ fulfillmentStatus(order.fulfillment_status, order.status).label }}
-                </span>
-              </p>
-            </div>
-
-            <div class="order-summary shrink-0 text-right">
-              <p class="nums text-[15px] font-bold">{{ money(order.total_amount) }}</p>
-              <span class="mt-1.5 badge" :class="orderStatus(order.status).badge">
+            <div class="order-card-head">
+              <p class="mono order-card-no">{{ order.order_no }}</p>
+              <span class="badge" :class="orderStatus(order.status).badge">
                 {{ orderStatus(order.status).label }}
               </span>
+            </div>
+            <div class="order-card-main">
+              <div class="order-thumb">
+                <img
+                  v-if="order.product?.image_path"
+                  :src="order.product.image_path"
+                  :alt="order.product.name"
+                  class="size-full object-cover"
+                />
+                <span v-else class="mono text-xs text-[var(--text-quiet)]">
+                  {{ (order.product?.name || 'NL').slice(0, 2).toUpperCase() }}
+                </span>
+              </div>
+              <div class="order-main min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <h2 class="truncate text-[15px] font-semibold">
+                    {{ order.product?.name || '数字商品' }}
+                  </h2>
+                  <span v-if="order.quantity > 1" class="badge badge-neutral nums">×{{ order.quantity }}</span>
+                </div>
+                <p class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--text-quiet)]">
+                  <span class="nums">{{ when(order.created_at) }}</span>
+                  <span v-if="order.status === 'pending'" class="badge" :class="order.transaction_id ? 'badge-warning' : 'badge-neutral'">
+                    {{ order.transaction_id ? '已发起支付 · 待核实' : '尚未付款' }}
+                  </span>
+                  <span v-else-if="order.fulfillment_status !== 'delivered' && order.fulfillment_status !== 'completed'" class="badge" :class="fulfillmentStatus(order.fulfillment_status, order.status).badge">
+                    {{ fulfillmentStatus(order.fulfillment_status, order.status).label }}
+                  </span>
+                </p>
+              </div>
+              <div class="order-summary shrink-0 text-right">
+                <p class="nums text-[16px] font-bold">{{ money(order.total_amount) }}</p>
+                <span class="order-card-enter">查看详情 →</span>
+              </div>
             </div>
           </RouterLink>
         </li>
@@ -289,6 +289,74 @@ onMounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.order-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow: hidden;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: var(--shadow-xs);
+  padding: var(--space-4);
+  transition: border-color var(--fast), box-shadow var(--fast), transform 200ms var(--spring);
+}
+
+.order-card:hover {
+  border-color: var(--stroke-hi);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.order-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--stroke-quiet);
+  padding-bottom: var(--space-2);
+}
+
+.order-card-no {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-quiet);
+  font-size: var(--text-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-card-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.order-card-enter {
+  color: var(--accent);
+  font-size: var(--text-caption);
+  font-weight: 650;
+}
+
+@media (max-width: 640px) {
+  .order-card-main {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .order-summary {
+    display: flex;
+    width: 100%;
+    align-items: baseline;
+    justify-content: space-between;
+    border-top: 1px solid var(--stroke-quiet);
+    padding-top: var(--space-2);
+    text-align: left;
+  }
+}
+</style>
 
 <style scoped>
 .order-toolbar {

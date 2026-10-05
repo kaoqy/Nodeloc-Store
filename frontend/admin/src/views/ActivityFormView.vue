@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import WorkbenchHeader from '../components/WorkbenchHeader.vue'
 import {
   activityTypeOptions,
   createActivity,
@@ -428,19 +429,21 @@ onMounted(load)
 
 <template>
   <section class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 class="page-title">{{ editingID ? '编辑活动' : '新建活动' }}</h2>
-        <p class="quiet mt-1 text-xs">规则由后端计算，买家端看到的价格一律以服务端为准。</p>
-      </div>
-      <div class="flex gap-2">
+    <WorkbenchHeader
+      :title="editingID ? '编辑活动' : '新建活动'"
+      description="规则由后端计算，买家端看到的价格一律以服务端为准。"
+      eyebrow="活动营销"
+      back-to="/activities"
+      back-label="返回活动列表"
+    >
+      <template #actions>
         <RouterLink to="/activities" class="btn btn-secondary btn-sm">返回列表</RouterLink>
         <button class="btn btn-secondary btn-sm" :disabled="saving" @click="save('draft')">保存草稿</button>
         <button class="btn btn-primary btn-sm" :disabled="saving" @click="save('running')">
           {{ saving ? '保存中…' : '保存并上线' }}
         </button>
-      </div>
-    </div>
+      </template>
+    </WorkbenchHeader>
 
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>

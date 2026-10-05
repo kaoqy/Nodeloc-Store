@@ -5,7 +5,7 @@ import AdminIcon from '../components/AdminIcon.vue'
 import AppDrawer from '../components/AppDrawer.vue'
 import DataTable, { type Column } from '../components/DataTable.vue'
 import FilterBar from '../components/FilterBar.vue'
-import PageHeader from '../components/PageHeader.vue'
+import ManagementPage from '../components/ManagementPage.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import {
   alertLowStock,
@@ -289,10 +289,15 @@ onMounted(async () => {
 
 <template>
   <section class="space-y-4">
-    <PageHeader
+    <ManagementPage
       title="卡密库存"
       description="导入或生成卡密、按状态筛选与批量操作。补货后等待中的订单会自动发货。"
-      bordered
+      eyebrow="库存与交付"
+      :metrics="[
+        { label: '当前结果', value: total, hint: '筛选后的卡密总数' },
+        { label: '库存告急', value: lowStock.length, hint: '需要补货的商品', tone: 'warning' },
+        { label: '已选', value: selected.length, hint: '可批量处理的卡密' },
+      ]"
     >
       <template #actions>
         <button v-if="canManage" class="btn btn-primary btn-sm" @click="showImport = true; importProduct = productId">
@@ -307,7 +312,7 @@ onMounted(async () => {
           导出
         </button>
       </template>
-    </PageHeader>
+    </ManagementPage>
 
     <!-- 欠货提示：只有真的欠着买家才出现 -->
     <div v-if="lowStock.length" class="card space-y-3">
