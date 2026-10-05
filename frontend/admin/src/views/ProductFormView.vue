@@ -51,7 +51,19 @@ const form = reactive({
 const isCard = computed(() => form.product_type === 'card')
 const isNewAPI = computed(() => form.delivery_channel === 'new_api')
 const isManual = computed(() => !isCard.value && !isNewAPI.value)
-const invalid = computed(() => !form.name.trim() || !form.slug.trim() || Number(form.price) < 0)
+const invalid = computed(() => {
+  if (!form.name.trim() || !form.slug.trim()) return true
+  // The shop charges product.price × quantity through the existing order rule,
+  // so every sellable product — New-API included — must carry a positive price.
+  return !Number.isInteger(Number(form.price)) || Number(form.price) <= 0
+})
+const priceError = computed(() => {
+  if (!form.name.trim() || !form.slug.trim()) return ''
+  if (!Number.isInteger(Number(form.price)) || Number(form.price) <= 0) {
+    return '请填写大于 0 的整数售价（NL）；下单金额按“售价 × 数量”由服务端计算。'
+  }
+  return ''
+})
 const topupError = computed(() => {
   if (!isNewAPI.value) return ''
   const min = Number(form.min_topup_amount)
@@ -96,7 +108,13 @@ function payload(): Partial<Product> {
     is_archived: form.is_archived,
     sort_order: Number(form.sort_order) || 0,
     category_id: form.category_id,
-    form_schema: JSON.stringify(form.form_schema.filter((field) => field.key.trim() && field.label.trim())),
+    // New-API buyers only enter the top-up amount, which the provider
+    // contributes; a product-level form would add inputs this channel must not
+    // ask for. The in-memory list is kept so switching back to card/manual
+    // restores the fields that were already configured.
+    form_schema: isNewAPI.value
+      ? '[]'
+      : JSON.stringify(form.form_schema.filter((field) => field.key.trim() && field.label.trim())),
   }
 }
 
@@ -177,6 +195,7 @@ async function load() {
 async function save() {
   if (formInvalid.value) {
     if (topupError.value) error.value = topupError.value
+    else if (priceError.value) error.value = priceError.value
     return
   }
   if (invalidPriceHint.value) {
@@ -305,12 +324,22 @@ onMounted(load)
           <h3 class="mb-4 text-sm font-semibold">{{ isNewAPI ? '价格与充值额度' : '价格与库存' }}</h3>
           <div class="grid gap-4 sm:grid-cols-2">
             <div>
-              <label class="label" for="p-price">{{ isNewAPI ? '商品单价（NL，可选）' : '售价（NL）*' }}</label>
-              <input id="p-price" v-model.number="form.price" type="number" min="0" step="1" class="input nums" />
+              <label class="label" for="p-price">售价（NL）*</label>
+              <input
+                id="p-price"
+                v-model.number="form.price"
+                type="number"
+                min="1"
+                step="1"
+                class="input nums"
+                :class="{ 'input-error': Boolean(priceError) }"
+                :aria-invalid="Boolean(priceError)"
+              />
               <p v-if="isNewAPI" class="hint mt-1.5">
-                金额按现有规则「商品单价 × 数量」由服务端计算，充值额度只用于换算 quota，两者单位不同。
-                系统目前没有「充值额度 × 汇率 = 金额」的计价规则；未填写单价时商品可以保存，但买家无法下单。
+                金额按现有规则「售价 × 购买数量」由服务端计算；充值额度只用于换算 quota，两者单位不同。
               </p>
+              <p v-else class="hint mt-1.5">下单金额按“售价 × 数量”由服务端计算。</p>
+              <p v-if="priceError" class="field-error" role="alert">{{ priceError }}</p>
             </div>
             <div>
               <label class="label" for="p-original">划线原价（可选，NL）</label>
@@ -365,7 +394,7 @@ onMounted(load)
           </div>
         </div>
 
-        <div class="card">
+        <div v-if="!isNewAPI" class="card">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 class="text-sm font-semibold">购买表单字段</h3>

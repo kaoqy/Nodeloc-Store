@@ -34,6 +34,27 @@ func TestNewAPIKeyIsThirteenLowercaseAlphanumeric(t *testing.T) {
 	}
 }
 
+// TestNewAPIChannelExposesOnlyTheAmountField pins the field contract: the
+// New-API channel asks the buyer for exactly one thing, the top-up amount, and
+// never for an account, username or any other channel-specific input.
+func TestNewAPIChannelExposesOnlyTheAmountField(t *testing.T) {
+	manifest := NewNewAPIRedemption(nil).Manifest()
+	if len(manifest.FormSchema) != 1 {
+		t.Fatalf("New-API exposes %d form fields, want exactly 1", len(manifest.FormSchema))
+	}
+	field := manifest.FormSchema[0]
+	if field.Key != "nl_amount" || field.Type != "number" || !field.Required {
+		t.Fatalf("New-API form field = %+v, want a required number nl_amount", field)
+	}
+	for _, banned := range []string{"account", "username", "user_id", "nl_account"} {
+		for _, candidate := range manifest.FormSchema {
+			if strings.Contains(candidate.Key, banned) {
+				t.Fatalf("New-API must not ask for %q (field %q)", banned, candidate.Key)
+			}
+		}
+	}
+}
+
 func TestNewAPIRequestCarriesOnlyKeyAndQuota(t *testing.T) {
 	var gotBody string
 	var gotAuth string

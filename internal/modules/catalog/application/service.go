@@ -1140,6 +1140,13 @@ func normalizeProduct(product *domain.Product) error {
 		if product.MinTopupAmount > product.MaxTopupAmount {
 			return fmt.Errorf("%w: New-API 商品单次最少充值额度不能大于最多充值额度。", domain.ErrInvalidInput)
 		}
+		// The order flow charges the existing product price (price × quantity);
+		// this channel has no amount→price rule of its own. A zero price would
+		// save fine here and then fail every checkout with a vague "not
+		// purchasable", so refuse it at the source with a message naming the fix.
+		if product.Price <= 0 {
+			return fmt.Errorf("%w: New-API 商品需要填写大于 0 的售价（NL），下单金额按售价 × 数量计算。", domain.ErrInvalidInput)
+		}
 		return nil
 	case domain.DeliveryChannelCard, domain.DeliveryChannelManual:
 		// fallthrough to the existing product_type checks below

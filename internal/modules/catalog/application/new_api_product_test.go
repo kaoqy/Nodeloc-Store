@@ -67,6 +67,20 @@ func TestNewAPIProductRejectsMissingBounds(t *testing.T) {
 	}
 }
 
+// A New-API product with no price would save here and then fail every checkout
+// with a vague "not purchasable"; the channel has no amount→price rule, so the
+// save must refuse it up front and name the fix.
+func TestNewAPIProductRejectsZeroPrice(t *testing.T) {
+	repo := &restockProducts{}
+	service := newPatchService(repo)
+	product := newAPIProduct()
+	product.Price = 0
+	err := service.CreateProduct(context.Background(), product)
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("zero-price New-API product returned %v, want ErrInvalidInput", err)
+	}
+}
+
 func TestCardProductClearsTopupBounds(t *testing.T) {
 	repo := &restockProducts{}
 	service := newPatchService(repo)

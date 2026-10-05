@@ -61,14 +61,9 @@ const limit = computed(() => {
 })
 
 const soldOut = computed(() => limit.value === 0)
-// A New-API product with no price has no defined amount to charge, so the shop
-// has not finished setting it up. The checkout refuses it server-side; the page
-// says so instead of showing 0 NL.
-const pricingUnavailable = computed(() => isNewAPIDelivery.value && unitPrice.value <= 0)
 const buyLabel = computed(() => {
   if (!site.paymentsEnabled) return '本店暂停收款'
   if (soldOut.value) return '暂时缺货'
-  if (pricingUnavailable.value) return '暂未开放购买'
   if (submittingPhase.value === 'order') return '正在创建订单…'
   if (submittingPhase.value === 'payment') return '正在打开支付…'
   if (submitting.value) return '处理中…'
@@ -311,10 +306,6 @@ async function purchase() {
   const item = product.value
   if (!item || submitting.value) return
   if (!site.paymentsEnabled) return
-  if (pricingUnavailable.value) {
-    error.value = '这个商品还没有设置可购买的单价，暂时无法下单。'
-    return
-  }
   if (unpaidOrderNo.value) {
     // 刚才那一单还挂在这里。主按钮再点一次不该再开一张新单——买家会以为试第二次
     // 是无害的，而两家店里会同时躺着两笔待付款，其中一笔可能被付掉两次。
@@ -586,7 +577,7 @@ watch(
         <div class="my-5 divider" />
 
         <form class="space-y-5" novalidate @submit.prevent="purchase">
-          <div class="flex items-center justify-between gap-3">
+          <div v-if="!isNewAPIDelivery" class="flex items-center justify-between gap-3">
             <span class="label !mb-0">数量</span>
             <div class="stepper">
               <button type="button" :disabled="quantity <= 1 || soldOut" aria-label="减少数量" @click="step(-1)">−</button>
@@ -784,7 +775,10 @@ watch(
               <span class="min-w-0 truncate text-right font-semibold">{{ product.name }}</span>
             </div>
             <div class="flex items-baseline justify-between text-[var(--text-dim)]">
-              <span>商品原价 <span class="quiet">× {{ quantity }}</span></span>
+              <span>
+                {{ isNewAPIDelivery ? '商品售价' : '商品原价' }}
+                <span v-if="!isNewAPIDelivery" class="quiet">× {{ quantity }}</span>
+              </span>
               <span class="nums">{{ money(wasPrice > 0 ? wasPrice * quantity : gross) }}</span>
             </div>
             <div v-if="activitySaving > 0" class="flex items-baseline justify-between text-[var(--success)]">
