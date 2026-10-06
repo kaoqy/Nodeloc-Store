@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -111,37 +110,9 @@ func TestNewAPIProductPipelineWithRealModules(t *testing.T) {
 	)
 	paymentService.SetPluginDeliverer(bridge)
 
-	// A brand-new New-API product carries no price. The shop has no rule that
-	// turns a top-up amount into a chargeable amount, so checkout must refuse it
-	// with the specific missing-rule error rather than "product unavailable",
-	// and must not create an order.
-	_, err = paymentService.CreateOrder(context.Background(), CreateOrderInput{
-		UserID:     7,
-		ProductID:  product.ID,
-		Slug:       product.Slug,
-		Quantity:   1,
-		FormValues: map[string]string{"nl_amount": "50"},
-	})
-	if !errors.Is(err, ErrNewAPIPricingRuleMissing) {
-		t.Fatalf("price-less New-API checkout returned %v, want ErrNewAPIPricingRuleMissing", err)
-	}
-	var orderCount int64
-	if err := db.Model(&models.Order{}).Where("product_id = ?", product.ID).Count(&orderCount).Error; err != nil {
-		t.Fatalf("count orders: %v", err)
-	}
-	if orderCount != 0 {
-		t.Fatalf("a missing-pricing checkout created %d orders, want 0", orderCount)
-	}
-
-	// With a legacy price set, the same product orders and stores the amount.
-	stored, err := catalogService.GetProduct(context.Background(), product.ID)
-	if err != nil {
-		t.Fatalf("reload product: %v", err)
-	}
-	stored.Price = 5
-	if _, err := catalogService.UpdateProduct(context.Background(), stored.ID, stored); err != nil {
-		t.Fatalf("set legacy price: %v", err)
-	}
+	// A New-API product carries no product price: the buyer pays exactly the NL
+	// amount they entered, so the order must succeed and store that amount as
+	// both the top-up and the chargeable total.
 	order, err := paymentService.CreateOrder(context.Background(), CreateOrderInput{
 		UserID:     7,
 		ProductID:  product.ID,
@@ -154,6 +125,9 @@ func TestNewAPIProductPipelineWithRealModules(t *testing.T) {
 	}
 	if order.TopupAmount != 50 || order.ProductID != product.ID {
 		t.Fatalf("order = %+v, want product %d topup 50", order, product.ID)
+	}
+	if order.TotalAmount != 50 || order.UnitPrice != 50 {
+		t.Fatalf("order priced %d x %d, want 50 x 1 (the entered NL)", order.UnitPrice, order.Quantity)
 	}
 
 	// The channel must accept only the two amount bounds and must not require any

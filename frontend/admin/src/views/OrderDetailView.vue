@@ -245,11 +245,9 @@ onMounted(load)
       <div class="card !p-4">
         <p class="eyebrow">金额</p>
         <template v-if="order.product?.delivery_channel === 'new_api'">
-          <p class="nums mt-2 text-xl font-bold accent-text">
-            {{ order.topup_amount ? order.topup_amount + ' 额度' : '额度型商品' }}
-          </p>
+          <p class="nums mt-2 text-xl font-bold accent-text">{{ money(order.total_amount) }}</p>
           <p class="quiet mt-1 text-xs">
-            额度型订单<template v-if="order.topup_amount"> · 本次充值额度 {{ order.topup_amount }}</template>
+            额度型订单<template v-if="order.topup_amount"> · 本次充值额度 {{ order.topup_amount }} NL</template>
           </p>
         </template>
         <template v-else>

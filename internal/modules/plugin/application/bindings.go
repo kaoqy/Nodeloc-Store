@@ -220,6 +220,11 @@ type Fulfillability struct {
 	MappingValue string               `json:"mapping_value,omitempty"`
 	Options      []string             `json:"options,omitempty"`
 	FormSchema   []contract.FormField `json:"form_schema,omitempty"`
+	// NLToUSD is the shop's public NL→USD rate for the amount-type channel. It
+	// is not a credential: showing it lets the product page state the rate the
+	// server will use, so the buyer can see how the top-up becomes a redemption
+	// amount instead of guessing.
+	NLToUSD string `json:"nl_usd_rate,omitempty"`
 	// DeliveryNote is a safe, non-secret explanation of what will be delivered.
 	DeliveryNote string `json:"delivery_note,omitempty"`
 }
@@ -253,6 +258,11 @@ func (s *Service) DescribeProduct(ctx context.Context, productID uint) (*Fulfill
 	}
 	if plugin.Key == "new-api-redemption-v1" {
 		describe.DeliveryNote = "付款后创建 New-API 兑换码交给买家；买家需自行到 New-API 平台兑换，系统不会自动充值到账户。"
+		if s.runtime != nil {
+			if settings, _, err := s.runtime.NewAPIConfig(ctx); err == nil {
+				describe.NLToUSD = strings.TrimSpace(settings["nl_usd_rate"])
+			}
+		}
 	}
 	// New-API needs no mapping choice: the provider contributes its own amount
 	// field and the buyer enters the value. Requiring a non-empty binding value

@@ -208,7 +208,8 @@ onMounted(async () => {
             选好商品，<span class="accent-text">支付后自动交付</span>
           </h1>
           <p class="mt-3 text-sm leading-relaxed text-[var(--text-dim)] sm:text-[15px]">
-            使用 NodeLoc 账号登录即可购买。卡密在付款确认后自动发放，人工交付商品会进入发货队列，进度同步到订单详情。
+            使用 NodeLoc 账号登录即可购买。卡密在付款确认后自动发放，额度型商品按你填写的充值额度下单并在付款后生成兑换码，
+            人工交付商品会进入发货队列，进度都会同步到订单详情。
           </p>
           <div class="hero-actions">
             <a href="#catalog" class="btn btn-primary">浏览商品</a>
@@ -216,7 +217,7 @@ onMounted(async () => {
           <ul class="hero-points">
             <li>NodeLoc 授权登录</li>
             <li>支付结果服务端核实</li>
-            <li>订单与交付记录可查</li>
+            <li>卡密 / 兑换码 / 人工交付</li>
           </ul>
         </div>
 

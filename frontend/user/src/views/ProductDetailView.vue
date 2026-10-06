@@ -72,7 +72,12 @@ const buyLabel = computed(() => {
 })
 // 活动价是商品级的基础价：服务端在商品接口里算好活动后的单价，
 // 优惠码再叠加在这之上。没有活动时 activity_price 为空，退回正常售价。
-const unitPrice = computed(() => product.value?.activity_price || product.value?.price || 0)
+// 普通商品按售价（有活动优先活动价）计算；New-API 是额度型商品，没有售价，
+// 单价就是用户本次填写的充值额度（单位 NL）。服务端以同一口径落库与收费。
+const unitPrice = computed(() => {
+  if (isNewAPIDelivery.value) return nlAmount.value
+  return product.value?.activity_price || product.value?.price || 0
+})
 const activitySaving = computed(() => Number(product.value?.activity_saving || 0))
 // 划线价只保留一条：有活动时是活动前售价，否则是店家标的原价。
 // 两个都显示会让买家看到两个「原价」，不知道该信哪个。
@@ -102,6 +107,13 @@ const nlAmount = computed(() => {
 const topupRangeLabel = computed(() => {
   if (!isNewAPIDelivery.value || topupMin.value <= 0 || topupMax.value <= 0) return ''
   return `${topupMin.value} – ${topupMax.value}`
+})
+// 店铺的 NL→美元汇率（公开非敏感）。用于向买家说明“填写的额度如何换算成
+// 兑换码额度”，具体换算由服务端完成，这里只做展示。
+const nlToUSD = computed(() => {
+  const raw = String(pluginDescriptor.value?.nl_usd_rate || '').trim()
+  const value = Number(raw)
+  return raw && Number.isFinite(value) && value > 0 ? raw : ''
 })
 
 /**
@@ -602,6 +614,9 @@ watch(
             <p v-if="topupRangeLabel" class="hint mt-2">
               本商品单次充值额度：<span class="nums font-semibold">{{ topupRangeLabel }}</span>。
             </p>
+            <p v-if="nlToUSD" class="hint mt-1">
+              本站汇率：<span class="nums font-semibold">1 NL = {{ nlToUSD }} 美元</span>（服务端按此换算兑换额度）。
+            </p>
           </div>
 
           <div v-if="product.form_schema?.length" class="space-y-4">
@@ -776,8 +791,8 @@ watch(
               <span class="nums">{{ nlAmount > 0 ? nlAmount : '—' }}</span>
             </div>
             <div v-if="isNewAPIDelivery" class="flex items-baseline justify-between text-[var(--text-dim)]">
-              <span>应付金额</span>
-              <span class="quiet">以订单结算为准</span>
+              <span>应付金额 <span class="quiet">（按充值额度计费）</span></span>
+              <span class="nums">{{ nlAmount > 0 ? money(nlAmount) : '填写额度后显示' }}</span>
             </div>
             <div v-else class="flex items-baseline justify-between text-[var(--text-dim)]">
               <span>
@@ -794,7 +809,11 @@ watch(
               <span>优惠码减免</span>
               <span class="nums">-{{ money(discount) }}</span>
             </div>
-            <div v-if="!isNewAPIDelivery" class="flex items-baseline justify-between border-t border-[var(--stroke-quiet)] pt-2">
+            <div v-if="isNewAPIDelivery" class="flex items-baseline justify-between border-t border-[var(--stroke-quiet)] pt-2">
+              <span class="text-[var(--text-dim)]">应付合计</span>
+              <span class="nums accent-text text-2xl font-bold">{{ nlAmount > 0 ? money(nlAmount) : '—' }}</span>
+            </div>
+            <div v-else class="flex items-baseline justify-between border-t border-[var(--stroke-quiet)] pt-2">
               <span class="text-[var(--text-dim)]">应付合计</span>
               <span class="nums accent-text text-2xl font-bold">{{ money(payable) }}</span>
             </div>

@@ -850,8 +850,8 @@ onBeforeUnmount(() => {
                 placeholder="例如 1（表示 1 NL = 1 美元）"
               />
               <p class="hint mt-1">
-                填写“1 NL 等于多少美元”，必须为正数。系统按
-                <span class="mono">订单实付 NL × 该比例 × 500000</span>
+                填写“1 NL 等于多少美元”，必须为正数。买家下的是 NL 额度，系统按
+                <span class="mono">订单 NL × 该比例 × 500000</span>
                 计算上游 quota（上游以 500000 quota = 1 美元），全程由服务端计算。
               </p>
             </div>

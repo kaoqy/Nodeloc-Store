@@ -17,6 +17,8 @@ export interface ProductPluginDescriptor {
   mapping_value?: string
   options?: string[]
   form_schema?: PluginFormField[]
+  /** 该店铺的 NL→美元汇率（公开非敏感），商品页据此说明额度换算口径。 */
+  nl_usd_rate?: string
   delivery_note?: string
 }
 

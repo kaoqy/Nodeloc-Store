@@ -3,6 +3,8 @@ package routertest
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -205,5 +207,121 @@ func TestNewAPIOrderRouteAcceptsTheStorefrontPayload(t *testing.T) {
 	}
 	if orderCount != 1 {
 		t.Fatalf("orders = %d, want exactly the one valid order", orderCount)
+	}
+}
+
+// TestNewAPIOrderWithoutProductPriceSucceeds proves the amount-type rule end to
+// end: a New-API product has no product price, and the order must still be
+// created, charged at exactly the NL amount the buyer entered.
+func TestNewAPIOrderWithoutProductPriceSucceeds(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// The payment layer logs the technical reason for a 5xx; keep the test tidy.
+	previousWriter := log.Writer()
+	log.SetOutput(io.Discard)
+	t.Cleanup(func() { log.SetOutput(previousWriter) })
+
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+
+	cfg := &config.Config{}
+	cfg.Database.Driver = "sqlite"
+	cfg.Database.DSN = filepath.Join(dir, "store.db")
+	cfg.JWT.Secret = "new-api-pricing-repro-secret"
+
+	ctn, err := container.New(cfg, nil)
+	if err != nil {
+		t.Fatalf("container.New: %v", err)
+	}
+	defer func() {
+		if sqlDB, err := ctn.DB.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	}()
+
+	router := gin.New()
+	accounts := ctn.Identity.Handler.AccountReader()
+	ctn.Identity.Handler.RegisterRoutes(router, &cfg.JWT)
+	ctn.Payment.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
+	ctn.Catalog.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
+	ctn.Plugin.Handler.RegisterRoutes(router, &cfg.JWT, accounts)
+
+	buyer := &models.User{Username: "pricing-buyer", Role: "user", IsActive: true}
+	if err := ctn.DB.Create(buyer).Error; err != nil {
+		t.Fatalf("seed buyer: %v", err)
+	}
+	// Exactly the channel's allowed configuration: two amount bounds, no price.
+	product := &models.Product{
+		Name:            "New-API 无价充值",
+		Slug:            "topup-no-price",
+		Price:           0,
+		ProductType:     domain.ProductTypeManual,
+		DeliveryChannel: domain.DeliveryChannelNewAPI,
+		MinTopupAmount:  10,
+		MaxTopupAmount:  100,
+		IsPublished:     true,
+	}
+	if err := ctn.DB.Create(product).Error; err != nil {
+		t.Fatalf("seed product: %v", err)
+	}
+	var provider models.Plugin
+	if err := ctn.DB.Where("key = ?", "new-api-redemption-v1").First(&provider).Error; err != nil {
+		t.Fatalf("load provider: %v", err)
+	}
+	if err := ctn.DB.Create(&models.PluginBinding{
+		PluginID: provider.ID, ProductID: product.ID, Value: "",
+		RemoteName: "New-API 兑换码", RemoteRef: "new-api-redemption-v1", IsEnabled: true,
+	}).Error; err != nil {
+		t.Fatalf("seed binding: %v", err)
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  strconv.FormatUint(uint64(buyer.ID), 10),
+		"exp":  time.Now().Add(time.Hour).Unix(),
+		"role": "user",
+	})
+	signed, err := token.SignedString([]byte(cfg.JWT.Secret))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"product_id":  product.ID,
+		"slug":        product.Slug,
+		"quantity":    1,
+		"form_values": map[string]string{"nl_amount": "50"},
+	})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/payment/orders", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+signed)
+	router.ServeHTTP(recorder, request)
+
+	// A New-API product with no product price must order successfully: the buyer
+	// pays exactly the NL amount they entered.
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("price-less New-API order answered %d, want 201: %s", recorder.Code, recorder.Body.String())
+	}
+	var created struct {
+		Order models.Order `json:"order"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode order: %v", err)
+	}
+	if created.Order.TotalAmount != 50 || created.Order.UnitPrice != 50 {
+		t.Fatalf("order priced %d x %d, want 50 x 1", created.Order.UnitPrice, created.Order.Quantity)
+	}
+	if created.Order.TopupAmount != 50 {
+		t.Fatalf("order topup = %d, want 50", created.Order.TopupAmount)
 	}
 }

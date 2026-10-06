@@ -47,12 +47,6 @@ var (
 	// can only land in a NodeLoc account, and a shop buyer who signed up locally
 	// has none. Saying so is the operator's cue to ask them to bind it.
 	ErrGrantRecipientUnknown = errors.New("这个账号没有绑定 NodeLoc 用户，积分没有可转入的账户；请让对方在个人中心用 NodeLoc 登录一次")
-	// ErrNewAPIPricingRuleMissing is the honest answer for a New-API
-	// amount-type product: it is configured with a top-up range only, and the
-	// shop has no rule that turns a top-up amount into the amount NodeLoc must
-	// collect. The order cannot be priced, so it is refused with this specific
-	// reason instead of a misleading "product unavailable".
-	ErrNewAPIPricingRuleMissing = errors.New("New-API 额度型商品缺少计价规则")
 )
 
 // maxOrderQuantity bounds a single storefront order so one buyer cannot drain
@@ -234,15 +228,12 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 	if input.ProductID != 0 && slug != "" && product.Slug != slug {
 		return nil, fmt.Errorf("%w: 商品标识与商品 ID 不一致，请刷新商品页后重试", ErrInvalidInput)
 	}
-	// A New-API product is priced by its top-up amount, but the shop defines no
-	// rule that maps that amount to money and NodeLoc can only collect a positive
-	// amount. Refuse with the real reason rather than the generic
-	// "not purchasable" — the operator needs to know this is a business rule
-	// that is missing, not a product that is off the shelf.
-	if isNewAPIProduct(product) && product.Price <= 0 {
-		return nil, ErrNewAPIPricingRuleMissing
-	}
-	if product.Price <= 0 {
+	// New-API is an amount-type channel: the buyer's top-up amount IS the price.
+	// The buyer pays that many NL, and the store later converts those NL into the
+	// upstream quota with the configured NL→USD rate. So a New-API product needs
+	// no product price at all; only the fixed-price channels require one.
+	newAPI := isNewAPIProduct(product)
+	if !newAPI && product.Price <= 0 {
 		return nil, domain.ErrProductNotPurchasable
 	}
 
@@ -285,7 +276,6 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 	}
 	// New-API products deliver a freshly created redemption code after payment;
 	// they never draw on card stock, so they skip the card-count gate entirely.
-	newAPI := isNewAPIProduct(product)
 	topupAmount := 0
 	if newAPI {
 		var answers map[string]string
@@ -316,14 +306,22 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 		}
 	}
 
+	// The unit price and total the buyer is charged. For a New-API product the
+	// buyer pays exactly the NL amount they entered (it is an amount-type good),
+	// and quantity is fixed at 1; every other channel keeps price × quantity.
+	unitPrice := product.Price
 	total := product.Price * quantity
+	if newAPI {
+		unitPrice = topupAmount
+		total = topupAmount
+	}
 	couponCode := strings.ToUpper(strings.TrimSpace(input.CouponCode))
 	var couponID *uint
 	if couponCode != "" {
 		if s.coupons == nil {
 			return nil, ErrCouponUnavailable
 		}
-		taken, id, err := s.coupons.DiscountFor(ctx, input.UserID, product.ID, quantity, product.Price, couponCode)
+		taken, id, err := s.coupons.DiscountFor(ctx, input.UserID, product.ID, quantity, unitPrice, couponCode)
 		if err != nil {
 			// Both errors stay in the chain: ErrCouponUnavailable is what Classify
 			// matches on, and the catalogue error behind it names the exact rule
@@ -349,7 +347,7 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 			UserID:    input.UserID,
 			ProductID: product.ID,
 			Quantity:  quantity,
-			UnitPrice: product.Price,
+			UnitPrice: unitPrice,
 		})
 		if err != nil && !errors.Is(err, activitydomain.ErrNoActivity) {
 			return nil, fmt.Errorf("activity pricing: %w", err)
@@ -370,8 +368,8 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 		ProductID:         product.ID,
 		Quantity:          quantity,
 		TopupAmount:       topupAmount,
-		UnitPrice:         product.Price,
-		DiscountAmount:    product.Price*quantity - total,
+		UnitPrice:         unitPrice,
+		DiscountAmount:    unitPrice*quantity - total,
 		CouponID:          couponID,
 		CouponCode:        couponCode,
 		TotalAmount:       total,
@@ -401,7 +399,7 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 			ActivityID:     activityPricing.ActivityID,
 			UserID:         input.UserID,
 			Quantity:       quantity,
-			OriginalAmount: product.Price * quantity,
+			OriginalAmount: unitPrice * quantity,
 			DiscountAmount: activityPricing.DiscountAmount,
 			PayableAmount:  total,
 			Snapshot:       activityPricing.Snapshot,
