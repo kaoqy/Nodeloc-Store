@@ -61,14 +61,9 @@ const limit = computed(() => {
 })
 
 const soldOut = computed(() => limit.value === 0)
-// New-API 商品本身不含价格。若店铺也没有给出“额度→金额”的计价规则，服务端
-// 无法得出 NodeLoc 要收的金额；这不是缺货，必须在付款前如实说明，而不是让买家
-// 点一次、再看一次失败。旧行若保留了售价，则可以正常下单。
-const pricingUnavailable = computed(() => isNewAPIDelivery.value && unitPrice.value <= 0)
 const buyLabel = computed(() => {
   if (!site.paymentsEnabled) return '本店暂停收款'
   if (soldOut.value) return '暂时缺货'
-  if (pricingUnavailable.value) return '暂不可下单：缺少计价规则'
   if (submittingPhase.value === 'order') return '正在创建订单…'
   if (submittingPhase.value === 'payment') return '正在打开支付…'
   if (submitting.value) return '处理中…'
@@ -304,10 +299,6 @@ async function purchase() {
   const item = product.value
   if (!item || submitting.value) return
   if (!site.paymentsEnabled) return
-  if (pricingUnavailable.value) {
-    error.value = '该额度型商品还没有配置计价规则，暂时无法下单；请联系店家。'
-    return
-  }
   if (unpaidOrderNo.value) {
     // 刚才那一单还挂在这里。主按钮再点一次不该再开一张新单——买家会以为试第二次
     // 是无害的，而两家店里会同时躺着两笔待付款，其中一笔可能被付掉两次。
@@ -611,9 +602,6 @@ watch(
             <p v-if="topupRangeLabel" class="hint mt-2">
               本商品单次充值额度：<span class="nums font-semibold">{{ topupRangeLabel }}</span>。
             </p>
-            <p v-if="pricingUnavailable" class="alert alert-warning mt-3" role="status">
-              该额度型商品还没有配置“额度 → 金额”的计价规则，暂时无法下单。请联系店家，而不是重复提交。
-            </p>
           </div>
 
           <div v-if="product.form_schema?.length" class="space-y-4">
@@ -832,7 +820,7 @@ watch(
           <button
             class="btn btn-primary btn-lg w-full"
             type="submit"
-            :disabled="submitting || soldOut || pricingUnavailable || !site.paymentsEnabled"
+            :disabled="submitting || soldOut || !site.paymentsEnabled"
           >
             <span v-if="submitting" class="spinner spinner-light" />
             {{ buyLabel }}
