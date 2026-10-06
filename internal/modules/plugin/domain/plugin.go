@@ -20,6 +20,10 @@ var (
 	ErrPluginDisabled  = errors.New("plugin is disabled")
 	ErrBindingNotFound = errors.New("plugin binding not found")
 	ErrInvalidInput    = errors.New("invalid plugin input")
+	// ErrChannelNotReady marks a delivery channel the shop has not finished
+	// configuring. Checkout refuses before money moves, and the message the
+	// buyer sees says so without leaking the missing credential names.
+	ErrChannelNotReady = errors.New("delivery channel is not configured")
 	// ErrNoBinding is the buyer-facing answer when a purchase needs a plugin
 	// mapping and none exists: better a sentence than delivering the wrong thing.
 	ErrNoBinding = errors.New("这个商品还没有匹配到对应的交付项目")

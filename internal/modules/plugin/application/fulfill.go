@@ -156,6 +156,20 @@ func (s *Service) ValidateSelection(ctx context.Context, productID uint, formVal
 	if len(bindings) == 0 {
 		return nil
 	}
+	// A New-API product needs its channel configured before money changes hands:
+	// the buyer pays NL now and the code is minted after payment, so an
+	// incomplete channel would otherwise become a paid order nobody can fulfil.
+	// This runs at checkout, before the order exists, and returns a buyer-safe
+	// sentence; the credential detail stays in the settings page.
+	for _, binding := range bindings {
+		if !binding.IsEnabled || binding.RemoteRef != "new-api-redemption-v1" {
+			continue
+		}
+		if err := s.requireNewAPIReady(ctx); err != nil {
+			return fmt.Errorf("%w: %v", domain.ErrChannelNotReady, err)
+		}
+		break
+	}
 	matchField := strings.TrimSpace(bindings[0].MatchField)
 	if matchField == "" {
 		return nil

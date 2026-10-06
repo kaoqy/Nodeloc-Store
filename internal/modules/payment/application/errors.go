@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/payment/domain"
 )
 
@@ -42,6 +43,15 @@ func Classify(err error) *Failure {
 		// A refused 转账 already carries the copy and the status the route should
 		// answer with, written for the person who pressed the button.
 		return &Failure{Code: failure.Code, Status: failure.Status, Message: failure.Message, Retryable: failure.Retryable, Detail: failure.Message}
+	case errors.Is(err, contract.ErrChannelNotReady):
+		// The product's delivery channel is not configured yet. Refusing here is
+		// the point: the buyer must not pay for an order the shop cannot fulfil.
+		return &Failure{
+			Code:    "channel_not_ready",
+			Status:  http.StatusServiceUnavailable,
+			Message: "该商品暂时无法下单，请稍后再试或联系店家。",
+			Detail:  err.Error(),
+		}
 	case errors.Is(err, ErrInvalidInput):
 		return &Failure{Code: "invalid_input", Status: http.StatusBadRequest, Message: "订单信息有误，请检查后重新提交。"}
 	case errors.Is(err, ErrForbidden):

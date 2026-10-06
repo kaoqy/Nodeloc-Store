@@ -3,11 +3,14 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	paymentcontract "github.com/kaoqy/Nodeloc-Store/internal/modules/payment/contract"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/plugin/application"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/plugin/domain"
 )
 
 // DeliveryBridge is the adapter between the money module and the plugin module.
@@ -27,12 +30,6 @@ func NewDeliveryBridge(service *application.Service) *DeliveryBridge {
 // plugin binding that routes delivery in step with the product's chosen channel.
 func (b *DeliveryBridge) SyncProductChannel(ctx context.Context, productID uint, channel string) error {
 	return b.service.SyncProductChannel(ctx, productID, channel)
-}
-
-// CheckProductChannel lets the catalogue refuse a channel that cannot deliver
-// yet (for example New-API without complete credentials) before saving.
-func (b *DeliveryBridge) CheckProductChannel(ctx context.Context, channel string) error {
-	return b.service.CheckProductChannel(ctx, channel)
 }
 
 // Owns is what tells payment to route an order through its plugin instead of the
@@ -84,7 +81,13 @@ func (b *DeliveryBridge) Fulfill(ctx context.Context, order *models.Order) (*pay
 // ValidateSelection is the checkout-time gate. It runs before the order is
 // written, so a buyer never pays for a selection that has no delivery item.
 func (b *DeliveryBridge) ValidateSelection(ctx context.Context, productID uint, formValues map[string]string) error {
-	return b.service.ValidateSelection(ctx, productID, formValues)
+	err := b.service.ValidateSelection(ctx, productID, formValues)
+	if err != nil && errors.Is(err, domain.ErrChannelNotReady) {
+		// Translate the plugin module's sentinel into the payment module's own,
+		// so the money side recognises it without importing plugin internals.
+		return fmt.Errorf("%w: %v", paymentcontract.ErrChannelNotReady, err)
+	}
+	return err
 }
 
 // FormFields adapts the provider's buyer-facing form schema to the shared

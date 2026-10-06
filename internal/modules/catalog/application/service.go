@@ -46,33 +46,26 @@ type Service struct {
 // runtime. It is declared here (rather than importing the plugin module) because
 // the architecture keeps modules on their own contract packages.
 type deliveryChannelSync interface {
-	// CheckProductChannel refuses a channel that cannot currently deliver (for
-	// example New-API before its credentials are configured), before the product
-	// row is written.
-	CheckProductChannel(ctx context.Context, channel string) error
 	SyncProductChannel(ctx context.Context, productID uint, channel string) error
 }
 
 // SetDeliveryChannelSync attaches the plugin runtime's channel synchroniser.
 func (s *Service) SetDeliveryChannelSync(sync deliveryChannelSync) { s.channelSync = sync }
 
-// checkChannel refuses a delivery channel the shop cannot currently honour, so
-// the product is not saved as New-API while the channel has no credentials.
-func (s *Service) checkChannel(ctx context.Context, product *domain.Product) error {
-	if s.channelSync == nil || product == nil {
-		return nil
-	}
-	return s.channelSync.CheckProductChannel(ctx, product.DeliveryChannel)
-}
-
 // syncChannel reports the product's channel to the plugin runtime after the row
-// exists. Its error is returned: a product saved as New-API with no binding
-// would silently fall back to manual delivery, so the operator must see it.
-func (s *Service) syncChannel(ctx context.Context, product *domain.Product) error {
+// exists. Creating the binding does not depend on the channel's credentials, so
+// the product can always be saved as New-API; an incomplete channel config is
+// reported when a buyer actually checks out (or when the code is generated),
+// not by blocking the product form. A sync failure is logged rather than
+// returned: the product row is already valid, and a missing binding is repaired
+// the next time the product is saved.
+func (s *Service) syncChannel(ctx context.Context, product *domain.Product) {
 	if s.channelSync == nil || product == nil || product.ID == 0 {
-		return nil
+		return
 	}
-	return s.channelSync.SyncProductChannel(ctx, product.ID, product.DeliveryChannel)
+	if err := s.channelSync.SyncProductChannel(ctx, product.ID, product.DeliveryChannel); err != nil {
+		log.Printf("[catalog] product %d channel %q could not be synced: %v", product.ID, product.DeliveryChannel, err)
+	}
 }
 
 // deliveryWake is the payment module's answer to "keys just landed on this
@@ -225,14 +218,12 @@ func (s *Service) CreateProduct(ctx context.Context, product *domain.Product) er
 	if err := normalizeProduct(product); err != nil {
 		return err
 	}
-	if err := s.checkChannel(ctx, product); err != nil {
-		return err
-	}
 	product.StockCount = 0
 	if err := s.products.Create(ctx, product); err != nil {
 		return err
 	}
-	return s.syncChannel(ctx, product)
+	s.syncChannel(ctx, product)
+	return nil
 }
 
 // UpdateProduct applies a patch: fields left zero are treated as "unchanged"
@@ -349,20 +340,10 @@ func (s *Service) UpdateProductPatch(ctx context.Context, id uint, input *domain
 	if product.DeliveryChannel == domain.DeliveryChannelNewAPI && product.Price <= 0 && storedPrice > 0 {
 		product.Price = storedPrice
 	}
-	// Only a form edit (changed == nil) or an explicit channel change re-checks
-	// preconditions. A list-page toggle such as 下架 must not be blocked because
-	// the New-API credentials were removed after the product was created.
-	if changed == nil || changed["delivery_channel"] {
-		if err := s.checkChannel(ctx, product); err != nil {
-			return nil, err
-		}
-	}
 	if err := s.products.Update(ctx, product); err != nil {
 		return nil, err
 	}
-	if err := s.syncChannel(ctx, product); err != nil {
-		return nil, err
-	}
+	s.syncChannel(ctx, product)
 	return product, nil
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/kaoqy/Nodeloc-Store/internal/config"
 	"github.com/kaoqy/Nodeloc-Store/internal/models"
 	"github.com/kaoqy/Nodeloc-Store/internal/modules/catalog/domain"
+	"github.com/kaoqy/Nodeloc-Store/internal/modules/system"
 )
 
 // TestNewAPIOrderRouteAcceptsTheStorefrontPayload is end-to-end, network-level
@@ -102,6 +103,14 @@ func TestNewAPIOrderRouteAcceptsTheStorefrontPayload(t *testing.T) {
 	}
 	if err := ctn.DB.Create(binding).Error; err != nil {
 		t.Fatalf("seed binding: %v", err)
+	}
+	if err := system.SaveRuntime(ctn.DB, &system.RuntimeConfig{
+		NewAPI: system.NewAPIConfig{
+			BaseURL: "https://new-api.example.com", AdminAccessToken: "token",
+			AdminUserID: "1", NLToUSD: "1",
+		},
+	}); err != nil {
+		t.Fatalf("configure New-API: %v", err)
 	}
 
 	// The storefront's amount input comes from this public descriptor; it must
@@ -283,6 +292,14 @@ func TestNewAPIOrderWithoutProductPriceSucceeds(t *testing.T) {
 		RemoteName: "New-API 兑换码", RemoteRef: "new-api-redemption-v1", IsEnabled: true,
 	}).Error; err != nil {
 		t.Fatalf("seed binding: %v", err)
+	}
+	if err := system.SaveRuntime(ctn.DB, &system.RuntimeConfig{
+		NewAPI: system.NewAPIConfig{
+			BaseURL: "https://new-api.example.com", AdminAccessToken: "token",
+			AdminUserID: "1", NLToUSD: "1",
+		},
+	}); err != nil {
+		t.Fatalf("configure New-API: %v", err)
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{

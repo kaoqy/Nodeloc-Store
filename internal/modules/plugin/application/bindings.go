@@ -315,9 +315,10 @@ func (s *Service) SyncProductChannel(ctx context.Context, productID uint, channe
 	if target == nil {
 		return fmt.Errorf("%w: New-API 发货渠道不在当前版本里", domain.ErrInvalidInput)
 	}
-	if err := s.requireNewAPIReady(ctx); err != nil {
-		return err
-	}
+	// The binding itself needs no credentials: it only records that this product
+	// is delivered through New-API. Whether the channel is configured is checked
+	// at checkout and again right before the upstream call, so a shop can set up
+	// its products first and fill in the credentials afterwards.
 	return s.repo.CreateBinding(ctx, &domain.PluginBinding{
 		PluginID:   target.ID,
 		ProductID:  productID,
@@ -326,17 +327,6 @@ func (s *Service) SyncProductChannel(ctx context.Context, productID uint, channe
 		RemoteRef:  "new-api-redemption-v1",
 		IsEnabled:  true,
 	})
-}
-
-// CheckProductChannel refuses a channel the shop cannot currently deliver.
-// Today only New-API has a precondition — complete runtime credentials — but the
-// check lives here so the catalogue does not have to know which channels have
-// requirements.
-func (s *Service) CheckProductChannel(ctx context.Context, channel string) error {
-	if !strings.EqualFold(strings.TrimSpace(channel), "new_api") {
-		return nil
-	}
-	return s.requireNewAPIReady(ctx)
 }
 
 func (s *Service) requireNewAPIReady(ctx context.Context) error {

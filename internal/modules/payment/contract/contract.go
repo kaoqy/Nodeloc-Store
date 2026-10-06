@@ -218,6 +218,12 @@ type PluginDelivery struct {
 // PrepareOrder when a product has no enabled plugin binding.
 var ErrPluginUnbound = errors.New("no plugin is bound to this product")
 
+// ErrChannelNotReady means the product's delivery channel is not configured yet.
+// Checkout must refuse before money moves so the buyer is not left with a paid
+// order the shop cannot fulfil. It is a distinct sentinel so the storefront can
+// say "this product is not ready" instead of the generic "bad order".
+var ErrChannelNotReady = errors.New("delivery channel is not configured")
+
 // CouponPricing is the catalogue's answer to "what is this code worth on that
 // order". Payment asks before any money moves, because the amount handed to
 // NodeLoc must already be the discounted one; a code that cannot be priced

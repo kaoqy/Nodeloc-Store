@@ -265,7 +265,9 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 			_ = json.Unmarshal([]byte(formValuesJSON), &answers)
 		}
 		if err := s.plugins.ValidateSelection(ctx, product.ID, answers); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+			// %w keeps the plugin's own sentinel reachable so Classify can tell a
+			// "channel not configured" refusal from a generic bad order.
+			return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 		}
 	}
 	if len(contact) > 255 {
