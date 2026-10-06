@@ -235,6 +235,13 @@ func (s *Service) DescribeProduct(ctx context.Context, productID uint) (*Fulfill
 	if productID == 0 {
 		return nil, nil
 	}
+	// Repair a New-API product whose binding is missing (an older row, or a sync
+	// that failed) before reading: the descriptor, the amount input and delivery
+	// routing all key off that binding, so a missing one would otherwise make an
+	// amount-type product impossible to buy.
+	if err := s.ensureNewAPIBinding(ctx, productID); err != nil {
+		return nil, err
+	}
 	bindings, err := s.repo.ListBindingsForProduct(ctx, productID)
 	if err != nil {
 		return nil, err
@@ -286,6 +293,39 @@ func (s *Service) DescribeProduct(ctx context.Context, productID uint) (*Fulfill
 // a random code at payment time rather than mapping the order to a stored item.
 // Choosing any other channel removes that binding, so a product switched back to
 // card or manual delivery no longer routes through New-API.
+// ensureNewAPIBinding creates the binding for a New-API product that lacks one.
+// It is idempotent and safe to call on every read: products that already have an
+// enabled binding are left untouched, and non-New-API products are ignored.
+func (s *Service) ensureNewAPIBinding(ctx context.Context, productID uint) error {
+	if productID == 0 {
+		return nil
+	}
+	bindings, err := s.repo.ListBindingsForProduct(ctx, productID)
+	if err != nil {
+		return err
+	}
+	for i := range bindings {
+		if bindings[i].RemoteRef != "new-api-redemption-v1" {
+			continue
+		}
+		if bindings[i].IsEnabled {
+			return nil
+		}
+		// The product still declares the New-API channel, so the binding belongs
+		// enabled; re-enable it rather than leaving a paid order unable to route.
+		bindings[i].IsEnabled = true
+		return s.repo.UpdateBinding(ctx, &bindings[i])
+	}
+	channel, err := s.repo.ProductDeliveryChannel(ctx, productID)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(channel), "new_api") {
+		return nil
+	}
+	return s.SyncProductChannel(ctx, productID, "new_api")
+}
+
 func (s *Service) SyncProductChannel(ctx context.Context, productID uint, channel string) error {
 	if productID == 0 {
 		return fmt.Errorf("%w: 请选择商品", domain.ErrInvalidInput)

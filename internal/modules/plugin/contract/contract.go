@@ -29,6 +29,10 @@ type Repository interface {
 	// ProductExists guards a binding so a mapping cannot point at a product the
 	// shop removed.
 	ProductExists(ctx context.Context, productID uint) (bool, error)
+	// ProductDeliveryChannel reads a product's chosen delivery channel, so the
+	// runtime can repair a missing New-API binding for rows written before the
+	// binding existed. It returns "" when the product is gone.
+	ProductDeliveryChannel(ctx context.Context, productID uint) (string, error)
 	// OrderContext reads the names an order is delivered with. Payment hands the
 	// plugin module the order alone (that is the module boundary), so the plugin
 	// module looks the product title and the buyer's name up itself.

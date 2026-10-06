@@ -92,12 +92,33 @@ const gross = computed(() => unitPrice.value * quantity.value)
 /** What NodeLoc is asked to collect: the quoted discount is already off it. */
 const payable = computed(() => (quote.value?.accepted ? quote.value.payable : gross.value))
 const discount = computed(() => (quote.value?.accepted ? quote.value.discount : 0))
-const pluginFormFields = computed(() => pluginDescriptor.value?.form_schema ?? [])
 const isNewAPIDelivery = computed(
   () =>
     product.value?.delivery_channel === 'new_api' ||
     pluginDescriptor.value?.plugin_key === 'new-api-redemption-v1',
 )
+// The amount input must appear as soon as we know the product is a New-API
+// product. The descriptor normally supplies it, but if that request is slow or
+// fails the buyer would otherwise see a product with no way to enter an amount;
+// fall back to the product's own channel so the input is always present.
+const pluginFormFields = computed(() => {
+  const declared = pluginDescriptor.value?.form_schema ?? []
+  if (declared.length) return declared
+  if (isNewAPIDelivery.value) {
+    return [
+      {
+        key: 'nl_amount',
+        label: '本次充值额度',
+        type: 'number' as const,
+        required: true,
+        placeholder: '例如 100',
+        help: '必须在该商品的单次最少与最多充值额度之间。',
+        max_length: 18,
+      },
+    ]
+  }
+  return declared
+})
 const topupMin = computed(() => Number(product.value?.min_topup_amount || 0))
 const topupMax = computed(() => Number(product.value?.max_topup_amount || 0))
 const nlAmount = computed(() => {

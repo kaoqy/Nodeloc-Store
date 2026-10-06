@@ -36,6 +36,11 @@ type OrderInfo struct {
 
 // Owns reports whether an enabled plugin is bound to this order's product.
 func (s *Service) Owns(ctx context.Context, productID uint) (bool, error) {
+	// Repair a missing New-API binding before deciding ownership, so an order
+	// for an amount-type product still routes to the provider that fulfils it.
+	if err := s.ensureNewAPIBinding(ctx, productID); err != nil {
+		return false, err
+	}
 	return s.ProductNeedsPlugin(ctx, productID)
 }
 
@@ -148,6 +153,11 @@ func (s *Service) Deliver(ctx context.Context, info OrderInfo) (*contract.Delive
 func (s *Service) ValidateSelection(ctx context.Context, productID uint, formValues map[string]string) error {
 	if productID == 0 {
 		return nil
+	}
+	// Repair a missing or disabled New-API binding before checkout, so a paid
+	// order can always route to the provider that mints its code.
+	if err := s.ensureNewAPIBinding(ctx, productID); err != nil {
+		return err
 	}
 	bindings, err := s.repo.ListBindingsForProduct(ctx, productID)
 	if err != nil {

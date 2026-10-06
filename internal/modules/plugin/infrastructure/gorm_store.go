@@ -147,6 +147,20 @@ func (s *GormStore) ProductExists(ctx context.Context, productID uint) (bool, er
 	return count > 0, nil
 }
 
+// ProductDeliveryChannel reads the product's own delivery channel. A missing
+// row returns "", which the caller reads as "nothing to repair".
+func (s *GormStore) ProductDeliveryChannel(ctx context.Context, productID uint) (string, error) {
+	var product models.Product
+	err := s.db.WithContext(ctx).Select("delivery_channel").First(&product, productID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return product.DeliveryChannel, nil
+}
+
 // OrderContext joins the names an order is delivered with. A missing product or
 // buyer is not an error: the order may have been placed by an account that was
 // since removed, and the plugin can still deliver.

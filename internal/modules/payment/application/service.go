@@ -58,6 +58,21 @@ const maxOrderQuantity = 20
 // internals; the value is part of the product contract.
 const newAPIDeliveryChannel = "new_api"
 
+// newAPITopupFieldKey is the buyer's single New-API input, matching the field
+// key the provider declares so the two never drift apart.
+const newAPITopupFieldKey = "nl_amount"
+
+// hasFormField reports whether the schema already declares a key, so the
+// New-API amount field is never added twice when the plugin also contributes it.
+func hasFormField(fields []models.ProductFormField, key string) bool {
+	for _, field := range fields {
+		if strings.TrimSpace(field.Key) == key {
+			return true
+		}
+	}
+	return false
+}
+
 // isNewAPIProduct reports whether a product is sold through the product-level
 // New-API redemption channel. Legacy rows predate delivery_channel, so an empty
 // value is read as "not New-API" and keeps the shop's own fulfilment.
@@ -251,6 +266,19 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*mod
 			return nil, fmt.Errorf("load plugin form fields: %w", err)
 		}
 		formFields = append(formFields, extraFields...)
+	}
+	// A New-API product's single input (the top-up amount) belongs to the
+	// product's own delivery channel, not to a plugin binding. Adding it here
+	// keeps an amount-type product orderable even when its binding is missing
+	// (an older row, or a sync that failed), which the plugin-supplied schema
+	// alone would not cover.
+	if isNewAPIProduct(product) && !hasFormField(formFields, newAPITopupFieldKey) {
+		formFields = append(formFields, models.ProductFormField{
+			Key:      newAPITopupFieldKey,
+			Label:    "本次充值额度",
+			Type:     "number",
+			Required: true,
+		})
 	}
 	formValuesJSON, err := models.ValidateProductForm(formFields, input.FormValues)
 	if err != nil {

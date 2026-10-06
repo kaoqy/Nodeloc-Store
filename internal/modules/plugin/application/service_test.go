@@ -65,6 +65,12 @@ func (r *fakeRepo) ListBindingsForProduct(_ context.Context, productID uint) ([]
 	return out, nil
 }
 
+// ProductDeliveryChannel is only read to repair a missing New-API binding. The
+// fake returns "" so these tests see "nothing to repair" unless they opt in.
+func (r *fakeRepo) ProductDeliveryChannel(context.Context, uint) (string, error) {
+	return "", nil
+}
+
 func (r *fakeRepo) ResolveBinding(_ context.Context, productID uint, value string) (*domain.PluginBinding, error) {
 	for _, binding := range r.bindings {
 		if binding.ProductID == productID && binding.Value == value && binding.IsEnabled {
